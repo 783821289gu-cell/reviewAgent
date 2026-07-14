@@ -147,6 +147,18 @@
       "method": "POST",
       "path": "/api/tasks",
       "status": 201,
+      "request_example": {
+        "content_type": "multipart/form-data; boundary=<boundary>",
+        "fields": {
+          "review_position": "甲方"
+        },
+        "file": {
+          "field_name": "contract_file",
+          "file_name": "baseline.docx",
+          "content_type": "application/octet-stream",
+          "content_description": "项目内合成 NDA 文本生成的 DOCX 字节"
+        }
+      },
       "required_keys": [
         "task_id",
         "status",
@@ -165,7 +177,7 @@
         "logs",
         "events"
       ],
-      "example": {
+      "response_body_summary": {
         "status": "UPLOAD_RECEIVED",
         "file_name": "baseline.docx",
         "file_type": "docx",
@@ -176,6 +188,11 @@
       "method": "GET",
       "path": "/api/tasks/{task_id}",
       "status": 200,
+      "request_example": {
+        "path_parameters": {
+          "task_id": "<task_id returned by task_create>"
+        }
+      },
       "required_keys": [
         "task_id",
         "status",
@@ -194,7 +211,7 @@
         "logs",
         "events"
       ],
-      "example": {
+      "response_body_summary": {
         "status": "HUMAN_REVIEW_PENDING",
         "clause_count": 4,
         "risk_count": 4,
@@ -205,9 +222,55 @@
       "method": "GET",
       "path": "/api/tasks/{task_id}/events",
       "status": 200,
+      "request_example": {
+        "path_parameters": {
+          "task_id": "<task_id returned by task_create>"
+        }
+      },
       "content_type": "text/event-stream; charset=utf-8",
       "event_name": "review_event",
       "event_required_keys": ["event_id", "task_id", "status", "message", "step_name", "tool_name", "created_at", "task"],
+      "response_event_example": {
+        "event": "review_event",
+        "id": 0,
+        "data": {
+          "event_id": 0,
+          "task_id": "<task_id>",
+          "status": "START",
+          "message": "审查任务已创建，等待上传处理。",
+          "step_name": "create_task",
+          "tool_name": "",
+          "created_at": "<ISO-8601 timestamp>",
+          "task": {
+            "task_id": "<task_id>",
+            "status": "START",
+            "file_name": "baseline.docx",
+            "file_type": "docx",
+            "review_position": "甲方",
+            "message": "审查任务已创建，等待上传处理。",
+            "document": null,
+            "clauses": null,
+            "matched_rules": null,
+            "review_contexts": null,
+            "analysis_results": null,
+            "risk_findings": null,
+            "evidence_results": null,
+            "report_file": null,
+            "logs": [],
+            "events": [
+              {
+                "event_id": 0,
+                "task_id": "<task_id>",
+                "status": "START",
+                "message": "审查任务已创建，等待上传处理。",
+                "step_name": "create_task",
+                "tool_name": "",
+                "created_at": "<ISO-8601 timestamp>"
+              }
+            ]
+          }
+        }
+      },
       "sequence": [
         "START",
         "UPLOAD_RECEIVED",
@@ -223,6 +286,14 @@
       "method": "POST",
       "path": "/api/local-review",
       "status": 200,
+      "request_example": {
+        "content_type": "application/json",
+        "body": {
+          "task_id": "<task_id returned by task_create>",
+          "clause_id": "CL-001",
+          "selected_text": "保密信息包括披露方提供的任何商业信息、技术资料和合作资料。"
+        }
+      },
       "required_keys": [
         "review_id",
         "task_id",
@@ -237,14 +308,34 @@
         "formal_risk_generated",
         "message",
         "logs"
-      ]
+      ],
+      "response_body_summary": {
+        "scope": "local_selection",
+        "clause_id": "CL-001",
+        "formal_risk_generated": false,
+        "selected_text": "保密信息包括披露方提供的任何商业信息、技术资料和合作资料。"
+      }
     },
     "feedback": {
       "method": "POST",
       "path": "/api/tasks/{task_id}/feedback",
       "status": 200,
+      "request_example": {
+        "content_type": "application/json",
+        "path_parameters": {
+          "task_id": "<task_id returned by task_create>"
+        },
+        "body": {
+          "risk_id": "<risk_id returned by task_get>",
+          "action": "accept",
+          "final_severity": "<existing severity>",
+          "final_suggestion": "<existing revision suggestion>",
+          "ignore_reason": "",
+          "include_in_report": true
+        }
+      },
       "required_keys": ["status", "message", "risk", "memory_item", "task"],
-      "example": {
+      "response_body_summary": {
         "task_status": "MEMORY_UPDATED",
         "review_status": "CONFIRMED_RISK",
         "include_in_report": true
@@ -254,9 +345,15 @@
       "method": "POST",
       "path": "/api/tasks/{task_id}/report",
       "status": 200,
+      "request_example": {
+        "path_parameters": {
+          "task_id": "<task_id after feedback>"
+        },
+        "body": null
+      },
       "required_keys": ["status", "message", "report_file", "task"],
       "report_file_required_keys": ["report_id", "task_id", "file_name", "format", "path", "risk_count", "generated_at", "markdown"],
-      "example": {
+      "response_body_summary": {
         "status": "REPORT_READY",
         "task_status": "REPORT_READY",
         "risk_count": 1
@@ -266,9 +363,12 @@
       "method": "POST",
       "path": "/api/evaluation/run",
       "status": 200,
+      "request_example": {
+        "body": null
+      },
       "required_keys": ["evaluation_id", "created_at", "sample_count", "passed_count", "claim", "results", "summary_path", "markdown_path"],
       "result_required_keys": ["sample_name", "file", "review_position", "source", "task_ran", "document_parsed", "clauses_structured", "playbook_hit", "risk_has_evidence", "feedback_memory_written", "report_exported", "failure_reason"],
-      "example": {
+      "response_body_summary": {
         "sample_count": 10,
         "passed_count": 10,
         "claim": "基础评测仅验证流程跑通，不代表生产级准确率。"
@@ -292,6 +392,10 @@
       "method": "POST",
       "path": "/api/local-review",
       "status": 400,
+      "request_example": {
+        "content_type": "application/json",
+        "raw_body": "{"
+      },
       "body": {
         "status": "TASK_ERROR",
         "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
@@ -301,6 +405,10 @@
       "method": "POST",
       "path": "/api/tasks",
       "status": 400,
+      "request_example": {
+        "content_type": "application/json",
+        "body": {}
+      },
       "body": {
         "status": "TASK_ERROR",
         "message": "请使用 multipart/form-data 上传合同文件。"
@@ -310,15 +418,54 @@
       "method": "POST",
       "path": "/api/tasks",
       "status": 400,
+      "request_example": {
+        "content_type": "multipart/form-data; boundary=<boundary>",
+        "fields": {
+          "review_position": "甲方"
+        },
+        "file": {
+          "field_name": "contract_file",
+          "file_name": "baseline.txt",
+          "content_type": "text/plain",
+          "content": "synthetic text"
+        }
+      },
       "body": {
         "status": "TASK_ERROR",
         "message": "仅支持上传 .docx 或 .pdf 文件。"
+      }
+    },
+    "invalid_parameter": {
+      "method": "POST",
+      "path": "/api/tasks",
+      "status": 400,
+      "request_example": {
+        "content_type": "multipart/form-data; boundary=<boundary>",
+        "fields": {
+          "review_position": "法务"
+        },
+        "file": {
+          "field_name": "contract_file",
+          "file_name": "baseline.docx",
+          "content_type": "application/octet-stream",
+          "content_description": "项目内合成 NDA 文本生成的 DOCX 字节"
+        }
+      },
+      "body": {
+        "status": "TASK_ERROR",
+        "message": "review_position must be 甲方 or 乙方"
       }
     },
     "unfinished_report": {
       "method": "POST",
       "path": "/api/tasks/{unfinished_task_id}/report",
       "status": 400,
+      "request_example": {
+        "path_parameters": {
+          "unfinished_task_id": "<task_id whose status is UPLOAD_RECEIVED>"
+        },
+        "body": null
+      },
       "body": {
         "status": "TASK_ERROR",
         "message": "审查任务尚未完成，不能生成报告。"

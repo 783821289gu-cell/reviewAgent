@@ -1,6 +1,6 @@
 {
   "captured_on": "2026-07-14",
-  "command": "run_basic_evaluation with temporary output, report and SQLite paths",
+  "command": "python -m unittest backend.tests.test_report_evaluation.ReportEvaluationTest.test_basic_evaluation_runs_ten_synthetic_samples",
   "sample_count": 10,
   "passed_count": 10,
   "claim": "基础评测仅验证流程跑通，不代表生产级准确率。",
