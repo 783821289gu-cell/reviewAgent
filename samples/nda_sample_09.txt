@@ -1,0 +1,5 @@
+1. Definitions
+Confidential Information means all business information, technical materials, cooperation records and any other information received during the project.
+
+2. Term
+The confidentiality obligation will survive for 3 years after termination.

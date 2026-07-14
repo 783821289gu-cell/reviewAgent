@@ -1,0 +1,76 @@
+{
+  "sample_set": "synthetic_nda_v1",
+  "source_note": "All samples are synthetic project fixtures and are not real customer contracts.",
+  "samples": [
+    {
+      "sample_name": "NDA Sample 01 - Broad Definition",
+      "file": "nda_sample_01.txt",
+      "review_position": "甲方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "保密信息范围过宽"
+    },
+    {
+      "sample_name": "NDA Sample 02 - Missing Exceptions",
+      "file": "nda_sample_02.txt",
+      "review_position": "乙方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "缺少保密信息例外"
+    },
+    {
+      "sample_name": "NDA Sample 03 - Perpetual Term",
+      "file": "nda_sample_03.txt",
+      "review_position": "乙方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "保密期限不合理"
+    },
+    {
+      "sample_name": "NDA Sample 04 - Unclear Use",
+      "file": "nda_sample_04.txt",
+      "review_position": "甲方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "使用目的或使用限制不清"
+    },
+    {
+      "sample_name": "NDA Sample 05 - Broad Disclosure",
+      "file": "nda_sample_05.txt",
+      "review_position": "甲方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "允许披露对象过宽"
+    },
+    {
+      "sample_name": "NDA Sample 06 - Unlimited Liability",
+      "file": "nda_sample_06.txt",
+      "review_position": "乙方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "责任无限或责任边界不清"
+    },
+    {
+      "sample_name": "NDA Sample 07 - High Penalty",
+      "file": "nda_sample_07.txt",
+      "review_position": "乙方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "违约责任或违约金明显不合理"
+    },
+    {
+      "sample_name": "NDA Sample 08 - Mixed Definition And Disclosure",
+      "file": "nda_sample_08.txt",
+      "review_position": "甲方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "定义和允许披露复合风险"
+    },
+    {
+      "sample_name": "NDA Sample 09 - English Broad Definition",
+      "file": "nda_sample_09.txt",
+      "review_position": "乙方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "英文保密信息定义过宽"
+    },
+    {
+      "sample_name": "NDA Sample 10 - Multi Clause Demo",
+      "file": "nda_sample_10.txt",
+      "review_position": "甲方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "完整演示样本"
+    }
+  ]
+}

@@ -1,0 +1,328 @@
+{
+  "captured_on": "2026-07-14",
+  "transport": "http.server.ThreadingHTTPServer",
+  "dynamic_values": [
+    "task_id",
+    "risk_id",
+    "memory_id",
+    "event timestamps",
+    "report path",
+    "evaluation_id"
+  ],
+  "sse_read_note": "The baseline client stops after the terminal event because the response advertises keep-alive without a content length.",
+  "success": {
+    "health": {
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "service": "contract-review-agent",
+        "scope": "task-9"
+      }
+    },
+    "statuses": {
+      "method": "GET",
+      "path": "/api/statuses",
+      "status": 200,
+      "body": {
+        "statuses": [
+          "START",
+          "UPLOAD_RECEIVED",
+          "DOCUMENT_PARSED",
+          "CLAUSES_STRUCTURED",
+          "PLAYBOOK_RETRIEVED",
+          "CONTEXT_BUILT",
+          "RISK_ANALYZED",
+          "EVIDENCE_VERIFIED",
+          "HUMAN_REVIEW_PENDING",
+          "MEMORY_UPDATED",
+          "REPORT_READY",
+          "PARSE_FAILED",
+          "RETRIEVAL_FAILED",
+          "LLM_OUTPUT_INVALID",
+          "EVIDENCE_MISSING",
+          "NEED_MANUAL_REVIEW",
+          "TASK_ERROR"
+        ]
+      }
+    },
+    "tools": {
+      "method": "GET",
+      "path": "/api/tools",
+      "status": 200,
+      "tool_count": 11,
+      "tools": [
+        {
+          "name": "parse_document",
+          "input_keys": ["file_id", "file_name", "file_type", "content"],
+          "output_keys": ["paragraphs", "tables", "page_map"],
+          "calls_llm": false,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "not_applicable"
+        },
+        {
+          "name": "extract_clauses",
+          "input_keys": ["document"],
+          "output_keys": ["clauses"],
+          "calls_llm": false,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "not_applicable"
+        },
+        {
+          "name": "extract_key_fields",
+          "input_keys": ["clause"],
+          "output_keys": ["key_fields"],
+          "calls_llm": true,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "rule_based_no_external_llm"
+        },
+        {
+          "name": "retrieve_playbook_rules",
+          "input_keys": ["contract_type", "clause_type", "key_fields", "review_position"],
+          "output_keys": ["matched_rules"],
+          "calls_llm": false,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "not_applicable"
+        },
+        {
+          "name": "retrieve_related_clauses",
+          "input_keys": ["contract_type", "current_clause", "clauses", "risk_type", "playbook_check_point", "limit"],
+          "output_keys": ["related_clauses"],
+          "calls_llm": false,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "not_applicable"
+        },
+        {
+          "name": "retrieve_memory",
+          "input_keys": ["contract_type", "clause", "risk_type", "review_position", "memory_items", "limit"],
+          "output_keys": ["memories"],
+          "calls_llm": false,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "not_applicable"
+        },
+        {
+          "name": "analyze_risk",
+          "input_keys": ["review_context"],
+          "output_keys": ["risk_finding"],
+          "calls_llm": true,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "local_structured_no_external_llm"
+        },
+        {
+          "name": "verify_evidence",
+          "input_keys": ["finding", "clauses", "matched_rule"],
+          "output_keys": ["citation_status"],
+          "calls_llm": false,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "not_applicable"
+        },
+        {
+          "name": "generate_revision",
+          "input_keys": ["finding", "preferred_position"],
+          "output_keys": ["revision_suggestion"],
+          "calls_llm": true,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "local_template_no_external_llm"
+        },
+        {
+          "name": "write_memory",
+          "input_keys": ["human_feedback"],
+          "output_keys": ["memory_item"],
+          "calls_llm": false,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "not_applicable"
+        },
+        {
+          "name": "generate_report",
+          "input_keys": ["task_id", "task", "report_dir"],
+          "output_keys": ["report_file"],
+          "calls_llm": false,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "not_applicable"
+        }
+      ]
+    },
+    "task_create": {
+      "method": "POST",
+      "path": "/api/tasks",
+      "status": 201,
+      "required_keys": [
+        "task_id",
+        "status",
+        "file_name",
+        "file_type",
+        "review_position",
+        "message",
+        "document",
+        "clauses",
+        "matched_rules",
+        "review_contexts",
+        "analysis_results",
+        "risk_findings",
+        "evidence_results",
+        "report_file",
+        "logs",
+        "events"
+      ],
+      "example": {
+        "status": "UPLOAD_RECEIVED",
+        "file_name": "baseline.docx",
+        "file_type": "docx",
+        "review_position": "甲方"
+      }
+    },
+    "task_get": {
+      "method": "GET",
+      "path": "/api/tasks/{task_id}",
+      "status": 200,
+      "required_keys": [
+        "task_id",
+        "status",
+        "file_name",
+        "file_type",
+        "review_position",
+        "message",
+        "document",
+        "clauses",
+        "matched_rules",
+        "review_contexts",
+        "analysis_results",
+        "risk_findings",
+        "evidence_results",
+        "report_file",
+        "logs",
+        "events"
+      ],
+      "example": {
+        "status": "HUMAN_REVIEW_PENDING",
+        "clause_count": 4,
+        "risk_count": 4,
+        "log_count": 33
+      }
+    },
+    "events": {
+      "method": "GET",
+      "path": "/api/tasks/{task_id}/events",
+      "status": 200,
+      "content_type": "text/event-stream; charset=utf-8",
+      "event_name": "review_event",
+      "event_required_keys": ["event_id", "task_id", "status", "message", "step_name", "tool_name", "created_at", "task"],
+      "sequence": [
+        "START",
+        "UPLOAD_RECEIVED",
+        "DOCUMENT_PARSED",
+        "CLAUSES_STRUCTURED",
+        "PLAYBOOK_RETRIEVED",
+        "CONTEXT_BUILT",
+        "RISK_ANALYZED",
+        "HUMAN_REVIEW_PENDING"
+      ]
+    },
+    "local_review": {
+      "method": "POST",
+      "path": "/api/local-review",
+      "status": 200,
+      "required_keys": [
+        "review_id",
+        "task_id",
+        "scope",
+        "clause_id",
+        "clause_type",
+        "selected_text",
+        "matched_rules",
+        "related_formal_risks",
+        "local_findings",
+        "skipped_rule_ids",
+        "formal_risk_generated",
+        "message",
+        "logs"
+      ]
+    },
+    "feedback": {
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/feedback",
+      "status": 200,
+      "required_keys": ["status", "message", "risk", "memory_item", "task"],
+      "example": {
+        "task_status": "MEMORY_UPDATED",
+        "review_status": "CONFIRMED_RISK",
+        "include_in_report": true
+      }
+    },
+    "report": {
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/report",
+      "status": 200,
+      "required_keys": ["status", "message", "report_file", "task"],
+      "report_file_required_keys": ["report_id", "task_id", "file_name", "format", "path", "risk_count", "generated_at", "markdown"],
+      "example": {
+        "status": "REPORT_READY",
+        "task_status": "REPORT_READY",
+        "risk_count": 1
+      }
+    },
+    "evaluation": {
+      "method": "POST",
+      "path": "/api/evaluation/run",
+      "status": 200,
+      "required_keys": ["evaluation_id", "created_at", "sample_count", "passed_count", "claim", "results", "summary_path", "markdown_path"],
+      "result_required_keys": ["sample_name", "file", "review_position", "source", "task_ran", "document_parsed", "clauses_structured", "playbook_hit", "risk_has_evidence", "feedback_memory_written", "report_exported", "failure_reason"],
+      "example": {
+        "sample_count": 10,
+        "passed_count": 10,
+        "claim": "基础评测仅验证流程跑通，不代表生产级准确率。"
+      }
+    }
+  },
+  "errors": {
+    "missing_task": {
+      "method": "GET",
+      "path": "/api/tasks/task_missing",
+      "status": 404,
+      "body": {"error": "Task not found"}
+    },
+    "missing_route": {
+      "method": "GET",
+      "path": "/api/not-found",
+      "status": 404,
+      "body": {"error": "Not found"}
+    },
+    "malformed_json": {
+      "method": "POST",
+      "path": "/api/local-review",
+      "status": 400,
+      "body": {
+        "status": "TASK_ERROR",
+        "message": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+      }
+    },
+    "missing_multipart": {
+      "method": "POST",
+      "path": "/api/tasks",
+      "status": 400,
+      "body": {
+        "status": "TASK_ERROR",
+        "message": "请使用 multipart/form-data 上传合同文件。"
+      }
+    },
+    "unsupported_upload": {
+      "method": "POST",
+      "path": "/api/tasks",
+      "status": 400,
+      "body": {
+        "status": "TASK_ERROR",
+        "message": "仅支持上传 .docx 或 .pdf 文件。"
+      }
+    },
+    "unfinished_report": {
+      "method": "POST",
+      "path": "/api/tasks/{unfinished_task_id}/report",
+      "status": 400,
+      "body": {
+        "status": "TASK_ERROR",
+        "message": "审查任务尚未完成，不能生成报告。"
+      }
+    }
+  }
+}

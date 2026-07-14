@@ -115,11 +115,11 @@ tool_registry = {
 | `parse_document` | file_id | paragraphs, tables, page_map | 否 |
 | `extract_clauses` | document | clauses | 可选 |
 | `extract_key_fields` | clause | key_fields | 是 |
-| `retrieve_playbook_rules` | clause_type, key_fields, review_position | matched_rules | 否 |
-| `retrieve_related_clauses` | clause_id, risk_type | related_clauses | 否 |
-| `retrieve_memory` | clause, risk_type | memories | 否 |
+| `retrieve_playbook_rules` | contract_type, clause_type, key_fields, review_position | matched_rules | 否 |
+| `retrieve_related_clauses` | contract_type, current_clause, clauses, risk_type, playbook_check_point, limit | related_clauses | 否 |
+| `retrieve_memory` | contract_type, clause, risk_type, review_position, memory_items, limit | memories | 否 |
 | `analyze_risk` | review_context | risk_finding | 是 |
-| `verify_evidence` | finding, source_text | citation_status | 可选 |
+| `verify_evidence` | finding, clauses, matched_rule | citation_status | 可选 |
 | `generate_revision` | finding, preferred_position | revision_suggestion | 是 |
 | `write_memory` | human_feedback | memory_item | 可选 |
 | `generate_report` | task_id | report_file | 可选 |

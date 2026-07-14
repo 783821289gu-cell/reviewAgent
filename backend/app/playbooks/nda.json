@@ -1,0 +1,102 @@
+{
+  "playbook_version": "nda-v1",
+  "contract_type": "NDA",
+  "rules": [
+    {
+      "rule_id": "NDA-R001",
+      "contract_type": "NDA",
+      "clause_type": "定义",
+      "review_position": ["甲方", "乙方"],
+      "risk_type": "保密信息范围过宽",
+      "check_point": "检查保密信息定义是否限定来源、形式、标识、披露场景和合理范围。",
+      "risk_criteria": "如果条款把任何信息、全部资料、所有业务信息等不加限定地纳入保密信息，且缺少客观识别边界，应作为后续风险分析的触发条件。",
+      "severity_default": "中",
+      "revision_template": "建议将保密信息限定为披露方以书面、电子、口头或其他可识别方式披露，并标注或说明为保密的信息；对口头披露信息可要求在合理期限内书面确认。",
+      "key_field_triggers": ["right_holder"]
+    },
+    {
+      "rule_id": "NDA-R002",
+      "contract_type": "NDA",
+      "clause_type": "例外",
+      "review_position": ["甲方", "乙方"],
+      "risk_type": "缺少保密信息例外",
+      "check_point": "检查是否列明已公开、披露前已知、合法第三方取得、独立开发、法律法规或监管要求披露等例外。",
+      "risk_criteria": "如果合同未设置保密信息例外，或例外范围明显缺失，可能导致接收方承担不合理保密义务，应作为后续风险分析的触发条件。",
+      "severity_default": "高",
+      "revision_template": "建议补充保密信息例外，包括已公开信息、接收方披露前已合法知悉的信息、从无保密义务第三方合法取得的信息、接收方独立开发的信息，以及依法必须披露的信息。",
+      "key_field_triggers": []
+    },
+    {
+      "rule_id": "NDA-R003",
+      "contract_type": "NDA",
+      "clause_type": "期限",
+      "review_position": ["甲方", "乙方"],
+      "risk_type": "保密期限不合理",
+      "check_point": "检查保密期限是否明确，是否存在永久、无限期或与信息性质不匹配的期限安排。",
+      "risk_criteria": "如果保密期限缺失、永久适用于全部信息、或期限明显超过业务必要范围，应作为后续风险分析的触发条件。",
+      "severity_default": "中",
+      "revision_template": "建议区分一般保密信息和商业秘密：一般保密信息约定明确年限，商业秘密可在其未公开期间持续保密。",
+      "key_field_triggers": ["confidentiality_period"]
+    },
+    {
+      "rule_id": "NDA-R004",
+      "contract_type": "NDA",
+      "clause_type": "使用限制",
+      "review_position": ["甲方", "乙方"],
+      "risk_type": "使用目的或使用限制不清",
+      "check_point": "检查是否明确保密信息只能用于约定合作、评估、交易或项目目的，且不得用于其他用途。",
+      "risk_criteria": "如果使用目的缺失、表述过于抽象，或没有禁止超范围使用，应作为后续风险分析的触发条件。",
+      "severity_default": "中",
+      "revision_template": "建议明确接收方仅可为本合同约定目的使用保密信息，未经披露方书面同意不得用于其他目的。",
+      "key_field_triggers": ["use_purpose"]
+    },
+    {
+      "rule_id": "NDA-R005",
+      "contract_type": "NDA",
+      "clause_type": "允许披露",
+      "review_position": ["甲方", "乙方"],
+      "risk_type": "允许披露对象过宽",
+      "check_point": "检查允许披露对象是否限定为确有知悉必要的员工、关联方、顾问或代表，并要求其承担不低于本合同的保密义务。",
+      "risk_criteria": "如果允许披露给关联方、代表、顾问或其他第三方但没有必要性、范围和保密约束，应作为后续风险分析的触发条件。",
+      "severity_default": "中",
+      "revision_template": "建议限定允许披露对象为为实现约定目的而确有知悉必要的人员，并要求接收方确保相关人员承担不低于本合同的保密义务。",
+      "key_field_triggers": ["permitted_disclosure_targets"]
+    },
+    {
+      "rule_id": "NDA-R006",
+      "contract_type": "NDA",
+      "clause_type": "返还销毁",
+      "review_position": ["甲方", "乙方"],
+      "risk_type": "返还或销毁义务不明确",
+      "check_point": "检查合同终止、披露方要求或合作结束时，接收方是否需要返还、销毁或删除保密信息及其载体。",
+      "risk_criteria": "如果未约定返还或销毁触发条件、完成期限、备份处理或销毁证明，应作为后续风险分析的触发条件。",
+      "severity_default": "中",
+      "revision_template": "建议约定在合同终止、披露方书面要求或合作目的结束后，接收方应在合理期限内返还或销毁保密信息，并按要求提供书面确认。",
+      "key_field_triggers": []
+    },
+    {
+      "rule_id": "NDA-R007",
+      "contract_type": "NDA",
+      "clause_type": "违约责任",
+      "review_position": ["甲方", "乙方"],
+      "risk_type": "责任无限或责任边界不清",
+      "check_point": "检查违约责任是否存在无限责任、全部损失、间接损失或责任范围缺少边界的表述。",
+      "risk_criteria": "如果条款要求承担不限额赔偿、全部直接和间接损失，或没有排除不可归责损失，应作为后续风险分析的触发条件。",
+      "severity_default": "高",
+      "revision_template": "建议明确责任范围、可赔偿损失类型和责任限制；如需例外，应针对故意、重大过失或侵犯商业秘密等情形单独约定。",
+      "key_field_triggers": ["liability_scope"]
+    },
+    {
+      "rule_id": "NDA-R008",
+      "contract_type": "NDA",
+      "clause_type": "违约责任",
+      "review_position": ["甲方", "乙方"],
+      "risk_type": "违约责任或违约金明显不合理",
+      "check_point": "检查违约金、赔偿标准和救济措施是否清晰、合理，并与违约后果相匹配。",
+      "risk_criteria": "如果违约金金额明显过高或过低、计算方式不明，或只规定单方严苛责任，应作为后续风险分析的触发条件。",
+      "severity_default": "中",
+      "revision_template": "建议将违约金或赔偿标准调整为与实际损失、信息价值、违约影响相匹配，并保留依法调整或继续追偿合理损失的表述。",
+      "key_field_triggers": ["breach_liability"]
+    }
+  ]
+}
