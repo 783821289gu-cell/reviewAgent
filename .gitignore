@@ -16,13 +16,16 @@ dist/
 .pytest_cache/
 playwright-report/
 test-results/
+blob-report/
 
 *.sqlite
 *.sqlite3
-backend/app/data/uploads/
+backend/app/data/uploads/*
+!backend/app/data/uploads/.gitignore
 
 backend/app/reports/*.md
 evaluation/evaluation_summary.json
 evaluation/evaluation_summary.md
 evaluation/reports/
 evaluation/evaluation_memory.sqlite3
+evaluation/effect/
