@@ -10,7 +10,7 @@
 4. 浏览器 E2E：`pnpm test:e2e`，Playwright Chromium 实际运行 7 项，7 项通过，最终一次耗时 14.2 秒。
 5. 流程评测：实际运行 10 个合成样本，10 个跑通；结论仍为“仅验证流程跑通，不代表生产级准确率”。
 6. 效果评测：实际运行 6 个合同样本和 14 项指标，状态为 `completed_with_failures`。
-7. Git 发布：在本记录提交后执行工作区审计、提交并推送 `origin/main`；最终结果以远端分支和交付回复为准。
+7. Git 发布：`git push origin main` 已成功，远端已包含 `historical-commit` 和 `historical-commit`；本行作为随后独立的发布确认提交推送。
 
 ## 未达标指标
 
