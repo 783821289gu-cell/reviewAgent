@@ -108,6 +108,8 @@ def _build_markdown(task: dict, risks: list[dict]) -> str:
                 "",
                 f"- 风险 ID：{_text(risk.get('risk_id'))}",
                 f"- 风险等级：{_text(risk.get('severity'))}",
+                f"- 审查立场：{_risk_review_position(task, risk)}",
+                f"- 立场风险重点：{_text(risk.get('risk_focus'))}",
                 f"- 条款 ID：{_text(risk.get('clause_id'))}",
                 f"- 人工反馈状态：{_feedback_status(risk)}",
                 "",
@@ -151,6 +153,16 @@ def _feedback_status(risk: dict) -> str:
     if review_status == "IGNORED_RISK":
         return "已忽略并允许列入报告"
     return "未记录人工反馈"
+
+
+def _risk_review_position(task: dict, risk: dict) -> str:
+    task_position = str(task.get("review_position", "")).strip()
+    risk_position = str(risk.get("review_position", "")).strip()
+    if not risk_position:
+        raise ValueError("报告风险缺少审查立场。")
+    if risk_position != task_position:
+        raise ValueError("报告风险审查立场与任务不一致。")
+    return risk_position
 
 
 def _quote(value) -> str:

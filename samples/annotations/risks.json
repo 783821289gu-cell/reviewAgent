@@ -1,0 +1,44 @@
+{
+  "annotation_version": "effect-v1",
+  "items": [
+    {
+      "annotation_id": "nda-01-risk-01",
+      "contract_id": "nda-01",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": ["中"],
+      "evidence_spans": [
+        "保密信息是指披露方向接收方提供的任何商业信息、技术资料、合作资料以及与双方业务有关的一切信息。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-02-risk-01",
+      "contract_id": "nda-02",
+      "clause_id": "CL-001",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": ["高"],
+      "evidence_spans": [
+        "本合同未对不受本协议约束的信息类型另行约定，接收方应对披露方提供的资料承担限制。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-03-risk-01",
+      "contract_id": "nda-03",
+      "clause_id": "CL-001",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": ["高"],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，该义务不因合作终止而解除。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    }
+  ]
+}

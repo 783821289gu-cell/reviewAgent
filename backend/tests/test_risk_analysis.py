@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
@@ -8,7 +9,7 @@ TEST_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(APP_DIR))
 sys.path.insert(0, str(TEST_DIR))
 
-from models.risk import VALID_RISK_TYPES
+from models.risk import VALID_RISK_TYPES, validate_risk_finding
 from services.evidence_service import verify_evidence
 from services.risk_analyzer import analyze_risk, generate_revision
 from test_retrieval_context import build_clause_payloads
@@ -27,6 +28,9 @@ class RiskAnalysisTest(unittest.TestCase):
         self.assertEqual(finding["clause_id"], "CL-001")
         self.assertIn("商业信息", finding["evidence_text"])
         self.assertEqual(finding["matched_rule_ids"], ["NDA-R001"])
+        self.assertEqual(finding["review_position"], "甲方")
+        self.assertEqual(finding["risk_focus"], context["matched_rule"]["risk_focus"])
+        self.assertIn("甲方立场风险重点", finding["risk_reason"])
         self.assertTrue(finding["revision_suggestion"])
         self.assertEqual(finding["review_status"], "CONFIRMED_RISK")
 
@@ -42,6 +46,8 @@ class RiskAnalysisTest(unittest.TestCase):
                 "clause_id": "CL-001",
                 "evidence_text": "保密信息是指披露方提供的商业信息、技术资料和合作资料。",
                 "matched_rule_ids": ["NDA-R001"],
+                "review_position": "甲方",
+                "risk_focus": context["matched_rule"]["risk_focus"],
                 "revision_suggestion": "限定保密信息范围。",
                 "review_status": "CONFIRMED_RISK",
             },
@@ -57,6 +63,38 @@ class RiskAnalysisTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             analyze_risk({"review_context": context})
+
+    def test_analyze_risk_rejects_position_basis_mismatch_after_retry(self):
+        context = build_review_context()
+        mismatched_output = {
+            "risk_type": "保密信息范围过宽",
+            "severity": "中",
+            "confidence": 0.8,
+            "risk_reason": "证据文本命中检查点。",
+            "clause_id": "CL-001",
+            "evidence_text": "保密信息是指披露方提供的商业信息、技术资料和合作资料。",
+            "matched_rule_ids": ["NDA-R001"],
+            "review_position": "乙方",
+            "risk_focus": "与 Playbook 无关的风险重点。",
+            "revision_suggestion": "限定保密信息范围。",
+            "review_status": "CONFIRMED_RISK",
+        }
+        context["debug_llm_outputs"] = [mismatched_output, mismatched_output]
+
+        with self.assertRaisesRegex(ValueError, "review_position does not match"):
+            analyze_risk({"review_context": context})
+
+    def test_risk_model_rejects_weakly_typed_llm_output(self):
+        context = build_review_context()
+        finding = analyze_risk({"review_context": context})
+        finding["confidence"] = True
+        with self.assertRaisesRegex(ValueError, "confidence must be numeric"):
+            validate_risk_finding(finding)
+
+        finding = analyze_risk({"review_context": context})
+        finding["matched_rule_ids"] = [123]
+        with self.assertRaisesRegex(ValueError, "non-empty strings"):
+            validate_risk_finding(finding)
 
     def test_verify_evidence_requires_clause_text_and_rule_match(self):
         context = build_review_context()
@@ -109,11 +147,31 @@ class RiskAnalysisTest(unittest.TestCase):
         context = build_review_context()
         finding = analyze_risk({"review_context": context})
 
-        revision = generate_revision({"finding": finding, "preferred_position": "乙方"})
+        revision = generate_revision({"finding": finding, "preferred_position": "甲方"})
 
-        self.assertEqual(revision["preferred_position"], "乙方")
+        self.assertEqual(revision["preferred_position"], "甲方")
         self.assertEqual(revision["basis_rule_ids"], ["NDA-R001"])
         self.assertTrue(revision["revision_suggestion"])
+
+    def test_generate_revision_uses_structured_provider_boundary(self):
+        context = build_review_context()
+        finding = analyze_risk({"review_context": context})
+
+        with patch(
+            "services.risk_analyzer.generate_structured_revision",
+            return_value={"revision_suggestion": "使用模型生成的结构化修改建议。"},
+        ) as provider_call:
+            revision = generate_revision({"finding": finding, "preferred_position": "甲方"})
+
+        provider_call.assert_called_once()
+        self.assertEqual(revision["revision_suggestion"], "使用模型生成的结构化修改建议。")
+
+    def test_generate_revision_rejects_position_mismatch(self):
+        context = build_review_context()
+        finding = analyze_risk({"review_context": context})
+
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            generate_revision({"finding": finding, "preferred_position": "乙方"})
 
     def test_generate_revision_exposes_memory_reference_when_used(self):
         context = build_review_context()
@@ -128,7 +186,7 @@ class RiskAnalysisTest(unittest.TestCase):
             }
         ]
 
-        revision = generate_revision({"finding": finding, "preferred_position": "乙方"})
+        revision = generate_revision({"finding": finding, "preferred_position": "甲方"})
 
         self.assertIn("历史反馈参考", revision["revision_suggestion"])
         self.assertEqual(revision["memory_references"][0]["memory_id"], "MEM-001")
@@ -145,9 +203,16 @@ def build_review_context() -> dict:
         "matched_rule": {
             "rule_id": "NDA-R001",
             "risk_type": "保密信息范围过宽",
+            "review_position": "甲方",
             "severity_default": "中",
+            "risk_focus": "确保甲方保密信息定义可识别且可执行。",
             "check_point": "检查保密信息定义是否限定来源、形式、标识、披露场景和合理范围。",
             "revision_template": "建议将保密信息限定为披露方以可识别方式披露并标注为保密的信息。",
+            "position_config": {
+                "severity_default": "中",
+                "risk_focus": "确保甲方保密信息定义可识别且可执行。",
+                "revision_template": "建议将保密信息限定为披露方以可识别方式披露并标注为保密的信息。",
+            },
         },
         "related_clauses": [],
         "related_memory": [],

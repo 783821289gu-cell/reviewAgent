@@ -10,6 +10,9 @@ class RelatedClause:
     key_fields: dict
     source_location: dict
     vector_similarity: float
+    embedding_mode: str
+    embedding_model: str
+    vector_dimension: int
     rerank_score: float
     rerank_factors: dict
     retrieval_scope: str

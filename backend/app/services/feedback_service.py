@@ -1,5 +1,7 @@
 from copy import deepcopy
 from datetime import datetime, timezone
+from hashlib import sha256
+import json
 
 from models.feedback import FEEDBACK_ACTIONS, VALID_FINAL_SEVERITIES
 from models.log import StepLog
@@ -62,8 +64,10 @@ def apply_feedback_to_task(
 
     logs = [StepLog(**item) for item in (task.logs or [])]
     tool_input = {"human_feedback": human_feedback}
-    if db_path:
-        tool_input["db_path"] = db_path
+    resolved_db_path = db_path or event_store.db_path
+    if resolved_db_path:
+        tool_input["db_path"] = resolved_db_path
+        tool_input["idempotency_key"] = _feedback_idempotency_key(task_id, feedback_payload)
     memory_item = invoke_tool(
         task_id,
         tool_registry,
@@ -100,6 +104,11 @@ def apply_feedback_to_task(
         "memory_item": memory_item,
         "task": updated_task.to_dict(),
     }
+
+
+def _feedback_idempotency_key(task_id: str, feedback_payload: dict) -> str:
+    canonical = json.dumps(feedback_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"write_memory:{task_id}:{sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
 def _find_risk(risks: list[dict], risk_id: str) -> dict:

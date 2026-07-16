@@ -1,9 +1,39 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from math import isfinite
 
 
 def _default_memory_db_path() -> str:
     return os.path.join(os.path.dirname(__file__), "data", "review_agent_memory.sqlite3")
+
+
+def _default_upload_dir() -> str:
+    return os.path.join(os.path.dirname(__file__), "data", "uploads")
+
+
+def _allowed_origins() -> tuple[str, ...]:
+    raw_value = os.getenv("REVIEW_AGENT_ALLOWED_ORIGINS", "")
+    origins = tuple(origin.strip().rstrip("/") for origin in raw_value.split(",") if origin.strip())
+    if "*" in origins:
+        raise ValueError("REVIEW_AGENT_ALLOWED_ORIGINS must not contain '*'")
+    return origins
+
+
+def _optional_non_negative_float(name: str) -> float | None:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return None
+    value = float(raw_value)
+    if not isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be a finite non-negative number")
+    return value
+
+
+def _positive_float(name: str, default: str) -> float:
+    value = float(os.getenv(name, default))
+    if not isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a finite positive number")
+    return value
 
 
 @dataclass(frozen=True)
@@ -11,8 +41,29 @@ class Settings:
     host: str = os.getenv("REVIEW_AGENT_HOST", "127.0.0.1")
     port: int = int(os.getenv("REVIEW_AGENT_PORT", "8000"))
     max_upload_bytes: int = int(os.getenv("REVIEW_AGENT_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+    allowed_origins: tuple[str, ...] = field(default_factory=_allowed_origins)
     llm_mode: str = os.getenv("REVIEW_AGENT_LLM_MODE", "local_structured")
+    llm_base_url: str = os.getenv("REVIEW_AGENT_LLM_BASE_URL", "").strip()
+    llm_api_key: str = os.getenv("REVIEW_AGENT_LLM_API_KEY", "").strip()
+    llm_model: str = os.getenv("REVIEW_AGENT_LLM_MODEL", "").strip()
+    llm_timeout_seconds: float = field(
+        default_factory=lambda: _positive_float("REVIEW_AGENT_LLM_TIMEOUT_SECONDS", "60")
+    )
+    llm_prompt_cost_per_million: float | None = field(
+        default_factory=lambda: _optional_non_negative_float("REVIEW_AGENT_LLM_PROMPT_COST_PER_1M")
+    )
+    llm_completion_cost_per_million: float | None = field(
+        default_factory=lambda: _optional_non_negative_float("REVIEW_AGENT_LLM_COMPLETION_COST_PER_1M")
+    )
+    embedding_mode: str = os.getenv("REVIEW_AGENT_EMBEDDING_MODE", "local_sparse")
+    embedding_base_url: str = os.getenv("REVIEW_AGENT_EMBEDDING_BASE_URL", "").strip()
+    embedding_api_key: str = os.getenv("REVIEW_AGENT_EMBEDDING_API_KEY", "").strip()
+    embedding_model: str = os.getenv("REVIEW_AGENT_EMBEDDING_MODEL", "").strip()
+    embedding_timeout_seconds: float = field(
+        default_factory=lambda: _positive_float("REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS", "60")
+    )
     memory_db_path: str = os.getenv("REVIEW_AGENT_MEMORY_DB_PATH", _default_memory_db_path())
+    upload_dir: str = os.getenv("REVIEW_AGENT_UPLOAD_DIR", _default_upload_dir())
     service_name: str = "contract-review-agent"
 
 

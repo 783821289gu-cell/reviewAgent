@@ -4,6 +4,7 @@ export function ReportExport(root, props) {
   const report = props.report || {};
   const reportFile = report.result?.report_file || null;
   const hasTask = Boolean(props.task?.task_id);
+  const reviewPosition = props.task?.review_position || "";
   const reportable = REPORTABLE_STATUSES.has(props.task?.status);
   const disabled = !hasTask || !reportable || Boolean(report.loading);
 
@@ -30,12 +31,14 @@ export function ReportExport(root, props) {
     return;
   }
   if (reportFile) {
-    status.textContent = `已导出 ${reportFile.risk_count} 项风险`;
+    status.textContent = `已导出${reviewPosition ? ` ${reviewPosition}立场` : ""}报告，共 ${reportFile.risk_count} 项风险`;
     return;
   }
   if (!hasTask) {
     status.textContent = "未创建任务";
     return;
   }
-  status.textContent = reportable ? "等待导出" : "审查完成后可导出";
+  status.textContent = reportable
+    ? `等待导出${reviewPosition ? ` ${reviewPosition}立场` : ""}报告`
+    : "审查完成后可导出";
 }

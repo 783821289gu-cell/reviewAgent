@@ -27,12 +27,10 @@ REQUIRED_RULE_FIELDS = {
     "rule_id",
     "contract_type",
     "clause_type",
-    "review_position",
     "risk_type",
     "check_point",
     "risk_criteria",
-    "severity_default",
-    "revision_template",
+    "positions",
 }
 
 
@@ -46,8 +44,11 @@ class PlaybookServiceTest(unittest.TestCase):
         for item in payloads:
             self.assertTrue(REQUIRED_RULE_FIELDS.issubset(item))
             self.assertEqual(item["contract_type"], "NDA")
-            self.assertIn("甲方", item["review_position"])
-            self.assertIn("乙方", item["review_position"])
+            self.assertEqual(set(item["positions"]), {"甲方", "乙方"})
+            for position_config in item["positions"].values():
+                self.assertIn(position_config["severity_default"], {"高", "中", "低"})
+                self.assertTrue(position_config["risk_focus"])
+                self.assertTrue(position_config["revision_template"])
 
     def test_retrieve_rules_by_contract_clause_fields_and_position(self):
         matched_rules = retrieve_playbook_rules(
@@ -63,6 +64,12 @@ class PlaybookServiceTest(unittest.TestCase):
         self.assertEqual(matched_rules[0]["rule_id"], "NDA-R003")
         self.assertEqual(matched_rules[0]["risk_type"], "保密期限不合理")
         self.assertEqual(matched_rules[0]["matched_key_fields"], ["confidentiality_period"])
+        self.assertEqual(matched_rules[0]["review_position"], "乙方")
+        self.assertEqual(matched_rules[0]["severity_default"], "高")
+        self.assertEqual(
+            matched_rules[0]["position_config"]["revision_template"],
+            matched_rules[0]["revision_template"],
+        )
 
     def test_unsupported_contract_type_returns_no_rules(self):
         matched_rules = retrieve_playbook_rules(

@@ -1,0 +1,5 @@
+Mutual Non-Disclosure Agreement
+
+The Disclosing Party may provide Confidential Information to the Receiving Party. Confidential Information includes technical, commercial, and customer information.
+
+The Receiving Party shall keep Confidential Information confidential and shall not disclose it without prior written consent.

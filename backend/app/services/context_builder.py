@@ -82,6 +82,7 @@ def _make_context(
 ) -> ReviewContext:
     clause_id = str(current_clause.get("clause_id", ""))
     rule_id = str(matched_rule.get("rule_id", ""))
+    resolved_rule = _validated_position_rule(matched_rule, review_position)
     return ReviewContext(
         context_id=f"{clause_id}:{rule_id}",
         contract_type=contract_type,
@@ -89,7 +90,7 @@ def _make_context(
         current_clause=current_clause,
         clause_type=str(current_clause.get("clause_type", "")),
         key_fields=current_clause.get("key_fields") or {},
-        matched_rule=matched_rule,
+        matched_rule=resolved_rule,
         related_clauses=related_clauses,
         related_memory=related_memory,
         output_constraints=dict(OUTPUT_CONSTRAINTS),
@@ -101,3 +102,31 @@ def _make_context(
 
 def _context_size(context: ReviewContext) -> int:
     return len(json.dumps(context.to_dict(), ensure_ascii=False))
+
+
+def _validated_position_rule(matched_rule: dict, review_position: str) -> dict:
+    resolved_rule = dict(matched_rule)
+    if str(resolved_rule.get("review_position", "")) != review_position:
+        raise ValueError("matched rule review_position does not match review context")
+
+    positions = resolved_rule.get("positions")
+    if not isinstance(positions, dict):
+        raise ValueError("matched rule positions are required")
+    configured_position = positions.get(review_position)
+    if not isinstance(configured_position, dict):
+        raise ValueError(f"matched rule missing position config: {review_position}")
+
+    position_config = resolved_rule.get("position_config")
+    if not isinstance(position_config, dict):
+        raise ValueError("matched rule position_config is required")
+    for field_name in ("severity_default", "risk_focus", "revision_template"):
+        value = str(position_config.get(field_name, "")).strip()
+        if not value:
+            raise ValueError(f"matched rule position_config.{field_name} is required")
+        if str(configured_position.get(field_name, "")).strip() != value:
+            raise ValueError(
+                f"matched rule position_config.{field_name} does not match positions"
+            )
+        if str(resolved_rule.get(field_name, "")).strip() != value:
+            raise ValueError(f"matched rule resolved {field_name} does not match position_config")
+    return resolved_rule

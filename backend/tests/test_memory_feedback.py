@@ -58,6 +58,11 @@ class MemoryFeedbackTest(unittest.TestCase):
             review_position=ReviewPosition.PARTY_B,
         )
         risk_id = state.risk_findings[0]["risk_id"]
+        risk_clause = next(
+            clause
+            for clause in state.clauses
+            if clause["clause_id"] == state.risk_findings[0]["clause_id"]
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = str(Path(temp_dir) / "memory.sqlite3")
@@ -76,7 +81,7 @@ class MemoryFeedbackTest(unittest.TestCase):
                 {
                     "db_path": db_path,
                     "contract_type": "NDA",
-                    "clause": state.clauses[0],
+                    "clause": risk_clause,
                     "risk_type": state.risk_findings[0]["risk_type"],
                     "review_position": "乙方",
                     "memory_items": [],

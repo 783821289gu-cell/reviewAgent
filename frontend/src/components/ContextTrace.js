@@ -68,7 +68,13 @@ function renderRelatedClauses(clauses) {
     label.textContent = `${clause.clause_id || "未知条款"} ${clause.clause_type || ""}`.trim();
 
     const score = document.createElement("span");
-    score.textContent = `rerank ${clause.rerank_score ?? "-"}`;
+    const model = clause.embedding_model || "未知向量模型";
+    score.textContent = `${model}；cosine ${clause.vector_similarity ?? "-"}；rerank ${clause.rerank_score ?? "-"}`;
+    if (clause.rerank_factors) {
+      score.title = Object.entries(clause.rerank_factors)
+        .map(([name, value]) => `${name}=${value}`)
+        .join("；");
+    }
 
     item.append(label, score);
     list.appendChild(item);

@@ -8,7 +8,12 @@ APP_DIR = Path(__file__).resolve().parents[1] / "app"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(APP_DIR))
 
-from services.evaluation_service import NO_PRODUCTION_CLAIM, run_basic_evaluation
+from services.evaluation_service import (
+    EFFECT_NO_PRODUCTION_CLAIM,
+    NO_PRODUCTION_CLAIM,
+    run_basic_evaluation,
+    run_effect_evaluation,
+)
 from services.log_service import invoke_tool
 from services.report_service import generate_report
 from tools.registry import tool_registry
@@ -32,6 +37,7 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertEqual(report_file["risk_count"], 1)
         self.assertIn("sample-nda.docx", markdown)
         self.assertIn("甲方", markdown)
+        self.assertIn("确保保密信息定义可执行", markdown)
         self.assertIn("nda-v1", markdown)
         self.assertIn("保密信息范围过宽", markdown)
         self.assertIn("任何商业信息", markdown)
@@ -76,6 +82,20 @@ class ReportEvaluationTest(unittest.TestCase):
                     }
                 )
 
+    def test_generate_report_rejects_risk_position_mismatch(self):
+        task = sample_task()
+        task["risk_findings"][0]["review_position"] = "乙方"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "审查立场与任务不一致"):
+                generate_report(
+                    {
+                        "task_id": task["task_id"],
+                        "task": task,
+                        "report_dir": temp_dir,
+                    }
+                )
+
     def test_basic_evaluation_runs_ten_synthetic_samples(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             summary = run_basic_evaluation(
@@ -98,6 +118,30 @@ class ReportEvaluationTest(unittest.TestCase):
         self.assertTrue(all(result["feedback_memory_written"] for result in summary["results"]))
         self.assertTrue(all(result["report_exported"] for result in summary["results"]))
         self.assertTrue(all(not result["failure_reason"] for result in summary["results"]))
+
+    def test_flow_and_effect_evaluations_are_separate_outputs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            flow = run_basic_evaluation(
+                {
+                    "samples_dir": str(PROJECT_ROOT / "samples"),
+                    "output_dir": str(Path(temp_dir) / "evaluation"),
+                    "report_dir": str(Path(temp_dir) / "reports"),
+                    "memory_db_path": str(Path(temp_dir) / "flow-memory.sqlite3"),
+                }
+            )
+            effect = run_effect_evaluation(
+                {
+                    "samples_dir": str(PROJECT_ROOT / "samples"),
+                    "output_dir": str(Path(temp_dir) / "evaluation"),
+                }
+            )
+
+        self.assertEqual(flow["claim"], NO_PRODUCTION_CLAIM)
+        self.assertNotIn("evaluation_type", flow)
+        self.assertNotIn("metrics", flow)
+        self.assertEqual(effect["evaluation_type"], "effect")
+        self.assertEqual(effect["claim"], EFFECT_NO_PRODUCTION_CLAIM)
+        self.assertNotEqual(flow["summary_path"], effect["summary_path"])
 
 
 def sample_task() -> dict:
@@ -127,6 +171,8 @@ def sample_task() -> dict:
                 "risk_reason": "证据文本命中 Playbook。",
                 "clause_id": "CL-001",
                 "evidence_text": "任何商业信息",
+                "review_position": "甲方",
+                "risk_focus": "确保保密信息定义可执行。",
                 "revision_suggestion": "限定保密信息范围。",
                 "review_status": "CONFIRMED_RISK",
                 "include_in_report": True,

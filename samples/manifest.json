@@ -72,5 +72,33 @@
       "source": "项目内合成样本，非真实客户合同。",
       "focus": "完整演示样本"
     }
-  ]
+  ],
+  "effect_evaluation": {
+    "annotation_version": "effect-v1",
+    "schema": "annotations/schema.json",
+    "contracts": "annotations/contracts.json",
+    "clauses": "annotations/clauses.json",
+    "risks": "annotations/risks.json",
+    "related_clauses": "annotations/related_clauses.json",
+    "parameters": {
+      "playbook_recall_k": 3,
+      "related_clause_recall_k": 1,
+      "thresholds": {
+        "nda_classification_accuracy": 0.9,
+        "non_nda_rejection_rate": 1.0,
+        "clause_boundary_accuracy": 0.9,
+        "clause_type_accuracy": 0.9,
+        "playbook_recall_at_k": 0.9,
+        "related_clause_recall_at_k": 0.8,
+        "risk_precision": 0.8,
+        "risk_recall": 0.8,
+        "risk_f1": 0.8,
+        "evidence_span_hit_rate": 0.9,
+        "manual_review_trigger_rate": 1.0,
+        "report_filter_accuracy": 1.0,
+        "tool_call_success_rate": 0.95,
+        "end_to_end_success_rate": 0.9
+      }
+    }
+  }
 }

@@ -2,6 +2,7 @@ const STATUS_LABELS = {
   START: "任务创建",
   UPLOAD_RECEIVED: "上传已接收",
   DOCUMENT_PARSED: "文档已解析",
+  CONTRACT_TYPE_CLASSIFIED: "合同类型已识别",
   CLAUSES_STRUCTURED: "条款已结构化",
   PLAYBOOK_RETRIEVED: "Playbook 已检索",
   CONTEXT_BUILT: "上下文已构建",
@@ -15,6 +16,8 @@ const STATUS_LABELS = {
   LLM_OUTPUT_INVALID: "模型输出无效",
   EVIDENCE_MISSING: "证据缺失",
   NEED_MANUAL_REVIEW: "需要人工复核",
+  UNSUPPORTED_CONTRACT_TYPE: "不支持的合同类型",
+  TASK_ERROR: "任务失败",
 };
 
 const EXCEPTION_STATUSES = new Set([
@@ -22,6 +25,8 @@ const EXCEPTION_STATUSES = new Set([
   "RETRIEVAL_FAILED",
   "LLM_OUTPUT_INVALID",
   "EVIDENCE_MISSING",
+  "UNSUPPORTED_CONTRACT_TYPE",
+  "TASK_ERROR",
 ]);
 
 const REVIEW_STATUSES = new Set([
@@ -48,7 +53,9 @@ export function ReviewProgress(root, props) {
     item.className = progressClassName(event.status);
 
     const status = document.createElement("strong");
-    status.textContent = STATUS_LABELS[event.status] || event.status || "未知状态";
+    status.textContent = event.step_name === "recovery_started"
+      ? "任务恢复"
+      : STATUS_LABELS[event.status] || event.status || "未知状态";
 
     const meta = document.createElement("span");
     meta.textContent = [event.step_name, event.tool_name].filter(Boolean).join(" / ");

@@ -1,12 +1,9 @@
 from pathlib import Path
-import json
 import sys
-import threading
 import time
 import unittest
-import urllib.error
-import urllib.request
-from http.server import ThreadingHTTPServer
+
+from fastapi.testclient import TestClient
 
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
@@ -14,7 +11,8 @@ TEST_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(APP_DIR))
 sys.path.insert(0, str(TEST_DIR))
 
-from main import ReviewAgentHandler
+from main import create_app
+from services.event_service import ReviewEventStore
 from services.local_review_service import run_local_review
 from services.task_service import create_review_task
 from test_document_pipeline import build_docx_bytes
@@ -59,65 +57,57 @@ class LocalReviewTest(unittest.TestCase):
             )
 
     def test_http_local_review_endpoint_returns_friendly_error_and_result(self):
-        server = ThreadingHTTPServer(("127.0.0.1", 0), ReviewAgentHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        app = create_app(event_store=ReviewEventStore())
+        with TestClient(app) as client:
+            created = _upload_docx(client)
+            task = _wait_for_terminal_task(client, created["task_id"])
 
-        try:
-            created = _upload_docx(base_url)
-            task = _wait_for_terminal_task(base_url, created["task_id"])
-
-            error = _post_json(
-                base_url,
+            error_response = client.post(
                 "/api/local-review",
-                {
+                json={
                     "task_id": task["task_id"],
                     "clause_id": "CL-001",
                     "selected_text": "不属于该条款的文字",
                 },
-                expect_error=True,
             )
+            self.assertEqual(error_response.status_code, 400)
+            error = error_response.json()
             self.assertEqual(error["status"], "TASK_ERROR")
             self.assertIn("框选文本不属于当前条款", error["message"])
 
-            result = _post_json(
-                base_url,
+            result_response = client.post(
                 "/api/local-review",
-                {
+                json={
                     "task_id": task["task_id"],
                     "clause_id": "CL-001",
                     "selected_text": "保密信息是指披露方提供的商业信息。",
                 },
             )
+            self.assertEqual(result_response.status_code, 200)
+            result = result_response.json()
             self.assertEqual(result["scope"], "local_selection")
             self.assertFalse(result["formal_risk_generated"])
             self.assertTrue(result["local_findings"])
-        finally:
-            server.shutdown()
-            server.server_close()
 
 
-def _upload_docx(base_url: str) -> dict:
-    boundary = "codexBoundary"
-    body = b"".join(
-        [
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"review_position\"\r\n\r\n甲方\r\n".encode("utf-8"),
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"contract_file\"; filename=\"sample.docx\"\r\nContent-Type: application/octet-stream\r\n\r\n".encode("utf-8"),
-            build_docx_bytes(),
-            f"\r\n--{boundary}--\r\n".encode("utf-8"),
-        ]
+def _upload_docx(client: TestClient) -> dict:
+    response = client.post(
+        "/api/tasks",
+        data={"review_position": "甲方"},
+        files={
+            "contract_file": (
+                "sample.docx",
+                build_docx_bytes(),
+                "application/octet-stream",
+            )
+        },
     )
-    request = urllib.request.Request(
-        f"{base_url}/api/tasks",
-        data=body,
-        method="POST",
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-    )
-    return json.loads(urllib.request.urlopen(request, timeout=5).read().decode("utf-8"))
+    if response.status_code != 201:
+        raise AssertionError(response.text)
+    return response.json()
 
 
-def _wait_for_terminal_task(base_url: str, task_id: str) -> dict:
+def _wait_for_terminal_task(client: TestClient, task_id: str) -> dict:
     terminal_statuses = {
         "EVIDENCE_VERIFIED",
         "HUMAN_REVIEW_PENDING",
@@ -130,27 +120,14 @@ def _wait_for_terminal_task(base_url: str, task_id: str) -> dict:
     }
     deadline = time.time() + 5
     while time.time() < deadline:
-        task = json.loads(urllib.request.urlopen(f"{base_url}/api/tasks/{task_id}", timeout=5).read().decode("utf-8"))
+        response = client.get(f"/api/tasks/{task_id}")
+        if response.status_code != 200:
+            raise AssertionError(response.text)
+        task = response.json()
         if task["status"] in terminal_statuses:
             return task
         time.sleep(0.05)
     raise AssertionError("review task did not reach terminal status")
-
-
-def _post_json(base_url: str, path: str, payload: dict, expect_error: bool = False) -> dict:
-    request = urllib.request.Request(
-        f"{base_url}{path}",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json; charset=utf-8"},
-    )
-    try:
-        response_body = urllib.request.urlopen(request, timeout=5).read().decode("utf-8")
-        return json.loads(response_body)
-    except urllib.error.HTTPError as exc:
-        if not expect_error:
-            raise
-        return json.loads(exc.read().decode("utf-8"))
 
 
 if __name__ == "__main__":

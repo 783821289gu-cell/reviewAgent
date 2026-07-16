@@ -1,0 +1,63 @@
+{
+  "annotation_version": "effect-v1",
+  "benchmark_type": "manually_annotated_related_clause_recall",
+  "scope": "deterministic offline provider regression only; not a real external embedding model benchmark",
+  "source": {
+    "source_type": "synthetic",
+    "note": "项目内人工编写的相关条款同义表达测试夹具，不含客户合同文本。"
+  },
+  "k": 1,
+  "cases": [
+    {
+      "case_id": "purpose-restriction-synonym",
+      "current_clause": {
+        "clause_id": "CL-001",
+        "clause_type": "使用限制",
+        "text": "接收方仅可为项目评估查阅资料。",
+        "key_fields": {"use_purpose": ["项目评估"]}
+      },
+      "risk_type": "使用目的或使用限制不清",
+      "playbook_check_point": "检查使用范围是否仅限项目评估。",
+      "candidates": [
+        {"clause_id": "CL-011", "clause_type": "报告", "text": "项目评估报告应在项目评估完成后五日提交。", "key_fields": {}},
+        {"clause_id": "CL-012", "clause_type": "保密义务", "text": "获悉资料不得挪作他用。", "key_fields": {}},
+        {"clause_id": "CL-013", "clause_type": "通知", "text": "项目联系人变更时应及时通知。", "key_fields": {}}
+      ],
+      "relevant_clause_ids": ["CL-012"]
+    },
+    {
+      "case_id": "return-destroy-synonym",
+      "current_clause": {
+        "clause_id": "CL-002",
+        "clause_type": "返还销毁",
+        "text": "本协议结束时资料处置方式由双方另行协商。",
+        "key_fields": {}
+      },
+      "risk_type": "返还或销毁义务不明确",
+      "playbook_check_point": "检查协议结束后是否要求返还或销毁资料。",
+      "candidates": [
+        {"clause_id": "CL-021", "clause_type": "争议解决", "text": "协议结束后的争议由仲裁机构处理。", "key_fields": {}},
+        {"clause_id": "CL-022", "clause_type": "数据处置", "text": "合作终止后应删除全部副本。", "key_fields": {}},
+        {"clause_id": "CL-023", "clause_type": "期限", "text": "合作期限可以书面方式延长。", "key_fields": {}}
+      ],
+      "relevant_clause_ids": ["CL-022"]
+    },
+    {
+      "case_id": "compelled-disclosure-notice-synonym",
+      "current_clause": {
+        "clause_id": "CL-003",
+        "clause_type": "允许披露",
+        "text": "接收方可以按照监管要求提供资料。",
+        "key_fields": {}
+      },
+      "risk_type": "允许披露对象过宽",
+      "playbook_check_point": "检查收到监管命令时是否需要提前告知披露方。",
+      "candidates": [
+        {"clause_id": "CL-031", "clause_type": "费用", "text": "执行监管命令产生的费用由接收方承担。", "key_fields": {}},
+        {"clause_id": "CL-032", "clause_type": "法定披露", "text": "接到行政机关指令时须事先通知信息所有人。", "key_fields": {}},
+        {"clause_id": "CL-033", "clause_type": "通知", "text": "联系地址变化后应告知另一方。", "key_fields": {}}
+      ],
+      "relevant_clause_ids": ["CL-032"]
+    }
+  ]
+}

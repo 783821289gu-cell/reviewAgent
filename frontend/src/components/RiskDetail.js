@@ -55,6 +55,8 @@ function renderFieldList(risk) {
   appendField(fields, "证据文本", risk.evidence_text);
   appendField(fields, "风险原因", risk.risk_reason);
   appendField(fields, "命中规则", (risk.matched_rule_ids || []).join("、"));
+  appendField(fields, "审查立场", risk.review_position);
+  appendField(fields, "立场风险重点", risk.risk_focus);
   appendField(fields, "修改建议", risk.revision_suggestion);
   appendField(fields, "复核状态", reviewStatusLabel(risk.review_status));
   appendField(fields, "报告选择", reportChoiceLabel(risk.include_in_report));

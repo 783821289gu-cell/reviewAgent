@@ -769,11 +769,48 @@ button:disabled {
   line-height: 1.5;
 }
 
+.evaluation-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.evaluation-tabs button {
+  min-height: 30px;
+  border: 1px solid #cbd6e2;
+  border-radius: 5px;
+  padding: 5px 9px;
+  color: #4b5968;
+  background: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.evaluation-tabs button[aria-selected="true"] {
+  border-color: #2d6f87;
+  color: #ffffff;
+  background: #2d6f87;
+}
+
 .evaluation-summary {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin: 10px 0;
+}
+
+.effect-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.effect-summary .effect-code-version {
+  grid-column: 1 / -1;
+}
+
+.effect-summary dd {
+  overflow-wrap: anywhere;
 }
 
 .evaluation-summary div {
@@ -811,6 +848,44 @@ button:disabled {
   margin-bottom: 8px;
   font-size: 13px;
   line-height: 1.4;
+}
+
+.effect-metric-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.effect-metric-head strong {
+  margin: 0;
+}
+
+.effect-metric-head span {
+  flex: 0 0 auto;
+  border-radius: 5px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.effect-metric-row p {
+  margin: 7px 0 0;
+  color: #596879;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.effect-failure-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #7f342a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.evaluation-failures {
+  margin-top: 10px;
 }
 
 .evaluation-checks {

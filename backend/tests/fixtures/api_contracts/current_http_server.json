@@ -30,6 +30,7 @@
           "START",
           "UPLOAD_RECEIVED",
           "DOCUMENT_PARSED",
+          "CONTRACT_TYPE_CLASSIFIED",
           "CLAUSES_STRUCTURED",
           "PLAYBOOK_RETRIEVED",
           "CONTEXT_BUILT",
@@ -43,6 +44,7 @@
           "LLM_OUTPUT_INVALID",
           "EVIDENCE_MISSING",
           "NEED_MANUAL_REVIEW",
+          "UNSUPPORTED_CONTRACT_TYPE",
           "TASK_ERROR"
         ]
       }
@@ -51,7 +53,7 @@
       "method": "GET",
       "path": "/api/tools",
       "status": 200,
-      "tool_count": 11,
+      "tool_count": 12,
       "tools": [
         {
           "name": "parse_document",
@@ -60,6 +62,14 @@
           "calls_llm": false,
           "runtime_calls_llm": false,
           "runtime_llm_mode": "not_applicable"
+        },
+        {
+          "name": "classify_contract_type",
+          "input_keys": ["document"],
+          "output_keys": ["contract_type", "confidence", "evidence", "decision"],
+          "calls_llm": true,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "deterministic_features_no_external_llm"
         },
         {
           "name": "extract_clauses",
@@ -87,7 +97,7 @@
         },
         {
           "name": "retrieve_related_clauses",
-          "input_keys": ["contract_type", "current_clause", "clauses", "risk_type", "playbook_check_point", "limit"],
+          "input_keys": ["contract_type", "current_clause", "clauses", "risk_type", "playbook_check_point", "limit", "embedding_cache"],
           "output_keys": ["related_clauses"],
           "calls_llm": false,
           "runtime_calls_llm": false,
@@ -167,6 +177,7 @@
         "review_position",
         "message",
         "document",
+        "contract_classification",
         "clauses",
         "matched_rules",
         "review_contexts",
@@ -201,6 +212,7 @@
         "review_position",
         "message",
         "document",
+        "contract_classification",
         "clauses",
         "matched_rules",
         "review_contexts",
@@ -215,7 +227,7 @@
         "status": "HUMAN_REVIEW_PENDING",
         "clause_count": 4,
         "risk_count": 4,
-        "log_count": 33
+        "log_count": 34
       }
     },
     "events": {
@@ -249,6 +261,7 @@
             "review_position": "甲方",
             "message": "审查任务已创建，等待上传处理。",
             "document": null,
+            "contract_classification": null,
             "clauses": null,
             "matched_rules": null,
             "review_contexts": null,
@@ -275,6 +288,7 @@
         "START",
         "UPLOAD_RECEIVED",
         "DOCUMENT_PARSED",
+        "CONTRACT_TYPE_CLASSIFIED",
         "CLAUSES_STRUCTURED",
         "PLAYBOOK_RETRIEVED",
         "CONTEXT_BUILT",
@@ -372,6 +386,22 @@
         "sample_count": 10,
         "passed_count": 10,
         "claim": "基础评测仅验证流程跑通，不代表生产级准确率。"
+      }
+    },
+    "effect_evaluation": {
+      "method": "POST",
+      "path": "/api/evaluation/effect/run",
+      "status": 200,
+      "request_example": {
+        "body": null
+      },
+      "required_keys": ["evaluation_id", "evaluation_type", "created_at", "status", "claim", "sample_count", "metrics", "versions", "evaluation_failures", "summary_path", "markdown_path"],
+      "metric_required_keys": ["metric", "label", "sample_count", "passed_count", "failed_count", "score", "threshold", "threshold_met", "failure_samples"],
+      "response_body_summary": {
+        "evaluation_type": "effect",
+        "sample_count": 6,
+        "metric_count": 14,
+        "claim": "效果评测仅报告当前人工标注集上的实际指标和失败样本，不代表生产级准确率。"
       }
     }
   },

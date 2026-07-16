@@ -1,0 +1,53 @@
+{
+  "annotation_version": "effect-v1",
+  "items": [
+    {
+      "annotation_id": "nda-01-clause-01",
+      "contract_id": "nda-01",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义\n保密信息是指披露方向接收方提供的任何商业信息、技术资料、合作资料以及与双方业务有关的一切信息。",
+      "clause_type": "定义",
+      "expected_rule_ids": ["NDA-R001"]
+    },
+    {
+      "annotation_id": "nda-01-clause-02",
+      "contract_id": "nda-01",
+      "clause_id": "CL-002",
+      "exact_text": "2. 保密义务\n接收方应妥善保管保密信息，不得向无关人员披露。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-02-clause-01",
+      "contract_id": "nda-02",
+      "clause_id": "CL-001",
+      "exact_text": "1. 例外\n本合同未对不受本协议约束的信息类型另行约定，接收方应对披露方提供的资料承担限制。",
+      "clause_type": "例外",
+      "expected_rule_ids": ["NDA-R002"]
+    },
+    {
+      "annotation_id": "nda-02-clause-02",
+      "contract_id": "nda-02",
+      "clause_id": "CL-002",
+      "exact_text": "2. 保密义务\n接收方不得披露或泄露保密信息。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-03-clause-01",
+      "contract_id": "nda-03",
+      "clause_id": "CL-001",
+      "exact_text": "1. 期限\n接收方对全部保密信息承担永久保密义务，该义务不因合作终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": ["NDA-R003"]
+    },
+    {
+      "annotation_id": "nda-03-clause-02",
+      "contract_id": "nda-03",
+      "clause_id": "CL-002",
+      "exact_text": "2. 定义\n保密信息包括披露方在合作过程中提供的项目资料。",
+      "clause_type": "定义",
+      "expected_rule_ids": ["NDA-R001"]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import { UploadPanel } from "./components/UploadPanel.js";
 import { WorkbenchLayout } from "./components/WorkbenchLayout.js";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = "";
 const TERMINAL_STATUSES = new Set([
   "EVIDENCE_VERIFIED",
   "HUMAN_REVIEW_PENDING",
@@ -10,8 +10,10 @@ const TERMINAL_STATUSES = new Set([
   "LLM_OUTPUT_INVALID",
   "EVIDENCE_MISSING",
   "NEED_MANUAL_REVIEW",
+  "UNSUPPORTED_CONTRACT_TYPE",
   "MEMORY_UPDATED",
   "REPORT_READY",
+  "TASK_ERROR",
 ]);
 
 export function renderApp(root) {
@@ -284,6 +286,8 @@ export function renderApp(root) {
   async function runEvaluation() {
     setState({
       evaluation: {
+        ...state.evaluation,
+        activeView: "flow",
         loading: true,
         error: "",
         result: state.evaluation.result,
@@ -300,6 +304,8 @@ export function renderApp(root) {
       }
       setState({
         evaluation: {
+          ...state.evaluation,
+          activeView: "flow",
           loading: false,
           error: "",
           result: payload,
@@ -308,12 +314,65 @@ export function renderApp(root) {
     } catch (error) {
       setState({
         evaluation: {
+          ...state.evaluation,
+          activeView: "flow",
           loading: false,
           error: error.message || "基础评测失败",
           result: state.evaluation.result,
         },
       });
     }
+  }
+
+  async function runEffectEvaluation() {
+    setState({
+      evaluation: {
+        ...state.evaluation,
+        activeView: "effect",
+        effectLoading: true,
+        effectError: "",
+      },
+    });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/evaluation/effect/run`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || "效果评测失败");
+      }
+      setState({
+        evaluation: {
+          ...state.evaluation,
+          activeView: "effect",
+          effectLoading: false,
+          effectError: "",
+          effectResult: payload,
+        },
+      });
+    } catch (error) {
+      setState({
+        evaluation: {
+          ...state.evaluation,
+          activeView: "effect",
+          effectLoading: false,
+          effectError: error.message || "效果评测失败",
+        },
+      });
+    }
+  }
+
+  function selectEvaluationView(view) {
+    if (!new Set(["flow", "effect"]).has(view)) {
+      return;
+    }
+    setState({
+      evaluation: {
+        ...state.evaluation,
+        activeView: view,
+      },
+    });
   }
 
   function requestLocalRerun(risk) {
@@ -350,10 +409,31 @@ export function renderApp(root) {
       }
     });
 
-    eventSource.onerror = () => {
+    eventSource.onerror = async () => {
       closeEventStream();
-      if (!state.task || !TERMINAL_STATUSES.has(state.task.status)) {
-        setState({ loading: false, error: "流式状态连接中断，请刷新任务状态。" });
+      if (!state.task || state.task.task_id !== taskId || TERMINAL_STATUSES.has(state.task.status)) {
+        return;
+      }
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`);
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.message || payload.error || "任务状态查询失败");
+        }
+        if (state.task?.task_id !== taskId) {
+          return;
+        }
+        setState({
+          task: payload,
+          loading: !TERMINAL_STATUSES.has(payload.status),
+          error: TERMINAL_STATUSES.has(payload.status)
+            ? ""
+            : "流式状态连接中断，请刷新任务状态。",
+        });
+      } catch {
+        if (state.task?.task_id === taskId) {
+          setState({ loading: false, error: "流式状态连接中断，请刷新任务状态。" });
+        }
       }
     };
   }
@@ -365,7 +445,7 @@ export function renderApp(root) {
           <div>
             <p class="eyebrow">NDA 合同审查 Agent 工作台</p>
             <h1>ContractReviewAgent</h1>
-            <p class="summary">任务 9 支持合同解析、条款结构化、Playbook 检索、上下文构建、风险分析、证据验证、原文定位、高亮、局部审查、人工反馈、SQLite Memory、Markdown 报告导出和基础评测。</p>
+            <p class="summary">任务 10 支持合同审查、人工反馈、报告与评测，并展示可持久化的任务 Trace、工具 Step、恢复信息和外部模型调用摘要。</p>
           </div>
           <span class="status-pill status-${state.backendStatus}">
             ${backendStatusLabel(state.backendStatus)}
@@ -399,6 +479,8 @@ export function renderApp(root) {
       onRequestLocalReview: requestLocalRerun,
       onExportReport: exportReport,
       onRunEvaluation: runEvaluation,
+      onRunEffectEvaluation: runEffectEvaluation,
+      onSelectEvaluationView: selectEvaluationView,
     });
   }
 
@@ -435,9 +517,13 @@ function emptyReport() {
 
 function emptyEvaluation() {
   return {
+    activeView: "flow",
     loading: false,
     error: "",
     result: null,
+    effectLoading: false,
+    effectError: "",
+    effectResult: null,
   };
 }
 

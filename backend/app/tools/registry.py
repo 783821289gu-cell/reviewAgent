@@ -1,5 +1,6 @@
 from services.clause_service import extract_clauses, extract_key_fields
 from services.clause_index_service import retrieve_related_clauses
+from services.contract_type_service import classify_contract_type
 from services.document_service import parse_document
 from services.memory_service import retrieve_memory, write_memory
 from services.playbook_service import retrieve_playbook_rules
@@ -11,6 +12,7 @@ from tools.contracts import runtime_calls_llm, runtime_llm_mode, tool_contracts
 
 tool_registry = {
     "parse_document": parse_document,
+    "classify_contract_type": classify_contract_type,
     "extract_clauses": extract_clauses,
     "extract_key_fields": extract_key_fields,
     "retrieve_playbook_rules": retrieve_playbook_rules,

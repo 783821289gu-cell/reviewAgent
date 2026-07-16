@@ -1,6 +1,6 @@
 from models.review import AgentState, ReviewPosition, ReviewTask, new_task
 from services.document_service import SUPPORTED_FILE_TYPES
-from services.review_service import review_orchestrator_agent
+from services.review_service import ReviewOrchestratorAgent, review_orchestrator_agent
 
 
 SUPPORTED_REVIEW_POSITIONS = {position.value: position for position in ReviewPosition}
@@ -35,11 +35,22 @@ def create_review_task(file_name: str, content: bytes, review_position_value: st
     return state.to_review_task()
 
 
-def start_review_task(file_name: str, content: bytes, review_position_value: str) -> AgentState:
-    return _run_review(file_name, content, review_position_value, async_mode=True)
+def start_review_task(
+    file_name: str,
+    content: bytes,
+    review_position_value: str,
+    review_agent: ReviewOrchestratorAgent = review_orchestrator_agent,
+) -> AgentState:
+    return _run_review(file_name, content, review_position_value, async_mode=True, review_agent=review_agent)
 
 
-def _run_review(file_name: str, content: bytes, review_position_value: str, async_mode: bool) -> AgentState:
+def _run_review(
+    file_name: str,
+    content: bytes,
+    review_position_value: str,
+    async_mode: bool,
+    review_agent: ReviewOrchestratorAgent = review_orchestrator_agent,
+) -> AgentState:
     normalized_file_name = file_name.strip()
     file_type = _get_file_type(normalized_file_name)
     review_position = _get_review_position(review_position_value)
@@ -50,13 +61,13 @@ def _run_review(file_name: str, content: bytes, review_position_value: str, asyn
         raise ValueError("上传文件为空，无法解析。")
 
     if async_mode:
-        return review_orchestrator_agent.start(
+        return review_agent.start(
             file_name=normalized_file_name,
             file_type=file_type,
             content=content,
             review_position=review_position,
         )
-    return review_orchestrator_agent.run_sync(
+    return review_agent.run_sync(
         file_name=normalized_file_name,
         file_type=file_type,
         content=content,

@@ -6,96 +6,168 @@
       "rule_id": "NDA-R001",
       "contract_type": "NDA",
       "clause_type": "定义",
-      "review_position": ["甲方", "乙方"],
       "risk_type": "保密信息范围过宽",
       "check_point": "检查保密信息定义是否限定来源、形式、标识、披露场景和合理范围。",
       "risk_criteria": "如果条款把任何信息、全部资料、所有业务信息等不加限定地纳入保密信息，且缺少客观识别边界，应作为后续风险分析的触发条件。",
-      "severity_default": "中",
-      "revision_template": "建议将保密信息限定为披露方以书面、电子、口头或其他可识别方式披露，并标注或说明为保密的信息；对口头披露信息可要求在合理期限内书面确认。",
+      "positions": {
+        "甲方": {
+          "severity_default": "中",
+          "risk_focus": "保持披露信息保护范围的同时，确保保密信息定义具有可识别性和可执行性。",
+          "revision_template": "建议保留对甲方披露信息的充分覆盖，同时限定为以书面、电子、口头或其他可识别方式披露并标注或说明为保密的信息；口头披露可在合理期限内书面确认。"
+        },
+        "乙方": {
+          "severity_default": "高",
+          "risk_focus": "限制乙方作为接收方承担的保密信息范围，避免不可识别或无限扩张的义务。",
+          "revision_template": "建议将乙方承担义务的保密信息限定为甲方明确标识或按披露情形可合理识别为保密的信息，并排除未标识、未确认或乙方无法合理识别的信息。"
+        }
+      },
       "key_field_triggers": ["right_holder"]
     },
     {
       "rule_id": "NDA-R002",
       "contract_type": "NDA",
       "clause_type": "例外",
-      "review_position": ["甲方", "乙方"],
       "risk_type": "缺少保密信息例外",
       "check_point": "检查是否列明已公开、披露前已知、合法第三方取得、独立开发、法律法规或监管要求披露等例外。",
       "risk_criteria": "如果合同未设置保密信息例外，或例外范围明显缺失，可能导致接收方承担不合理保密义务，应作为后续风险分析的触发条件。",
-      "severity_default": "高",
-      "revision_template": "建议补充保密信息例外，包括已公开信息、接收方披露前已合法知悉的信息、从无保密义务第三方合法取得的信息、接收方独立开发的信息，以及依法必须披露的信息。",
+      "positions": {
+        "甲方": {
+          "severity_default": "中",
+          "risk_focus": "通过清晰例外提高甲方保密条款的可执行性，并控制例外的证明责任。",
+          "revision_template": "建议补充已公开、乙方披露前已合法知悉、合法第三方取得、独立开发及依法披露等例外，并约定乙方对主张例外承担合理证明义务。"
+        },
+        "乙方": {
+          "severity_default": "高",
+          "risk_focus": "避免乙方对公开、已知、独立开发或依法披露的信息继续承担不合理义务。",
+          "revision_template": "建议完整列明已公开、乙方披露前已合法知悉、从无保密义务第三方合法取得、独立开发和依法必须披露等例外，并保留依法披露前合理通知甲方的机制。"
+        }
+      },
       "key_field_triggers": []
     },
     {
       "rule_id": "NDA-R003",
       "contract_type": "NDA",
       "clause_type": "期限",
-      "review_position": ["甲方", "乙方"],
       "risk_type": "保密期限不合理",
       "check_point": "检查保密期限是否明确，是否存在永久、无限期或与信息性质不匹配的期限安排。",
       "risk_criteria": "如果保密期限缺失、永久适用于全部信息、或期限明显超过业务必要范围，应作为后续风险分析的触发条件。",
-      "severity_default": "中",
-      "revision_template": "建议区分一般保密信息和商业秘密：一般保密信息约定明确年限，商业秘密可在其未公开期间持续保密。",
+      "positions": {
+        "甲方": {
+          "severity_default": "中",
+          "risk_focus": "确保甲方核心商业秘密获得持续保护，同时避免统一永久期限影响条款执行。",
+          "revision_template": "建议区分一般保密信息与甲方商业秘密：一般保密信息约定明确保护年限，商业秘密在其依法保持秘密性期间持续受保护。"
+        },
+        "乙方": {
+          "severity_default": "高",
+          "risk_focus": "限制乙方对普通保密信息承担永久或明显超过业务必要范围的义务。",
+          "revision_template": "建议为一般保密信息设置明确且合理的固定期限，仅对依法构成商业秘密的信息在其保持秘密性期间继续承担保密义务。"
+        }
+      },
       "key_field_triggers": ["confidentiality_period"]
     },
     {
       "rule_id": "NDA-R004",
       "contract_type": "NDA",
       "clause_type": "使用限制",
-      "review_position": ["甲方", "乙方"],
       "risk_type": "使用目的或使用限制不清",
       "check_point": "检查是否明确保密信息只能用于约定合作、评估、交易或项目目的，且不得用于其他用途。",
       "risk_criteria": "如果使用目的缺失、表述过于抽象，或没有禁止超范围使用，应作为后续风险分析的触发条件。",
-      "severity_default": "中",
-      "revision_template": "建议明确接收方仅可为本合同约定目的使用保密信息，未经披露方书面同意不得用于其他目的。",
+      "positions": {
+        "甲方": {
+          "severity_default": "高",
+          "risk_focus": "限制乙方使用甲方保密信息的目的和范围，防止竞争性或超范围使用。",
+          "revision_template": "建议明确乙方仅可为双方约定的合作评估或项目目的使用甲方保密信息，未经甲方事先书面同意不得用于其他目的。"
+        },
+        "乙方": {
+          "severity_default": "中",
+          "risk_focus": "确保乙方获准使用信息的业务目的清晰且具有可操作性，避免正常履约被过度限制。",
+          "revision_template": "建议具体列明乙方可进行的评估、内部决策和项目实施用途，并将额外用途的同意机制限定为合理、可执行的书面流程。"
+        }
+      },
       "key_field_triggers": ["use_purpose"]
     },
     {
       "rule_id": "NDA-R005",
       "contract_type": "NDA",
       "clause_type": "允许披露",
-      "review_position": ["甲方", "乙方"],
       "risk_type": "允许披露对象过宽",
       "check_point": "检查允许披露对象是否限定为确有知悉必要的员工、关联方、顾问或代表，并要求其承担不低于本合同的保密义务。",
       "risk_criteria": "如果允许披露给关联方、代表、顾问或其他第三方但没有必要性、范围和保密约束，应作为后续风险分析的触发条件。",
-      "severity_default": "中",
-      "revision_template": "建议限定允许披露对象为为实现约定目的而确有知悉必要的人员，并要求接收方确保相关人员承担不低于本合同的保密义务。",
+      "positions": {
+        "甲方": {
+          "severity_default": "高",
+          "risk_focus": "控制甲方保密信息的下游披露范围，并确保乙方对获知人员承担管理责任。",
+          "revision_template": "建议将乙方允许披露对象限定为实现约定目的确有知悉必要的员工和专业顾问，并要求乙方确保其承担不低于本合同的保密义务。"
+        },
+        "乙方": {
+          "severity_default": "中",
+          "risk_focus": "保留乙方为履约向必要员工、关联方和专业顾问披露的合理空间，同时明确责任边界。",
+          "revision_template": "建议允许乙方向有知悉必要的员工、关联方及专业顾问披露，但以履行约定目的为限，并通过保密义务或职业义务约束相关人员。"
+        }
+      },
       "key_field_triggers": ["permitted_disclosure_targets"]
     },
     {
       "rule_id": "NDA-R006",
       "contract_type": "NDA",
       "clause_type": "返还销毁",
-      "review_position": ["甲方", "乙方"],
       "risk_type": "返还或销毁义务不明确",
       "check_point": "检查合同终止、披露方要求或合作结束时，接收方是否需要返还、销毁或删除保密信息及其载体。",
       "risk_criteria": "如果未约定返还或销毁触发条件、完成期限、备份处理或销毁证明，应作为后续风险分析的触发条件。",
-      "severity_default": "中",
-      "revision_template": "建议约定在合同终止、披露方书面要求或合作目的结束后，接收方应在合理期限内返还或销毁保密信息，并按要求提供书面确认。",
+      "positions": {
+        "甲方": {
+          "severity_default": "高",
+          "risk_focus": "确保甲方可在合作结束或提出要求时控制保密信息的返还、删除和销毁证明。",
+          "revision_template": "建议约定在合同终止、甲方书面要求或合作目的结束后，乙方应在明确期限内返还或销毁甲方保密信息，并按甲方合理要求提供书面确认。"
+        },
+        "乙方": {
+          "severity_default": "中",
+          "risk_focus": "使乙方返还销毁义务具备可执行期限，并为法定留存和系统备份保留受控例外。",
+          "revision_template": "建议约定乙方在收到书面要求后的合理期限内返还或销毁信息，同时允许依法必须保留或无法从常规备份中立即删除的副本继续受保密义务约束。"
+        }
+      },
       "key_field_triggers": []
     },
     {
       "rule_id": "NDA-R007",
       "contract_type": "NDA",
       "clause_type": "违约责任",
-      "review_position": ["甲方", "乙方"],
       "risk_type": "责任无限或责任边界不清",
       "check_point": "检查违约责任是否存在无限责任、全部损失、间接损失或责任范围缺少边界的表述。",
       "risk_criteria": "如果条款要求承担不限额赔偿、全部直接和间接损失，或没有排除不可归责损失，应作为后续风险分析的触发条件。",
-      "severity_default": "高",
-      "revision_template": "建议明确责任范围、可赔偿损失类型和责任限制；如需例外，应针对故意、重大过失或侵犯商业秘密等情形单独约定。",
+      "positions": {
+        "甲方": {
+          "severity_default": "中",
+          "risk_focus": "保留甲方对严重泄密的充分追偿能力，同时提高损失范围和责任条款的可执行性。",
+          "revision_template": "建议明确甲方可追偿的直接损失和合理维权费用；责任限制不适用于乙方故意、重大过失或侵犯甲方商业秘密的情形。"
+        },
+        "乙方": {
+          "severity_default": "高",
+          "risk_focus": "限制乙方承担无限责任、间接损失和不可预见损失，建立清晰责任上限。",
+          "revision_template": "建议排除乙方对间接、附带及不可预见损失的责任，并设置与合同价值或可预见损失相匹配的责任上限，仅对故意或重大过失设置明确例外。"
+        }
+      },
       "key_field_triggers": ["liability_scope"]
     },
     {
       "rule_id": "NDA-R008",
       "contract_type": "NDA",
       "clause_type": "违约责任",
-      "review_position": ["甲方", "乙方"],
       "risk_type": "违约责任或违约金明显不合理",
       "check_point": "检查违约金、赔偿标准和救济措施是否清晰、合理，并与违约后果相匹配。",
       "risk_criteria": "如果违约金金额明显过高或过低、计算方式不明，或只规定单方严苛责任，应作为后续风险分析的触发条件。",
-      "severity_default": "中",
-      "revision_template": "建议将违约金或赔偿标准调整为与实际损失、信息价值、违约影响相匹配，并保留依法调整或继续追偿合理损失的表述。",
+      "positions": {
+        "甲方": {
+          "severity_default": "中",
+          "risk_focus": "维持对泄密行为的有效威慑和补偿能力，避免违约金因明显失衡而难以执行。",
+          "revision_template": "建议将违约金与甲方信息价值、泄密影响和合理维权成本关联，并保留实际损失超过违约金时继续追偿合理差额的权利。"
+        },
+        "乙方": {
+          "severity_default": "高",
+          "risk_focus": "避免乙方承担单方、固定高额或与实际损失明显不匹配的违约责任。",
+          "revision_template": "建议将乙方违约金调整为与实际可证明损失和违约影响相匹配，删除单方严苛或重复赔偿安排，并保留依法请求调整的权利。"
+        }
+      },
       "key_field_triggers": ["breach_liability"]
     }
   ]

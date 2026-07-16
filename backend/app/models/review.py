@@ -7,6 +7,7 @@ class ReviewStatus(StrEnum):
     START = "START"
     UPLOAD_RECEIVED = "UPLOAD_RECEIVED"
     DOCUMENT_PARSED = "DOCUMENT_PARSED"
+    CONTRACT_TYPE_CLASSIFIED = "CONTRACT_TYPE_CLASSIFIED"
     CLAUSES_STRUCTURED = "CLAUSES_STRUCTURED"
     PLAYBOOK_RETRIEVED = "PLAYBOOK_RETRIEVED"
     CONTEXT_BUILT = "CONTEXT_BUILT"
@@ -20,6 +21,7 @@ class ReviewStatus(StrEnum):
     LLM_OUTPUT_INVALID = "LLM_OUTPUT_INVALID"
     EVIDENCE_MISSING = "EVIDENCE_MISSING"
     NEED_MANUAL_REVIEW = "NEED_MANUAL_REVIEW"
+    UNSUPPORTED_CONTRACT_TYPE = "UNSUPPORTED_CONTRACT_TYPE"
     TASK_ERROR = "TASK_ERROR"
 
 
@@ -37,6 +39,7 @@ class ReviewTask:
     review_position: ReviewPosition
     message: str
     document: dict | None = None
+    contract_classification: dict | None = None
     clauses: list[dict] | None = None
     matched_rules: list[dict] | None = None
     review_contexts: list[dict] | None = None
@@ -45,6 +48,9 @@ class ReviewTask:
     evidence_results: list[dict] | None = None
     report_file: dict | None = None
     logs: list[dict] | None = None
+    trace_id: str = ""
+    recovery_count: int = 0
+    recovery_from_status: str = ""
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -62,6 +68,7 @@ class AgentState:
     review_position: ReviewPosition
     message: str
     document: dict | None = None
+    contract_classification: dict | None = None
     clauses: list[dict] | None = None
     matched_rules: list[dict] | None = None
     review_contexts: list[dict] | None = None
@@ -71,6 +78,9 @@ class AgentState:
     report_file: dict | None = None
     logs: list[dict] | None = None
     events: list[dict] | None = None
+    trace_id: str = ""
+    recovery_count: int = 0
+    recovery_from_status: str = ""
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -87,6 +97,7 @@ class AgentState:
             review_position=self.review_position,
             message=self.message,
             document=self.document,
+            contract_classification=self.contract_classification,
             clauses=self.clauses,
             matched_rules=self.matched_rules,
             review_contexts=self.review_contexts,
@@ -95,6 +106,9 @@ class AgentState:
             evidence_results=self.evidence_results,
             report_file=self.report_file,
             logs=self.logs,
+            trace_id=self.trace_id,
+            recovery_count=self.recovery_count,
+            recovery_from_status=self.recovery_from_status,
         )
 
 
@@ -105,6 +119,7 @@ def new_task(
     status: ReviewStatus = ReviewStatus.UPLOAD_RECEIVED,
     message: str = "任务壳已创建。",
     document: dict | None = None,
+    contract_classification: dict | None = None,
     clauses: list[dict] | None = None,
     matched_rules: list[dict] | None = None,
     review_contexts: list[dict] | None = None,
@@ -115,14 +130,16 @@ def new_task(
     logs: list[dict] | None = None,
     task_id: str | None = None,
 ) -> ReviewTask:
+    resolved_task_id = task_id or f"task_{uuid4().hex[:12]}"
     return ReviewTask(
-        task_id=task_id or f"task_{uuid4().hex[:12]}",
+        task_id=resolved_task_id,
         status=status,
         file_name=file_name,
         file_type=file_type,
         review_position=review_position,
         message=message,
         document=document,
+        contract_classification=contract_classification,
         clauses=clauses,
         matched_rules=matched_rules,
         review_contexts=review_contexts,
@@ -131,4 +148,10 @@ def new_task(
         evidence_results=evidence_results,
         report_file=report_file,
         logs=logs,
+        trace_id=trace_id_for_task(resolved_task_id),
     )
+
+
+def trace_id_for_task(task_id: str) -> str:
+    suffix = task_id.removeprefix("task_")
+    return f"trace_{suffix}"

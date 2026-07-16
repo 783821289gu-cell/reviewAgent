@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://review-agent.local/schemas/effect-annotations-v1.json",
+  "$defs": {
+    "AnnotationSource": {
+      "additionalProperties": false,
+      "properties": {
+        "source_type": {
+          "enum": [
+            "synthetic",
+            "public_authorized",
+            "deidentified_authorized"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "note": {
+          "minLength": 1,
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_type",
+        "note"
+      ],
+      "title": "AnnotationSource",
+      "type": "object"
+    },
+    "ClauseAnnotation": {
+      "additionalProperties": false,
+      "properties": {
+        "annotation_id": {
+          "minLength": 1,
+          "title": "Annotation Id",
+          "type": "string"
+        },
+        "contract_id": {
+          "minLength": 1,
+          "title": "Contract Id",
+          "type": "string"
+        },
+        "clause_id": {
+          "minLength": 1,
+          "title": "Clause Id",
+          "type": "string"
+        },
+        "exact_text": {
+          "minLength": 1,
+          "title": "Exact Text",
+          "type": "string"
+        },
+        "clause_type": {
+          "minLength": 1,
+          "title": "Clause Type",
+          "type": "string"
+        },
+        "expected_rule_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Expected Rule Ids",
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "annotation_id",
+        "contract_id",
+        "clause_id",
+        "exact_text",
+        "clause_type",
+        "expected_rule_ids"
+      ],
+      "title": "ClauseAnnotation",
+      "type": "object"
+    },
+    "ContractAnnotation": {
+      "additionalProperties": false,
+      "properties": {
+        "contract_id": {
+          "minLength": 1,
+          "title": "Contract Id",
+          "type": "string"
+        },
+        "file": {
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "review_position": {
+          "enum": [
+            "甲方",
+            "乙方"
+          ],
+          "title": "Review Position",
+          "type": "string"
+        },
+        "expected_contract_type": {
+          "minLength": 1,
+          "title": "Expected Contract Type",
+          "type": "string"
+        },
+        "expected_decision": {
+          "minLength": 1,
+          "title": "Expected Decision",
+          "type": "string"
+        },
+        "expected_terminal_status": {
+          "minLength": 1,
+          "title": "Expected Terminal Status",
+          "type": "string"
+        },
+        "manual_review_expected": {
+          "title": "Manual Review Expected",
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/AnnotationSource"
+        }
+      },
+      "required": [
+        "contract_id",
+        "file",
+        "review_position",
+        "expected_contract_type",
+        "expected_decision",
+        "expected_terminal_status",
+        "manual_review_expected",
+        "source"
+      ],
+      "title": "ContractAnnotation",
+      "type": "object"
+    },
+    "RelatedClauseAnnotation": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "minLength": 1,
+          "title": "Case Id",
+          "type": "string"
+        },
+        "current_clause": {
+          "$ref": "#/$defs/RelatedClauseItem"
+        },
+        "risk_type": {
+          "minLength": 1,
+          "title": "Risk Type",
+          "type": "string"
+        },
+        "playbook_check_point": {
+          "minLength": 1,
+          "title": "Playbook Check Point",
+          "type": "string"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/RelatedClauseItem"
+          },
+          "minItems": 1,
+          "title": "Candidates",
+          "type": "array"
+        },
+        "relevant_clause_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Relevant Clause Ids",
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "case_id",
+        "current_clause",
+        "risk_type",
+        "playbook_check_point",
+        "candidates",
+        "relevant_clause_ids"
+      ],
+      "title": "RelatedClauseAnnotation",
+      "type": "object"
+    },
+    "RelatedClauseItem": {
+      "additionalProperties": false,
+      "properties": {
+        "clause_id": {
+          "minLength": 1,
+          "title": "Clause Id",
+          "type": "string"
+        },
+        "clause_type": {
+          "minLength": 1,
+          "title": "Clause Type",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "key_fields": {
+          "additionalProperties": true,
+          "title": "Key Fields",
+          "type": "object"
+        }
+      },
+      "required": [
+        "clause_id",
+        "clause_type",
+        "text",
+        "key_fields"
+      ],
+      "title": "RelatedClauseItem",
+      "type": "object"
+    },
+    "RiskAnnotation": {
+      "additionalProperties": false,
+      "properties": {
+        "annotation_id": {
+          "minLength": 1,
+          "title": "Annotation Id",
+          "type": "string"
+        },
+        "contract_id": {
+          "minLength": 1,
+          "title": "Contract Id",
+          "type": "string"
+        },
+        "clause_id": {
+          "minLength": 1,
+          "title": "Clause Id",
+          "type": "string"
+        },
+        "risk_type": {
+          "minLength": 1,
+          "title": "Risk Type",
+          "type": "string"
+        },
+        "acceptable_severities": {
+          "items": {
+            "enum": [
+              "高",
+              "中",
+              "低"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Acceptable Severities",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "evidence_spans": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Evidence Spans",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "manual_review_expected": {
+          "title": "Manual Review Expected",
+          "type": "boolean"
+        },
+        "feedback_action": {
+          "enum": [
+            "accept",
+            "ignore"
+          ],
+          "title": "Feedback Action",
+          "type": "string"
+        },
+        "include_in_report": {
+          "title": "Include In Report",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "annotation_id",
+        "contract_id",
+        "clause_id",
+        "risk_type",
+        "acceptable_severities",
+        "evidence_spans",
+        "manual_review_expected",
+        "feedback_action",
+        "include_in_report"
+      ],
+      "title": "RiskAnnotation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "effect-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "contracts": {
+      "items": {
+        "$ref": "#/$defs/ContractAnnotation"
+      },
+      "minItems": 1,
+      "title": "Contracts",
+      "type": "array"
+    },
+    "clauses": {
+      "items": {
+        "$ref": "#/$defs/ClauseAnnotation"
+      },
+      "minItems": 1,
+      "title": "Clauses",
+      "type": "array"
+    },
+    "risks": {
+      "items": {
+        "$ref": "#/$defs/RiskAnnotation"
+      },
+      "minItems": 1,
+      "title": "Risks",
+      "type": "array"
+    },
+    "related_clauses": {
+      "items": {
+        "$ref": "#/$defs/RelatedClauseAnnotation"
+      },
+      "minItems": 1,
+      "title": "Related Clauses",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "contracts",
+    "clauses",
+    "risks",
+    "related_clauses"
+  ],
+  "title": "EffectAnnotationBundle",
+  "type": "object",
+  "x-source-files": [
+    "contracts.json",
+    "clauses.json",
+    "risks.json",
+    "related_clauses.json"
+  ]
+}

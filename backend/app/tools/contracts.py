@@ -1,7 +1,9 @@
+from config import settings
 from models.tool import ToolContract
 
 
 LOCAL_NO_EXTERNAL_LLM_MODES = {
+    "classify_contract_type": "deterministic_features_no_external_llm",
     "extract_key_fields": "rule_based_no_external_llm",
     "analyze_risk": "local_structured_no_external_llm",
     "generate_revision": "local_template_no_external_llm",
@@ -12,14 +14,18 @@ def runtime_calls_llm(tool_name: str) -> bool:
     contract = tool_contracts.get(tool_name)
     if contract is None or not contract.calls_llm:
         return False
-    return tool_name not in LOCAL_NO_EXTERNAL_LLM_MODES
+    return settings.llm_mode == "openai_compatible"
 
 
 def runtime_llm_mode(tool_name: str) -> str:
     contract = tool_contracts.get(tool_name)
     if contract is None or not contract.calls_llm:
         return "not_applicable"
-    return LOCAL_NO_EXTERNAL_LLM_MODES.get(tool_name, "external_llm")
+    if settings.llm_mode == "local_structured":
+        return LOCAL_NO_EXTERNAL_LLM_MODES.get(tool_name, "no_external_llm")
+    if settings.llm_mode == "openai_compatible":
+        return "openai_compatible"
+    return f"invalid_llm_mode:{settings.llm_mode}"
 
 
 tool_contracts = {
@@ -29,6 +35,18 @@ tool_contracts = {
         output_schema={"paragraphs": "list", "tables": "list", "page_map": "list"},
         calls_llm=False,
         description="解析 DOCX/PDF 合同正文，输出可回溯文档结构。",
+    ),
+    "classify_contract_type": ToolContract(
+        name="classify_contract_type",
+        input_schema={"document": "ContractDocument"},
+        output_schema={
+            "contract_type": "NDA|PROCUREMENT|SERVICE|EMPLOYMENT|UNKNOWN",
+            "confidence": "float",
+            "evidence": "list[str]",
+            "decision": "SUPPORTED|UNSUPPORTED_CONTRACT_TYPE|NEED_MANUAL_REVIEW",
+        },
+        calls_llm=True,
+        description="使用确定性标题、角色和保密义务特征识别 NDA；低置信度时保留人工复核入口。",
     ),
     "extract_clauses": ToolContract(
         name="extract_clauses",
@@ -60,10 +78,11 @@ tool_contracts = {
             "risk_type": "str",
             "playbook_check_point": "str",
             "limit": "int",
+            "embedding_cache": "dict optional (runtime only)",
         },
         output_schema={"related_clauses": "list"},
         calls_llm=False,
-        description="在当前合同条款内执行轻量向量召回和 rerank，检索与风险判断相关的条款。",
+        description="按配置使用定长 Embedding 在当前合同条款内执行余弦召回和规则 rerank。",
     ),
     "retrieve_memory": ToolContract(
         name="retrieve_memory",
@@ -89,9 +108,9 @@ tool_contracts = {
     "verify_evidence": ToolContract(
         name="verify_evidence",
         input_schema={"finding": "dict", "clauses": "list", "matched_rule": "dict"},
-        output_schema={"citation_status": "dict"},
+        output_schema={"citation_status": "dict including PDF source_location when available"},
         calls_llm=False,
-        description="校验风险证据是否可回到当前合同指定条款原文，并确认风险类型与命中规则一致。",
+        description="校验风险证据是否可回到当前合同指定条款原文；PDF 证据同时定位页码、文本块和坐标，并确认风险类型与命中规则一致。",
     ),
     "generate_revision": ToolContract(
         name="generate_revision",

@@ -15,3 +15,11 @@ The snapshot covers:
 All POST examples explicitly record their JSON body, multipart fields or empty-body behavior. `response_body_summary` is a normalized subset of the observed response; `required_keys` records the fields that must remain present when the transport is migrated.
 
 The SSE baseline client stops reading after the terminal event. The current server advertises keep-alive without a content length, so waiting for connection EOF can time out. This is recorded as current behavior, not fixed as part of task 1.
+
+The task 2 FastAPI migration keeps this file unchanged as the pre-migration reference. `backend/tests/test_api_fastapi.py` reads it directly and verifies the migrated success fields, status codes, tool contracts, SSE event structure and representative error payloads.
+
+Run the FastAPI contract tests from the repository root:
+
+```powershell
+python -m unittest backend.tests.test_api_fastapi
+```

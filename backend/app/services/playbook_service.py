@@ -2,7 +2,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-from models.playbook import PlaybookRule
+from models.playbook import PlaybookRule, SUPPORTED_REVIEW_POSITIONS
 
 
 PLAYBOOK_VERSION = "nda-v1"
@@ -21,15 +21,17 @@ def retrieve_playbook_rules(tool_input: dict) -> list[dict]:
         raise ValueError("clause_type is required")
     if not review_position:
         raise ValueError("review_position is required")
+    if review_position not in SUPPORTED_REVIEW_POSITIONS:
+        raise ValueError("review_position must be 甲方 or 乙方")
     if not isinstance(key_fields, dict):
         raise ValueError("key_fields must be a dict")
 
     matched_rules = []
     for rule in load_playbook_rules():
-        if not rule.matches(contract_type, clause_type, review_position):
+        if not rule.matches(contract_type, clause_type):
             continue
         match_score, matched_key_fields = _score_rule(rule, key_fields)
-        payload = rule.to_dict()
+        payload = rule.to_resolved_dict(review_position)
         payload["playbook_version"] = PLAYBOOK_VERSION
         payload["match_score"] = match_score
         payload["matched_key_fields"] = matched_key_fields
@@ -51,6 +53,9 @@ def load_playbook_rules() -> tuple[PlaybookRule, ...]:
         raise ValueError("Playbook version mismatch")
     if len(rules) != 8:
         raise ValueError("NDA Playbook must contain 8 first-version rules")
+    for rule in rules:
+        for review_position in SUPPORTED_REVIEW_POSITIONS:
+            rule.resolve_position(review_position)
     return rules
 
 

@@ -19,6 +19,7 @@ from tools.registry import tool_contracts_payload, tool_registry
 
 EXPECTED_TOOL_NAMES = {
     "parse_document",
+    "classify_contract_type",
     "extract_clauses",
     "extract_key_fields",
     "retrieve_playbook_rules",
@@ -39,6 +40,7 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertIn("START", statuses)
         self.assertIn("UPLOAD_RECEIVED", statuses)
         self.assertIn("DOCUMENT_PARSED", statuses)
+        self.assertIn("CONTRACT_TYPE_CLASSIFIED", statuses)
         self.assertIn("CLAUSES_STRUCTURED", statuses)
         self.assertIn("PLAYBOOK_RETRIEVED", statuses)
         self.assertIn("CONTEXT_BUILT", statuses)
@@ -52,6 +54,7 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertIn("LLM_OUTPUT_INVALID", statuses)
         self.assertIn("EVIDENCE_MISSING", statuses)
         self.assertIn("NEED_MANUAL_REVIEW", statuses)
+        self.assertIn("UNSUPPORTED_CONTRACT_TYPE", statuses)
 
     def test_tool_registry_and_contracts_are_complete(self):
         self.assertEqual(EXPECTED_TOOL_NAMES, set(tool_registry))
@@ -85,8 +88,8 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertEqual(payload["status"], "EVIDENCE_VERIFIED")
         self.assertGreaterEqual(len(payload["events"]), 8)
         self.assertEqual(
-            [log["tool_name"] for log in payload["logs"][:2]],
-            ["parse_document", "extract_clauses"],
+            [log["tool_name"] for log in payload["logs"][:3]],
+            ["parse_document", "classify_contract_type", "extract_clauses"],
         )
         self.assertTrue(all(log["status"] == "success" for log in payload["logs"]))
         self.assertEqual(payload["events"][-1]["status"], "EVIDENCE_VERIFIED")
@@ -96,6 +99,7 @@ class ReviewOrchestratorTest(unittest.TestCase):
                 "START",
                 "UPLOAD_RECEIVED",
                 "DOCUMENT_PARSED",
+                "CONTRACT_TYPE_CLASSIFIED",
                 "CLAUSES_STRUCTURED",
                 "PLAYBOOK_RETRIEVED",
                 "CONTEXT_BUILT",

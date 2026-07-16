@@ -1,4 +1,11 @@
 from config import settings
+from models.risk import (
+    VALID_REVIEW_POSITIONS,
+    VALID_REVIEW_STATUSES,
+    VALID_RISK_TYPES,
+    VALID_SEVERITIES,
+)
+from providers.llm_provider import LLMCallMetadata, LLMRequest, create_llm_provider
 
 
 BROAD_DEFINITION_TERMS = ("任何", "全部", "所有", "一切", "商业信息", "技术资料", "合作资料", "business information")
@@ -11,31 +18,188 @@ RETURN_TERMS = ("返还", "销毁", "删除", "return", "destroy", "delete")
 LIABILITY_RISK_TERMS = ("不限", "无限", "全部损失", "间接损失", "unlimited", "indirect damages")
 PENALTY_TERMS = ("违约金", "penalty", "liquidated damages")
 
+RISK_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "risk_type",
+        "severity",
+        "confidence",
+        "risk_reason",
+        "clause_id",
+        "evidence_text",
+        "matched_rule_ids",
+        "review_position",
+        "risk_focus",
+        "revision_suggestion",
+        "review_status",
+    ],
+    "properties": {
+        "risk_type": {"enum": sorted(VALID_RISK_TYPES)},
+        "severity": {"enum": sorted(VALID_SEVERITIES)},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "risk_reason": {"type": "string", "minLength": 1},
+        "clause_id": {"type": "string", "minLength": 1},
+        "evidence_text": {"type": "string"},
+        "matched_rule_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1},
+        },
+        "review_position": {"enum": sorted(VALID_REVIEW_POSITIONS)},
+        "risk_focus": {"type": "string", "minLength": 1},
+        "revision_suggestion": {"type": "string", "minLength": 1},
+        "review_status": {"enum": sorted(VALID_REVIEW_STATUSES)},
+    },
+}
+REVISION_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["revision_suggestion"],
+    "properties": {"revision_suggestion": {"type": "string"}},
+}
+KEY_FIELD_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        field_name: {"type": "array", "items": {"type": "string"}}
+        for field_name in (
+            "obligation_subject",
+            "right_holder",
+            "confidentiality_period",
+            "permitted_disclosure_targets",
+            "use_purpose",
+            "liability_scope",
+            "breach_liability",
+        )
+    },
+}
+CONTRACT_TYPE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["contract_type", "confidence", "evidence", "decision"],
+    "properties": {
+        "contract_type": {"enum": ["NDA", "PROCUREMENT", "SERVICE", "EMPLOYMENT", "UNKNOWN"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1},
+        },
+        "decision": {
+            "enum": ["SUPPORTED", "UNSUPPORTED_CONTRACT_TYPE", "NEED_MANUAL_REVIEW"]
+        },
+    },
+}
 
-def generate_structured_risk(review_context: dict, attempt: int = 1) -> dict:
-    if settings.llm_mode != "local_structured":
-        raise ValueError(f"unsupported REVIEW_AGENT_LLM_MODE: {settings.llm_mode}")
 
+def generate_structured_risk(
+    review_context: dict,
+    attempt: int = 1,
+    llm_calls: list[LLMCallMetadata] | None = None,
+) -> dict:
     debug_outputs = review_context.get("debug_llm_outputs")
     if isinstance(debug_outputs, list) and attempt <= len(debug_outputs):
-        return dict(debug_outputs[attempt - 1])
+        local_output = dict(debug_outputs[attempt - 1])
+    else:
+        local_output = _local_structured_risk(review_context)
+
+    return _generate_structured(
+        operation="analyze_risk",
+        input_payload=review_context,
+        output_schema=RISK_OUTPUT_SCHEMA,
+        local_output=local_output,
+        llm_calls=llm_calls,
+    )
+
+
+def generate_structured_revision(
+    finding: dict,
+    preferred_position: str,
+    local_revision: str,
+    llm_calls: list[LLMCallMetadata] | None = None,
+) -> dict:
+    return _generate_structured(
+        operation="generate_revision",
+        input_payload={
+            "finding": finding,
+            "preferred_position": preferred_position,
+        },
+        output_schema=REVISION_OUTPUT_SCHEMA,
+        local_output={"revision_suggestion": local_revision},
+        llm_calls=llm_calls,
+    )
+
+
+def generate_structured_key_fields(
+    clause: dict,
+    local_output: dict,
+    llm_calls: list[LLMCallMetadata] | None = None,
+) -> dict:
+    return _generate_structured(
+        operation="extract_key_fields",
+        input_payload={"clause": clause},
+        output_schema=KEY_FIELD_OUTPUT_SCHEMA,
+        local_output=local_output,
+        llm_calls=llm_calls,
+    )
+
+
+def generate_structured_contract_type(
+    document_texts: list[str],
+    local_output: dict,
+    llm_calls: list[LLMCallMetadata] | None = None,
+) -> dict:
+    return _generate_structured(
+        operation="classify_contract_type",
+        input_payload={"document_texts": document_texts},
+        output_schema=CONTRACT_TYPE_OUTPUT_SCHEMA,
+        local_output=local_output,
+        llm_calls=llm_calls,
+    )
+
+
+def _generate_structured(
+    operation: str,
+    input_payload: dict,
+    output_schema: dict,
+    local_output: dict,
+    llm_calls: list[LLMCallMetadata] | None,
+) -> dict:
+    provider = create_llm_provider(settings)
+    response = provider.generate_structured(
+        LLMRequest(
+            operation=operation,
+            input_payload=input_payload,
+            output_schema=output_schema,
+            local_output=local_output,
+        ),
+        call_records=llm_calls,
+    )
+    return response.output
+
+
+def _local_structured_risk(review_context: dict) -> dict:
 
     clause = review_context.get("current_clause") or {}
     rule = review_context.get("matched_rule") or {}
+    review_position, position_config = _position_config(review_context, rule)
     risk_type = str(rule.get("risk_type", ""))
     clause_text = str(clause.get("text", ""))
     evidence_text = _detect_evidence(risk_type, clause_text)
-    review_status = _review_status(rule, evidence_text)
+    review_status = _review_status(position_config, evidence_text)
 
     return {
         "risk_type": risk_type,
-        "severity": str(rule.get("severity_default", "中")),
+        "severity": str(position_config["severity_default"]),
         "confidence": _confidence(review_status, evidence_text),
-        "risk_reason": _risk_reason(rule, evidence_text),
+        "risk_reason": _risk_reason(rule, evidence_text, review_position, position_config),
         "clause_id": str(clause.get("clause_id", "")),
         "evidence_text": evidence_text,
         "matched_rule_ids": [str(rule.get("rule_id", ""))],
-        "revision_suggestion": str(rule.get("revision_template", "")),
+        "review_position": review_position,
+        "risk_focus": str(position_config["risk_focus"]),
+        "revision_suggestion": str(position_config["revision_template"]),
         "review_status": review_status,
     }
 
@@ -62,10 +226,10 @@ def _detect_evidence(risk_type: str, clause_text: str) -> str:
     return ""
 
 
-def _review_status(rule: dict, evidence_text: str) -> str:
+def _review_status(position_config: dict, evidence_text: str) -> str:
     if not evidence_text:
         return "NO_RISK"
-    if rule.get("severity_default") == "高":
+    if position_config.get("severity_default") == "高":
         return "NEED_MANUAL_REVIEW"
     return "CONFIRMED_RISK"
 
@@ -76,10 +240,35 @@ def _confidence(review_status: str, evidence_text: str) -> float:
     return 0.86 if len(evidence_text) >= 6 else 0.62
 
 
-def _risk_reason(rule: dict, evidence_text: str) -> str:
+def _risk_reason(
+    rule: dict,
+    evidence_text: str,
+    review_position: str,
+    position_config: dict,
+) -> str:
+    position_basis = f"{review_position}立场风险重点：{position_config.get('risk_focus', '')}"
     if not evidence_text:
-        return f"未在当前条款中发现触发“{rule.get('risk_type', '')}”的明确证据。"
-    return f"证据文本“{evidence_text}”命中 Playbook 检查点：{rule.get('check_point', '')}"
+        return f"未在当前条款中发现触发“{rule.get('risk_type', '')}”的明确证据；{position_basis}。"
+    return (
+        f"证据文本“{evidence_text}”命中 Playbook 检查点：{rule.get('check_point', '')}；"
+        f"{position_basis}。"
+    )
+
+
+def _position_config(review_context: dict, rule: dict) -> tuple[str, dict]:
+    review_position = str(review_context.get("review_position", "")).strip()
+    if not review_position:
+        raise ValueError("review_context review_position is required")
+    if str(rule.get("review_position", "")).strip() != review_position:
+        raise ValueError("matched rule review_position does not match review context")
+
+    position_config = rule.get("position_config")
+    if not isinstance(position_config, dict):
+        raise ValueError("matched rule position_config is required")
+    for field_name in ("severity_default", "risk_focus", "revision_template"):
+        if not str(position_config.get(field_name, "")).strip():
+            raise ValueError(f"matched rule position_config.{field_name} is required")
+    return review_position, position_config
 
 
 def _contains_any(text: str, terms: tuple[str, ...]) -> bool:

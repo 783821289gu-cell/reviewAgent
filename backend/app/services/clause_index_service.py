@@ -1,5 +1,6 @@
 from models.retrieval import RelatedClause
-from services.embedding_service import cosine_similarity, embed_text
+from providers.embedding_provider import embedding_call_records_from_tool_input
+from services.embedding_service import cosine_similarity, embed_texts
 from services.rerank_service import rerank_candidates
 
 
@@ -28,40 +29,45 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
     if limit <= 0:
         return []
 
+    embedding_cache = tool_input.get("embedding_cache")
+    if embedding_cache is None:
+        embedding_cache = {}
+    if not isinstance(embedding_cache, dict):
+        raise ValueError("embedding_cache must be a dict")
+
     current_clause_id = str(current_clause.get("clause_id", ""))
     query_context = {
         "current_clause_id": current_clause_id,
         "current_clause_type": current_clause.get("clause_type", ""),
         "risk_type": risk_type,
         "playbook_check_point": playbook_check_point,
+        "embedding_query_components": [
+            "current_clause_text",
+            "current_clause_type",
+            "risk_type",
+            "playbook_check_point",
+            "current_clause_key_fields",
+        ],
     }
-    query_vector = embed_text(
-        " ".join(
-            [
-                str(current_clause.get("text", "")),
-                str(current_clause.get("clause_type", "")),
-                risk_type,
-                playbook_check_point,
-                _key_fields_text(current_clause.get("key_fields") or {}),
-            ]
-        )
+    candidate_clauses = [
+        clause
+        for clause in clauses
+        if isinstance(clause, dict)
+        and str(clause.get("clause_id", "")) != current_clause_id
+    ]
+    texts = [
+        build_retrieval_query(current_clause, risk_type, playbook_check_point),
+        *[build_clause_embedding_text(clause) for clause in candidate_clauses],
+    ]
+    embedding_batch = embed_texts(
+        texts,
+        cache=embedding_cache,
+        call_records=embedding_call_records_from_tool_input(tool_input),
     )
+    query_vector = embedding_batch.vectors[0]
 
     candidates = []
-    for clause in clauses:
-        if not isinstance(clause, dict):
-            continue
-        if str(clause.get("clause_id", "")) == current_clause_id:
-            continue
-        candidate_vector = embed_text(
-            " ".join(
-                [
-                    str(clause.get("text", "")),
-                    str(clause.get("clause_type", "")),
-                    _key_fields_text(clause.get("key_fields") or {}),
-                ]
-            )
-        )
+    for clause, candidate_vector in zip(candidate_clauses, embedding_batch.vectors[1:]):
         candidates.append(
             {
                 "clause": clause,
@@ -89,6 +95,9 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
                 key_fields=clause.get("key_fields") or {},
                 source_location=clause.get("source_location") or {},
                 vector_similarity=round(float(item["vector_similarity"]), 4),
+                embedding_mode=embedding_batch.mode,
+                embedding_model=embedding_batch.model,
+                vector_dimension=embedding_batch.vector_dimension,
                 rerank_score=float(item["rerank_score"]),
                 rerank_factors=item["rerank_factors"],
                 retrieval_scope="current_contract",
@@ -96,6 +105,32 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
             ).to_dict()
         )
     return related_clauses
+
+
+def build_retrieval_query(
+    current_clause: dict,
+    risk_type: str,
+    playbook_check_point: str,
+) -> str:
+    return " ".join(
+        [
+            str(current_clause.get("text", "")),
+            str(current_clause.get("clause_type", "")),
+            str(risk_type),
+            str(playbook_check_point),
+            _key_fields_text(current_clause.get("key_fields") or {}),
+        ]
+    )
+
+
+def build_clause_embedding_text(clause: dict) -> str:
+    return " ".join(
+        [
+            str(clause.get("text", "")),
+            str(clause.get("clause_type", "")),
+            _key_fields_text(clause.get("key_fields") or {}),
+        ]
+    )
 
 
 def _key_fields_text(key_fields: dict) -> str:

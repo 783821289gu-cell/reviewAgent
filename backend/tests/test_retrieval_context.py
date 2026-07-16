@@ -48,6 +48,19 @@ class RetrievalContextTest(unittest.TestCase):
         self.assertTrue(all(item["retrieval_scope"] == "current_contract" for item in related_clauses))
         self.assertEqual(related_clauses[0]["query_context"]["current_clause_id"], "CL-002")
         self.assertIn("playbook_check_point", related_clauses[0]["query_context"])
+        self.assertEqual(related_clauses[0]["embedding_mode"], "local_sparse")
+        self.assertEqual(related_clauses[0]["embedding_model"], "local_sparse_hash_v1")
+        self.assertEqual(related_clauses[0]["vector_dimension"], 256)
+        self.assertEqual(
+            related_clauses[0]["query_context"]["embedding_query_components"],
+            [
+                "current_clause_text",
+                "current_clause_type",
+                "risk_type",
+                "playbook_check_point",
+                "current_clause_key_fields",
+            ],
+        )
         for factor_name in [
             "vector_similarity",
             "clause_type_relatedness",
@@ -79,6 +92,7 @@ class RetrievalContextTest(unittest.TestCase):
         self.assertTrue(related_clauses)
         self.assertEqual(logs[0].status, "success")
         self.assertIn("rerank_score", logs[0].output_summary)
+        self.assertEqual(logs[0].token_cost_summary, "local_sparse_no_external_embedding")
 
     def test_memory_retrieval_filters_provided_items(self):
         memories = retrieve_memory(
@@ -137,6 +151,22 @@ class RetrievalContextTest(unittest.TestCase):
                 "rule_id": "NDA-R004",
                 "risk_type": "使用目的或使用限制不清",
                 "check_point": "检查是否明确使用目的。",
+                "review_position": "甲方",
+                "severity_default": "高",
+                "risk_focus": "限制乙方超范围使用甲方保密信息。",
+                "revision_template": "限定乙方使用目的。",
+                "positions": {
+                    "甲方": {
+                        "severity_default": "高",
+                        "risk_focus": "限制乙方超范围使用甲方保密信息。",
+                        "revision_template": "限定乙方使用目的。",
+                    }
+                },
+                "position_config": {
+                    "severity_default": "高",
+                    "risk_focus": "限制乙方超范围使用甲方保密信息。",
+                    "revision_template": "限定乙方使用目的。",
+                },
             },
             related_clauses=build_clause_payloads(),
             related_memory=[{"memory_id": "MEM-001", "note": "x" * 2000}],
@@ -149,6 +179,22 @@ class RetrievalContextTest(unittest.TestCase):
         self.assertTrue(context["evidence_constraints"]["must_bind_to_original_clause"])
         self.assertFalse(context["formal_risk_generated"])
         self.assertIn("reduced_memory", context["reduction_trace"])
+
+    def test_context_builder_rejects_rule_without_resolved_position_config(self):
+        with self.assertRaisesRegex(ValueError, "positions are required"):
+            build_review_context(
+                contract_type="NDA",
+                review_position="甲方",
+                current_clause=build_clause_payloads()[0],
+                matched_rule={
+                    "rule_id": "NDA-R001",
+                    "risk_type": "保密信息范围过宽",
+                    "check_point": "检查定义范围。",
+                    "review_position": "甲方",
+                },
+                related_clauses=[],
+                related_memory=[],
+            )
 
 
 def build_clause_payloads() -> list[dict]:

@@ -1,0 +1,84 @@
+{
+  "annotation_version": "effect-v1",
+  "source_policy": "Only synthetic project fixtures are included; no customer contracts or transaction documents are used.",
+  "items": [
+    {
+      "contract_id": "nda-01",
+      "file": "nda_sample_01.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "EVIDENCE_VERIFIED",
+      "manual_review_expected": false,
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 样本，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-02",
+      "file": "nda_sample_02.txt",
+      "review_position": "乙方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 样本，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-03",
+      "file": "nda_sample_03.txt",
+      "review_position": "乙方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 样本，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "procurement-01",
+      "file": "contract_type/procurement_zh.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "PROCUREMENT",
+      "expected_decision": "UNSUPPORTED_CONTRACT_TYPE",
+      "expected_terminal_status": "UNSUPPORTED_CONTRACT_TYPE",
+      "manual_review_expected": false,
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的中文采购合同类型测试夹具。"
+      }
+    },
+    {
+      "contract_id": "service-01",
+      "file": "contract_type/service_en.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "SERVICE",
+      "expected_decision": "UNSUPPORTED_CONTRACT_TYPE",
+      "expected_terminal_status": "UNSUPPORTED_CONTRACT_TYPE",
+      "manual_review_expected": false,
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的英文服务合同类型测试夹具。"
+      }
+    },
+    {
+      "contract_id": "ambiguous-01",
+      "file": "contract_type/ambiguous_zh.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "UNKNOWN",
+      "expected_decision": "NEED_MANUAL_REVIEW",
+      "expected_terminal_status": "NEED_MANUAL_REVIEW",
+      "manual_review_expected": true,
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的低信息量合同类型测试夹具。"
+      }
+    }
+  ]
+}

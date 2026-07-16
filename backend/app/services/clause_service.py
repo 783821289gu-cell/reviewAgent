@@ -1,6 +1,13 @@
 import re
 
 from models.contract import Clause, ContractDocument
+from providers.llm_provider import (
+    LLMOutputInvalidError,
+    LLMProviderError,
+    llm_call_records_from_tool_input,
+    mark_latest_llm_call_schema_error,
+)
+from services.llm_service import generate_structured_key_fields
 
 
 CLAUSE_START_PATTERN = re.compile(
@@ -45,6 +52,15 @@ KEY_FIELD_RULES = {
     "breach_liability": ("违约", "违约金", "赔偿", "breach", "damages", "penalty"),
 }
 
+EXPECTED_KEY_FIELDS_BY_CLAUSE_TYPE = {
+    "定义": ("right_holder",),
+    "保密义务": ("obligation_subject",),
+    "使用限制": ("use_purpose",),
+    "允许披露": ("permitted_disclosure_targets",),
+    "期限": ("confidentiality_period",),
+    "违约责任": ("liability_scope", "breach_liability"),
+}
+
 PERIOD_PATTERN = re.compile(r"(永久|无限期|\d+\s*(?:年|个月|years?|months?))", re.I)
 
 
@@ -64,13 +80,7 @@ def extract_clauses(tool_input: dict) -> list[Clause]:
             continue
         for segment_index, segment in enumerate(_split_inline_clauses(text), start=1):
             clause_id = f"CL-{clause_index:03d}"
-            source_location = {
-                "start_block_id": group[0].block_id,
-                "end_block_id": group[-1].block_id,
-                "start_order": group[0].order,
-                "end_order": group[-1].order,
-                "segment_index": segment_index,
-            }
+            source_location = _clause_source_location(group, segment_index)
             clauses.append(
                 Clause(
                     clause_id=clause_id,
@@ -88,14 +98,50 @@ def extract_clauses(tool_input: dict) -> list[Clause]:
     return clauses
 
 
+def _clause_source_location(group, segment_index: int) -> dict:
+    source_location = {
+        "start_block_id": group[0].block_id,
+        "end_block_id": group[-1].block_id,
+        "start_order": group[0].order,
+        "end_order": group[-1].order,
+        "segment_index": segment_index,
+    }
+    pdf_blocks = []
+    for block in group:
+        page_number = block.source_location.get("page_number")
+        bbox = block.source_location.get("bbox")
+        if page_number is None or bbox is None:
+            continue
+        pdf_blocks.append(
+            {
+                "block_id": block.block_id,
+                "page_number": page_number,
+                "bbox": list(bbox),
+                "text": block.text,
+            }
+        )
+    if pdf_blocks:
+        source_location.update(
+            {
+                "start_page": pdf_blocks[0]["page_number"],
+                "end_page": pdf_blocks[-1]["page_number"],
+                "pdf_blocks": pdf_blocks,
+            }
+        )
+    return source_location
+
+
 def extract_key_fields(tool_input: dict) -> dict:
     clause = tool_input.get("clause")
     if isinstance(clause, dict):
         text = str(clause.get("text", ""))
+        clause_payload = dict(clause)
     elif isinstance(clause, Clause):
         text = clause.text
+        clause_payload = clause.to_dict()
     else:
         raise ValueError("extract_key_fields 输入无效。")
+    llm_calls = llm_call_records_from_tool_input(tool_input)
 
     lower_text = text.lower()
     key_fields = {
@@ -113,7 +159,58 @@ def extract_key_fields(tool_input: dict) -> dict:
         key_fields[field_name] = matches
 
     key_fields["confidentiality_period"] = PERIOD_PATTERN.findall(text)
-    return key_fields
+    if not _key_fields_need_supplement(clause_payload, key_fields):
+        return key_fields
+
+    last_error = None
+    for _attempt in (1, 2):
+        try:
+            supplement = generate_structured_key_fields(
+                clause_payload,
+                {},
+                llm_calls=llm_calls,
+            )
+            validated = _validate_key_field_supplement(supplement)
+            return _merge_key_fields(key_fields, validated)
+        except LLMProviderError as exc:
+            last_error = exc
+            if not exc.retryable:
+                break
+        except Exception as exc:
+            last_error = exc
+            mark_latest_llm_call_schema_error(llm_calls)
+    raise LLMOutputInvalidError(f"key field output invalid after retry: {last_error}")
+
+
+def _validate_key_field_supplement(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("key field output must be a dict")
+    unknown_fields = set(payload) - set(KEY_FIELD_RULES) - {"confidentiality_period"}
+    if unknown_fields:
+        raise ValueError(f"unknown key fields: {', '.join(sorted(unknown_fields))}")
+    validated = {}
+    for field_name, values in payload.items():
+        if not isinstance(values, list) or not all(
+            isinstance(value, str) and value.strip() for value in values
+        ):
+            raise ValueError(f"key field {field_name} must be a list of non-empty strings")
+        validated[field_name] = [value.strip() for value in values]
+    return validated
+
+
+def _key_fields_need_supplement(clause: dict, key_fields: dict) -> bool:
+    clause_type = str(clause.get("clause_type", "")).strip()
+    expected_fields = EXPECTED_KEY_FIELDS_BY_CLAUSE_TYPE.get(clause_type)
+    if expected_fields is None:
+        return not clause_type and not any(key_fields.values())
+    return any(not key_fields[field_name] for field_name in expected_fields)
+
+
+def _merge_key_fields(base: dict, supplement: dict) -> dict:
+    merged = {field_name: list(values) for field_name, values in base.items()}
+    for field_name, values in supplement.items():
+        merged[field_name] = list(dict.fromkeys([*merged[field_name], *values]))
+    return merged
 
 
 def attach_key_fields(clauses: list[Clause], key_fields_by_clause: dict[str, dict]) -> list[Clause]:

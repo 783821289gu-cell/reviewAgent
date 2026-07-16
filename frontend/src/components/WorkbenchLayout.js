@@ -44,6 +44,8 @@ export function WorkbenchLayout(root, props) {
         </section>
 
         <section class="result-pane">
+          <h2>合同类型</h2>
+          <div data-contract-classification></div>
           <h2>流式进度</h2>
           <div data-review-progress></div>
           <h2 class="secondary-heading">命中规则</h2>
@@ -71,6 +73,10 @@ export function WorkbenchLayout(root, props) {
   root.querySelector("[data-contract-name]").textContent = task?.file_name || "未创建任务";
   root.querySelector("[data-review-status]").textContent = task?.status || "START";
   root.querySelector("[data-playbook-version]").textContent = playbookVersion(task);
+  renderContractClassification(
+    root.querySelector("[data-contract-classification]"),
+    task?.contract_classification || null,
+  );
 
   ReportExport(root.querySelector("[data-report-export]"), {
     task,
@@ -120,10 +126,57 @@ export function WorkbenchLayout(root, props) {
   EvaluationPanel(root.querySelector("[data-evaluation-panel]"), {
     evaluation: props.evaluation,
     onRunEvaluation: props.onRunEvaluation,
+    onRunEffectEvaluation: props.onRunEffectEvaluation,
+    onSelectView: props.onSelectEvaluationView,
   });
   ExecutionLog(root.querySelector("[data-execution-log]"), {
     task,
   });
+}
+
+function renderContractClassification(root, classification) {
+  root.textContent = "";
+  if (!classification) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "等待合同类型识别。";
+    root.appendChild(empty);
+    return;
+  }
+
+  const summary = document.createElement("dl");
+  summary.className = "task-summary";
+  appendClassificationField(summary, "类型", classification.contract_type || "UNKNOWN");
+  appendClassificationField(summary, "置信度", formatConfidence(classification.confidence));
+  appendClassificationField(summary, "判定", classificationDecisionLabel(classification.decision));
+  appendClassificationField(summary, "识别依据", (classification.evidence || []).join("；") || "无");
+  root.appendChild(summary);
+}
+
+function appendClassificationField(root, label, value) {
+  const term = document.createElement("dt");
+  term.textContent = label;
+  const detail = document.createElement("dd");
+  detail.textContent = value;
+  root.append(term, detail);
+}
+
+function formatConfidence(confidence) {
+  const value = Number(confidence);
+  return Number.isFinite(value) ? `${Math.round(value * 100)}%` : "未知";
+}
+
+function classificationDecisionLabel(decision) {
+  if (decision === "SUPPORTED") {
+    return "支持审查";
+  }
+  if (decision === "UNSUPPORTED_CONTRACT_TYPE") {
+    return "不支持该合同类型";
+  }
+  if (decision === "NEED_MANUAL_REVIEW") {
+    return "需要人工复核";
+  }
+  return decision || "未知";
 }
 
 function playbookVersion(task) {

@@ -12,7 +12,8 @@ class StepLog:
     output_summary: str
     token_cost_summary: str
     error_message: str
+    trace_id: str = ""
+    step_id: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
-

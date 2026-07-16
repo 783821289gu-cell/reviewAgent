@@ -1,6 +1,7 @@
 from uuid import uuid4
 
-from db.sqlite import connect
+from db.repositories.memory_repository import MemoryRepository
+from config import settings
 from models.feedback import build_human_feedback
 from models.memory import MemoryItem, memory_item_from_row
 
@@ -64,54 +65,11 @@ def write_memory(tool_input: dict) -> dict:
         created_at=feedback.created_at,
     )
 
-    connection = connect(tool_input.get("db_path"))
-    try:
-        connection.execute(
-            """
-            INSERT INTO memory_items (
-                memory_id,
-                memory_type,
-                contract_type,
-                clause_type,
-                risk_type,
-                review_position,
-                user_action,
-                original_severity,
-                final_severity,
-                original_suggestion,
-                final_suggestion,
-                ignore_reason,
-                source_finding_id,
-                source_clause_id,
-                include_in_report,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                item.memory_id,
-                item.memory_type,
-                item.contract_type,
-                item.clause_type,
-                item.risk_type,
-                item.review_position,
-                item.user_action,
-                item.original_severity,
-                item.final_severity,
-                item.original_suggestion,
-                item.final_suggestion,
-                item.ignore_reason,
-                item.source_finding_id,
-                item.source_clause_id,
-                1 if item.include_in_report else 0,
-                item.created_at,
-            ),
-        )
-        connection.commit()
-    finally:
-        connection.close()
-
-    return item.to_dict()
+    repository = MemoryRepository(str(tool_input.get("db_path") or settings.memory_db_path))
+    return repository.save(
+        item.to_dict(),
+        idempotency_key=str(tool_input.get("idempotency_key") or "") or None,
+    )
 
 
 def _filter_provided_memory_items(
@@ -156,23 +114,14 @@ def _query_sqlite_memory(
     limit: int,
     db_path: str | None = None,
 ) -> list[dict]:
-    connection = connect(db_path)
-    try:
-        rows = connection.execute(
-            """
-            SELECT *
-            FROM memory_items
-            WHERE contract_type = ?
-              AND clause_type = ?
-              AND risk_type = ?
-              AND review_position IN ('', ?)
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            (contract_type, clause_type, risk_type, review_position, limit),
-        ).fetchall()
-    finally:
-        connection.close()
+    repository = MemoryRepository(str(db_path or settings.memory_db_path))
+    rows = repository.find(
+        contract_type=contract_type,
+        clause_type=clause_type,
+        risk_type=risk_type,
+        review_position=review_position,
+        limit=limit,
+    )
 
     payloads = []
     for row in rows:

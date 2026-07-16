@@ -70,7 +70,9 @@ function renderRuleCard(rule, activeRuleIds) {
 
   appendField(fields, "检查点", rule.check_point);
   appendField(fields, "触发标准", rule.risk_criteria);
-  appendField(fields, "修改模板", rule.revision_template);
+  appendField(fields, "审查立场", rule.review_position);
+  appendField(fields, "立场风险重点", rule.risk_focus);
+  appendField(fields, "立场修改模板", rule.revision_template);
   appendField(fields, "匹配字段", formatMatchedFields(rule.matched_key_fields));
 
   card.appendChild(fields);

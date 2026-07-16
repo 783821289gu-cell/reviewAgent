@@ -32,6 +32,7 @@ export function UploadPanel(root, props) {
       <p class="form-message" id="upload-message">
         ${props.disabled ? "请先启动后端服务。" : "请选择 DOCX/PDF 合同文件和审查立场。"}
       </p>
+      <p class="empty-state">PDF 仅支持可复制文本的文件；扫描件当前未启用 OCR。</p>
       <p class="error-message" id="upload-error" hidden></p>
     </section>
   `;
@@ -58,12 +59,14 @@ export function UploadPanel(root, props) {
     const supportedFile = hasFile && /\.(docx|pdf)$/i.test(file.name);
     startButton.disabled = isDisabled || !(supportedFile && hasRole);
 
-    if (props.loading) {
+    if (props.disabled) {
+      message.textContent = "请先启动后端服务。";
+    } else if (props.loading) {
       message.textContent = "正在上传并解析合同。";
     } else if (hasFile && !supportedFile) {
       message.textContent = "仅支持 .docx 或 .pdf 文件。";
     } else if (supportedFile && hasRole) {
-      message.textContent = "入口已就绪。任务 2 会解析合同并生成条款结构。";
+      message.textContent = "入口已就绪，可以上传并解析合同。";
     } else {
       message.textContent = "请选择 DOCX/PDF 合同文件和审查立场。";
     }
