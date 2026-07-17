@@ -41,3 +41,4 @@
 6. 流程评测实际运行 10 个样本，10 个跑通；效果评测实际运行 6 个样本、14 项指标，状态仍为 `completed_with_failures`。
 7. `related_clause_recall_at_k` 仍为 `0.3333`，阈值 `0.8`，通过 1 个、失败 2 个，没有改写为达标。
 8. 最新 E2E 运行目录实际包含独立的 `review-agent.sqlite3`、`uploads`、`reports` 和 `evaluation`，且均位于 Git 忽略的 `test-results/e2e/run-*` 下。
+9. 审查修复提交 `historical-commit` 已成功推送到 `origin/main`；提交包含行为范围以及 134 项后端测试、8 项 Playwright 测试的验证结果。
