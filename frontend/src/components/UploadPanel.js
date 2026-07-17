@@ -1,39 +1,54 @@
+import { icon } from "./Icon.js";
+
 export function UploadPanel(root, props) {
   const isDisabled = props.disabled || props.loading;
 
   root.innerHTML = `
-    <section class="panel upload-panel" aria-label="合同上传入口">
-      <div class="panel-header">
-        <h2>开始审查</h2>
-        <p>上传 NDA 合同并选择审查立场。未选择立场时不能开始审查。</p>
+    <section class="upload-workspace" aria-label="合同上传入口">
+      <div class="upload-heading">
+        <p class="section-kicker">NEW REVIEW</p>
+        <h2>新建合同审查</h2>
+        <p>选择合同文件和审查立场，系统将创建一条可追踪的审查任务。</p>
       </div>
 
-      <div class="form-grid">
-        <label class="field">
-          <span>合同文件</span>
+      <div class="upload-tool">
+        <label class="file-drop-field">
+          <span class="upload-icon">${icon("upload")}</span>
+          <strong>合同文件</strong>
+          <span class="file-name" data-file-name>选择 DOCX 或 PDF 文件</span>
           <input id="contract-file" type="file" accept=".docx,.pdf" ${isDisabled ? "disabled" : ""} />
+          <span class="button button-secondary file-picker">选择文件</span>
         </label>
 
-        <fieldset class="field role-field" ${isDisabled ? "disabled" : ""}>
+        <fieldset class="role-field" ${isDisabled ? "disabled" : ""}>
           <legend>审查立场</legend>
+          <div class="segmented-control">
           <label>
             <input type="radio" name="review-position" value="甲方" />
-            甲方
+            <span>甲方</span>
           </label>
           <label>
             <input type="radio" name="review-position" value="乙方" />
-            乙方
+            <span>乙方</span>
           </label>
+          </div>
         </fieldset>
 
-        <button id="start-review" type="button" disabled>上传并解析</button>
+        <div class="upload-actions">
+          ${props.canCancel ? '<button class="button button-ghost" type="button" data-cancel-upload>取消</button>' : ""}
+          <button class="button button-primary" id="start-review" type="button" disabled>
+            ${icon("upload")}<span>上传并解析</span>
+          </button>
+        </div>
       </div>
 
-      <p class="form-message" id="upload-message">
-        ${props.disabled ? "请先启动后端服务。" : "请选择 DOCX/PDF 合同文件和审查立场。"}
-      </p>
-      <p class="empty-state">PDF 仅支持可复制文本的文件；扫描件当前未启用 OCR。</p>
-      <p class="error-message" id="upload-error" hidden></p>
+      <div class="upload-status" aria-live="polite">
+        <p class="form-message" id="upload-message">
+          ${props.disabled ? "请先启动后端服务。" : "请选择 DOCX/PDF 合同文件和审查立场。"}
+        </p>
+        <p>PDF 仅支持可复制文本的文件，扫描件当前未启用 OCR。</p>
+        <p class="error-message" id="upload-error" hidden></p>
+      </div>
     </section>
   `;
 
@@ -42,6 +57,7 @@ export function UploadPanel(root, props) {
   const startButton = root.querySelector("#start-review");
   const message = root.querySelector("#upload-message");
   const errorMessage = root.querySelector("#upload-error");
+  const fileName = root.querySelector("[data-file-name]");
 
   if (props.error) {
     errorMessage.hidden = false;
@@ -57,6 +73,7 @@ export function UploadPanel(root, props) {
     const hasFile = Boolean(file);
     const hasRole = Boolean(getSelectedRole());
     const supportedFile = hasFile && /\.(docx|pdf)$/i.test(file.name);
+    fileName.textContent = hasFile ? file.name : "选择 DOCX 或 PDF 文件";
     startButton.disabled = isDisabled || !(supportedFile && hasRole);
 
     if (props.disabled) {
@@ -81,4 +98,5 @@ export function UploadPanel(root, props) {
       reviewPosition: getSelectedRole(),
     });
   });
+  root.querySelector("[data-cancel-upload]")?.addEventListener("click", props.onCancel);
 }

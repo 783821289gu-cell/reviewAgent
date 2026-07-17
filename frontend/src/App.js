@@ -1,5 +1,6 @@
 import { UploadPanel } from "./components/UploadPanel.js";
 import { WorkbenchLayout } from "./components/WorkbenchLayout.js";
+import { icon } from "./components/Icon.js";
 
 const API_BASE_URL = "";
 const TERMINAL_STATUSES = new Set([
@@ -26,6 +27,11 @@ export function renderApp(root) {
     loading: false,
     activeRiskId: "",
     activeClauseId: "",
+    workspaceView: "review",
+    mobileView: "risk",
+    riskFilter: "all",
+    executionLogOpen: false,
+    showUpload: true,
     localReview: emptyLocalReview(),
     feedback: emptyFeedback(),
     report: emptyReport(),
@@ -79,13 +85,18 @@ export function renderApp(root) {
         loading: true,
         activeRiskId: "",
         activeClauseId: "",
+        workspaceView: "review",
+        mobileView: "risk",
+        riskFilter: "all",
+        executionLogOpen: false,
+        showUpload: false,
         localReview: emptyLocalReview(),
         feedback: emptyFeedback(),
         report: emptyReport(),
       });
       subscribeToTaskEvents(payload.task_id);
     } catch (error) {
-      setState({ error: error.message || "任务创建失败", loading: false });
+      setState({ error: error.message || "任务创建失败", loading: false, showUpload: true });
     }
   }
 
@@ -95,6 +106,25 @@ export function renderApp(root) {
       activeClauseId: risk.clause_id || "",
     });
     focusClause(risk.clause_id);
+  }
+
+  function handleRiskLocate(risk) {
+    setState({
+      activeRiskId: risk.risk_id || "",
+      activeClauseId: risk.clause_id || "",
+      workspaceView: "review",
+      mobileView: "contract",
+    });
+    focusClause(risk.clause_id);
+  }
+
+  function handleClauseSelect(clauseId) {
+    setState({
+      activeClauseId: clauseId || "",
+      workspaceView: "review",
+      mobileView: "contract",
+    });
+    focusClause(clauseId);
   }
 
   function handleSelectionChange(selection) {
@@ -439,48 +469,114 @@ export function renderApp(root) {
   }
 
   function render() {
+    const taskId = state.task?.task_id || "";
+    const traceId = state.task?.trace_id || "";
     root.innerHTML = `
-      <main class="page-shell">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">NDA 合同审查 Agent 工作台</p>
-            <h1>ContractReviewAgent</h1>
-            <p class="summary">任务 10 支持合同审查、人工反馈、报告与评测，并展示可持久化的任务 Trace、工具 Step、恢复信息和外部模型调用摘要。</p>
+      <main class="app-shell">
+        <nav class="tool-rail" aria-label="工作区导航">
+          <div class="rail-brand" title="ContractReviewAgent">
+            ${icon("shield-alert")}
+            <span class="sr-only">ContractReviewAgent</span>
           </div>
-          <span class="status-pill status-${state.backendStatus}">
-            ${backendStatusLabel(state.backendStatus)}
-          </span>
-        </header>
+          <div class="rail-nav">
+            ${workspaceButton("review", "审查工作区", "layout-dashboard", state.workspaceView, false)}
+            ${workspaceButton("memory", "Memory 工作区", "database", state.workspaceView, !state.task)}
+            ${workspaceButton("evaluation", "评测工作区", "chart-no-axes-column-increasing", state.workspaceView, false)}
+          </div>
+          <span class="rail-status status-${state.backendStatus}" title="${backendStatusLabel(state.backendStatus)}"></span>
+        </nav>
 
-        <section id="upload-root"></section>
-        <section id="workbench-root"></section>
+        <section class="app-frame">
+          <header class="command-bar">
+            <div class="command-brand">
+              ${icon("shield-alert", { className: "mobile-brand-icon" })}
+              <div>
+                <h1>ContractReviewAgent</h1>
+                <p>合同审查工作台</p>
+              </div>
+            </div>
+            <div class="command-context" aria-label="当前任务信息">
+              ${taskId ? `<span><b>Task</b>${escapeHtml(shortId(taskId))}</span>` : ""}
+              ${traceId ? `<span><b>Trace</b>${escapeHtml(shortId(traceId))}</span>` : ""}
+              ${state.task?.review_position ? `<span><b>立场</b>${escapeHtml(state.task.review_position)}</span>` : ""}
+            </div>
+            <div class="command-actions">
+              <span class="service-status status-${state.backendStatus}">
+                <i aria-hidden="true"></i>${backendStatusLabel(state.backendStatus)}
+              </span>
+              <button class="button button-primary new-review-button" type="button" data-new-review aria-label="新建审查" ${state.loading ? "disabled" : ""}>
+                ${icon("plus")}<span>新建审查</span>
+              </button>
+            </div>
+          </header>
+
+          <nav class="mobile-workspace-nav" aria-label="移动端工作区导航">
+            ${workspaceButton("review", "审查", "layout-dashboard", state.workspaceView, false)}
+            ${workspaceButton("memory", "Memory", "database", state.workspaceView, !state.task)}
+            ${workspaceButton("evaluation", "评测", "chart-no-axes-column-increasing", state.workspaceView, false)}
+          </nav>
+
+          <div class="app-content ${state.showUpload ? "is-uploading" : ""}">
+            <section id="upload-root" ${state.showUpload ? "" : "hidden"}></section>
+            <section id="workbench-root" ${state.showUpload ? "hidden" : ""}></section>
+          </div>
+        </section>
       </main>
     `;
 
-    UploadPanel(document.querySelector("#upload-root"), {
-      disabled: state.backendStatus !== "online",
-      loading: state.loading,
-      error: state.error,
-      onSubmit: createTaskShell,
-    });
+    const uploadRoot = root.querySelector("#upload-root");
+    const workbenchRoot = root.querySelector("#workbench-root");
 
-    WorkbenchLayout(document.querySelector("#workbench-root"), {
-      task: state.task,
-      activeRiskId: state.activeRiskId,
-      activeClauseId: state.activeClauseId,
-      localReview: state.localReview,
-      feedback: state.feedback,
-      report: state.report,
-      evaluation: state.evaluation,
-      onSelectRisk: handleRiskSelect,
-      onSelectionChange: handleSelectionChange,
-      onRunLocalReview: runLocalReview,
-      onSubmitFeedback: submitFeedback,
-      onRequestLocalReview: requestLocalRerun,
-      onExportReport: exportReport,
-      onRunEvaluation: runEvaluation,
-      onRunEffectEvaluation: runEffectEvaluation,
-      onSelectEvaluationView: selectEvaluationView,
+    if (state.showUpload) {
+      UploadPanel(uploadRoot, {
+        disabled: state.backendStatus !== "online",
+        loading: state.loading,
+        error: state.error,
+        canCancel: Boolean(state.task),
+        onCancel: () => setState({ showUpload: false, error: "" }),
+        onSubmit: createTaskShell,
+      });
+    } else {
+      WorkbenchLayout(workbenchRoot, {
+        task: state.task,
+        activeRiskId: state.activeRiskId,
+        activeClauseId: state.activeClauseId,
+        workspaceView: state.workspaceView,
+        mobileView: state.mobileView,
+        riskFilter: state.riskFilter,
+        executionLogOpen: state.executionLogOpen,
+        localReview: state.localReview,
+        feedback: state.feedback,
+        report: state.report,
+        evaluation: state.evaluation,
+        onSelectRisk: handleRiskSelect,
+        onLocateRisk: handleRiskLocate,
+        onSelectClause: handleClauseSelect,
+        onSelectMobileView: (mobileView) => setState({ mobileView }),
+        onSelectRiskFilter: (riskFilter) => setState({ riskFilter }),
+        onExecutionLogToggle: (executionLogOpen) => setState({ executionLogOpen }),
+        onSelectionChange: handleSelectionChange,
+        onRunLocalReview: runLocalReview,
+        onSubmitFeedback: submitFeedback,
+        onRequestLocalReview: requestLocalRerun,
+        onExportReport: exportReport,
+        onRunEvaluation: runEvaluation,
+        onRunEffectEvaluation: runEffectEvaluation,
+        onSelectEvaluationView: selectEvaluationView,
+      });
+    }
+
+    root.querySelectorAll("[data-workspace]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const workspaceView = button.dataset.workspace;
+        setState({
+          workspaceView,
+          showUpload: workspaceView === "review" && !state.task,
+        });
+      });
+    });
+    root.querySelector("[data-new-review]")?.addEventListener("click", () => {
+      setState({ showUpload: true, error: "" });
     });
   }
 
@@ -552,10 +648,34 @@ function focusClause(clauseId) {
   }
   window.setTimeout(() => {
     document.getElementById(clauseId)?.scrollIntoView({
-      behavior: "smooth",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
       block: "center",
     });
   }, 0);
+}
+
+function workspaceButton(view, label, iconName, activeView, disabled) {
+  return `
+    <button class="rail-button ${activeView === view ? "is-active" : ""}" type="button"
+      data-workspace="${view}" title="${label}" aria-label="${label}"
+      ${activeView === view ? 'aria-current="page"' : ""} ${disabled ? "disabled" : ""}>
+      ${icon(iconName)}<span>${label}</span>
+    </button>
+  `;
+}
+
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 12 ? `${text.slice(0, 6)}…${text.slice(-4)}` : text;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function backendStatusLabel(status) {

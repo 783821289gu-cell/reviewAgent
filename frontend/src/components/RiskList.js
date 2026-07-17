@@ -1,3 +1,5 @@
+import { icon } from "./Icon.js";
+
 export function RiskList(root, props) {
   root.textContent = "";
 
@@ -27,34 +29,40 @@ export function RiskList(root, props) {
     const header = document.createElement("div");
     header.className = "risk-card-header";
 
+    const titleGroup = document.createElement("button");
+    titleGroup.type = "button";
+    titleGroup.className = "risk-card-title";
+    titleGroup.setAttribute("aria-label", `查看风险 ${risk.risk_id || risk.risk_type || "未命名风险"}`);
+    titleGroup.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectRisk();
+    });
     const title = document.createElement("strong");
     title.textContent = `${risk.risk_id || "未命名风险"} ${risk.risk_type || ""}`.trim();
+    titleGroup.appendChild(title);
 
     const severity = document.createElement("span");
     severity.className = severityClassName(risk.severity);
     severity.textContent = risk.severity || "未分级";
 
     const locate = document.createElement("button");
-    locate.className = "secondary-button compact-button";
+    locate.className = "icon-button compact-icon-button";
     locate.type = "button";
-    locate.textContent = "定位";
+    locate.title = "定位合同证据";
+    locate.setAttribute("aria-label", "定位");
+    locate.innerHTML = icon("locate-fixed");
     locate.addEventListener("click", (event) => {
       event.stopPropagation();
-      selectRisk();
+      props.onLocateRisk?.(risk);
     });
 
-    header.append(title, severity, locate);
+    header.append(titleGroup, severity, locate);
     item.appendChild(header);
 
     const meta = document.createElement("p");
     meta.className = "risk-meta";
     meta.textContent = `${risk.clause_id || "未知条款"} / 置信度 ${formatConfidence(risk.confidence)} / ${reviewStatusLabel(risk.review_status)}`;
     item.appendChild(meta);
-
-    const reason = document.createElement("p");
-    reason.className = "risk-reason";
-    reason.textContent = risk.risk_reason || "";
-    item.appendChild(reason);
 
     list.appendChild(item);
   });

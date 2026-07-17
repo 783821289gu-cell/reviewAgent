@@ -1,3 +1,5 @@
+import { icon } from "./Icon.js";
+
 const REPORTABLE_STATUSES = new Set(["EVIDENCE_VERIFIED", "HUMAN_REVIEW_PENDING", "MEMORY_UPDATED", "REPORT_READY"]);
 
 export function ReportExport(root, props) {
@@ -10,8 +12,8 @@ export function ReportExport(root, props) {
 
   root.innerHTML = `
     <div class="report-export">
-      <button class="secondary-button compact-button" type="button" ${disabled ? "disabled" : ""}>
-        ${report.loading ? "导出中" : "导出报告"}
+      <button class="button button-secondary compact-button" type="button" aria-label="${report.loading ? "导出中" : "导出报告"}" ${disabled ? "disabled" : ""}>
+        ${icon("download")}<span>${report.loading ? "导出中" : "导出报告"}</span>
       </button>
       <p class="inline-status" data-report-status></p>
     </div>

@@ -1,4 +1,5 @@
 import { RiskEditor } from "./RiskEditor.js";
+import { icon } from "./Icon.js";
 
 export function ReviewActions(root, props) {
   root.textContent = "";
@@ -23,16 +24,16 @@ export function ReviewActions(root, props) {
   actions.className = "feedback-actions";
 
   actions.append(
-    actionButton("采纳风险", "accept", props, editor),
-    actionButton("忽略风险", "ignore", props, editor),
-    actionButton("保存等级", "update_severity", props, editor),
-    actionButton("保存建议", "update_suggestion", props, editor),
+    actionButton("采纳风险", "accept", "check", props, editor, "button-primary"),
+    actionButton("忽略风险", "ignore", "x", props, editor, "button-secondary"),
+    actionButton("保存等级", "update_severity", "pencil", props, editor, "button-secondary"),
+    actionButton("保存建议", "update_suggestion", "pencil", props, editor, "button-secondary"),
   );
 
   const rerun = document.createElement("button");
   rerun.type = "button";
-  rerun.className = "secondary-button compact-button";
-  rerun.textContent = props.localReviewLoading ? "重审中" : "局部重审";
+  rerun.className = "button button-ghost compact-button";
+  rerun.innerHTML = `${icon("rotate-ccw")}<span>${props.localReviewLoading ? "重审中" : "局部重审"}</span>`;
   rerun.disabled = Boolean(props.localReviewLoading);
   rerun.addEventListener("click", () => {
     if (typeof props.onRequestLocalReview === "function") {
@@ -59,11 +60,11 @@ export function ReviewActions(root, props) {
   root.appendChild(panel);
 }
 
-function actionButton(label, action, props, editor) {
+function actionButton(label, action, iconName, props, editor, variant) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "secondary-button compact-button";
-  button.textContent = props.loading ? "提交中" : label;
+  button.className = `button ${variant} compact-button`;
+  button.innerHTML = `${icon(iconName)}<span>${props.loading ? "提交中" : label}</span>`;
   button.disabled = Boolean(props.loading);
   button.addEventListener("click", () => {
     if (typeof props.onSubmitFeedback !== "function") {

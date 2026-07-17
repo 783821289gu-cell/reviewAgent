@@ -37,6 +37,8 @@ export function ContractViewer(root, props) {
     const clauseRisks = risks.filter((risk) => risk.clause_id === clause.clause_id);
     article.className = clauseCardClassName(clause.clause_id, clauseRisks, props.activeClauseId);
     article.id = clause.clause_id;
+    article.tabIndex = -1;
+    article.dataset.clauseId = clause.clause_id;
     article.addEventListener("mouseup", () => handleSelection(article, clause, props.onSelectionChange));
 
     const header = document.createElement("div");
@@ -50,7 +52,10 @@ export function ContractViewer(root, props) {
     type.textContent = clause.clause_type || "其他";
 
     header.append(title, type);
-    article.append(header, renderClauseText(clause.text || "", clauseRisks, props.activeRiskId));
+    article.append(
+      header,
+      renderClauseText(clause.text || "", clauseRisks, props.activeRiskId, props.onSelectRisk),
+    );
     article.appendChild(renderKeyFields(clause.key_fields || {}));
     list.appendChild(article);
   });
@@ -69,7 +74,7 @@ function clauseCardClassName(clauseId, clauseRisks, activeClauseId) {
   return classNames.join(" ");
 }
 
-function renderClauseText(text, risks, activeRiskId) {
+function renderClauseText(text, risks, activeRiskId, onSelectRisk) {
   const paragraph = document.createElement("p");
   paragraph.className = "clause-text";
 
@@ -82,6 +87,7 @@ function renderClauseText(text, risks, activeRiskId) {
         end: start + evidenceText.length,
         evidenceText,
         riskId: risk.risk_id,
+        risk,
       };
     })
     .filter((range) => range.start >= 0 && range.end > range.start)
@@ -103,6 +109,9 @@ function renderClauseText(text, risks, activeRiskId) {
     const mark = document.createElement("mark");
     mark.className = range.riskId === activeRiskId ? "risk-highlight risk-highlight-active" : "risk-highlight";
     mark.textContent = text.slice(range.start, range.end);
+    mark.dataset.riskId = range.riskId || "";
+    mark.title = range.riskId ? `关联风险 ${range.riskId}` : "关联风险证据";
+    mark.addEventListener("click", () => onSelectRisk?.(range.risk));
     paragraph.appendChild(mark);
     cursor = range.end;
   });
@@ -129,8 +138,12 @@ function handleSelection(article, clause, onSelectionChange) {
 }
 
 function renderKeyFields(keyFields) {
+  const details = document.createElement("details");
+  details.className = "key-field-disclosure";
+  const summary = document.createElement("summary");
   const wrapper = document.createElement("dl");
   wrapper.className = "key-fields";
+  let fieldCount = 0;
 
   Object.entries(KEY_FIELD_LABELS).forEach(([fieldName, label]) => {
     const values = normalizeValues(keyFields[fieldName]);
@@ -145,6 +158,7 @@ function renderKeyFields(keyFields) {
     detail.textContent = values.join("、");
 
     wrapper.append(term, detail);
+    fieldCount += 1;
   });
 
   if (wrapper.childElementCount === 0) {
@@ -157,7 +171,9 @@ function renderKeyFields(keyFields) {
     wrapper.append(term, detail);
   }
 
-  return wrapper;
+  summary.textContent = `关键字段 ${fieldCount}`;
+  details.append(summary, wrapper);
+  return details;
 }
 
 function normalizeValues(value) {

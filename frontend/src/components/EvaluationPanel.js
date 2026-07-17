@@ -1,3 +1,5 @@
+import { icon } from "./Icon.js";
+
 const CHECK_FIELDS = [
   ["task_ran", "任务"],
   ["document_parsed", "解析"],
@@ -23,8 +25,8 @@ export function EvaluationPanel(root, props) {
             <button type="button" role="tab" data-evaluation-view="effect" aria-selected="${activeView === "effect"}">效果摘要</button>
           </div>
         </div>
-        <button class="secondary-button compact-button" data-run-evaluation type="button" ${loading ? "disabled" : ""}>
-          ${loading ? "评测中" : activeView === "effect" ? "运行效果评测" : "运行流程评测"}
+        <button class="button button-primary compact-button" data-run-evaluation type="button" ${loading ? "disabled" : ""}>
+          ${icon("chart-no-axes-column-increasing")}<span>${loading ? "评测中" : activeView === "effect" ? "运行效果评测" : "运行流程评测"}</span>
         </button>
       </div>
       <div data-evaluation-body></div>

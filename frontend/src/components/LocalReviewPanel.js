@@ -1,3 +1,5 @@
+import { icon } from "./Icon.js";
+
 export function LocalReviewPanel(root, props) {
   root.textContent = "";
 
@@ -9,7 +11,7 @@ export function LocalReviewPanel(root, props) {
   if (!selectedText || !clauseId) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
-    empty.textContent = "在左侧合同原文中框选文本后，可发起局部审查。";
+    empty.textContent = "在合同原文中框选文本后，可发起局部审查。";
     panel.appendChild(empty);
     root.appendChild(panel);
     return;
@@ -23,7 +25,8 @@ export function LocalReviewPanel(root, props) {
 
   const button = document.createElement("button");
   button.type = "button";
-  button.textContent = props.loading ? "审查中" : "局部审查";
+  button.className = "button button-primary compact-button";
+  button.innerHTML = `${icon("bot")}<span>${props.loading ? "审查中" : "局部审查"}</span>`;
   button.disabled = props.loading;
   button.addEventListener("click", () => {
     if (typeof props.onRunLocalReview === "function") {
