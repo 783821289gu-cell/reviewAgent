@@ -1,7 +1,10 @@
 const { defineConfig, devices } = require("playwright/test");
+const path = require("node:path");
 
 const port = Number(process.env.REVIEW_AGENT_E2E_PORT || 8010);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${port}`;
+const runId = `run-${Date.now()}-${process.pid}`;
+const runRoot = path.join("test-results", "e2e", runId);
 
 module.exports = defineConfig({
   testDir: "./frontend/tests/e2e",
@@ -34,8 +37,10 @@ module.exports = defineConfig({
       REVIEW_AGENT_ALLOWED_ORIGINS: baseURL,
       REVIEW_AGENT_LLM_MODE: "local_structured",
       REVIEW_AGENT_EMBEDDING_MODE: "local_sparse",
-      REVIEW_AGENT_MEMORY_DB_PATH: "test-results/e2e/review-agent.sqlite3",
-      REVIEW_AGENT_UPLOAD_DIR: "test-results/e2e/uploads",
+      REVIEW_AGENT_MEMORY_DB_PATH: path.join(runRoot, "review-agent.sqlite3"),
+      REVIEW_AGENT_UPLOAD_DIR: path.join(runRoot, "uploads"),
+      REVIEW_AGENT_REPORT_DIR: path.join(runRoot, "reports"),
+      REVIEW_AGENT_EVALUATION_OUTPUT_DIR: path.join(runRoot, "evaluation"),
     },
   },
   projects: [

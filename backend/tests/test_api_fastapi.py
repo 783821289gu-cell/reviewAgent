@@ -201,6 +201,20 @@ class FastApiContractTest(unittest.TestCase):
         self.assertEqual(report_result["task"]["status"], "REPORT_READY")
         self.assertEqual(report_result["report_file"]["risk_count"], 1)
 
+    def test_event_stream_sends_terminal_event_when_subscribed_immediately(self):
+        created = self._upload_docx()
+
+        with self.client.stream(
+            "GET", f"/api/tasks/{created['task_id']}/events"
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = "".join(response.iter_text())
+
+        events = _parse_sse(body)
+        statuses = [event["data"]["status"] for event in events]
+        self.assertEqual(statuses, self.contract["success"]["events"]["sequence"])
+        self.assertIn(statuses[-1], TERMINAL_STATUSES)
+
     def test_evaluation_route_matches_baseline(self):
         evaluation_contract = self.contract["success"]["evaluation"]
         response = self.client.post(evaluation_contract["path"])

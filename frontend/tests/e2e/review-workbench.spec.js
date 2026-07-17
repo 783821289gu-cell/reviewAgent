@@ -8,6 +8,14 @@ const FIXTURES = path.join(PROJECT_ROOT, "frontend", "tests", "fixtures");
 const TERMINAL_STATUS = /EVIDENCE_VERIFIED|HUMAN_REVIEW_PENDING/;
 
 
+test("选择立场但未选择文件时仍禁止提交", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('input[name="review-position"]').first().check();
+
+  await expect(page.locator("#start-review")).toBeDisabled();
+});
+
+
 test("FastAPI 托管首页并阻止未选择文件或立场的提交", async ({ page }) => {
   const response = await page.goto("/");
 
@@ -33,9 +41,13 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
   await upload(page, path.join(FIXTURES, "nda_high_risk.docx"), "甲方");
   const sse = await eventResponse;
   expect(sse.headers()["content-type"]).toContain("text/event-stream");
+  const sseBody = sse.text();
   await expect(page.locator("[data-review-status]")).toHaveText(TERMINAL_STATUS, {
     timeout: 45_000,
   });
+  expect(await sseBody).toMatch(
+    /"status":\s*"(?:EVIDENCE_VERIFIED|HUMAN_REVIEW_PENDING)"/,
+  );
   await expect(page.locator(".progress-list")).toContainText(/证据已验证|等待人工复核/);
 
   const riskCards = page.locator(".risk-card");

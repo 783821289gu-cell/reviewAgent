@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from api.dependencies import get_event_store, get_review_agent, get_settings, require_accepting_tasks
 from api.errors import ApiError, task_error
 from config import Settings
-from services.event_service import ReviewEventStore
+from services.event_service import TERMINAL_STATUSES, ReviewEventStore
 from services.review_service import ReviewOrchestratorAgent
 from services.task_service import start_review_task
 
@@ -29,6 +29,7 @@ SUPPORTED_MIME_TYPES = {
         "application/pdf",
     },
 }
+SSE_TERMINAL_STATUS_VALUES = {status.value for status in TERMINAL_STATUSES}
 
 
 @router.post("/api/tasks", status_code=201)
@@ -100,7 +101,7 @@ async def stream_task_events(
                 yield _sse_event(event)
                 next_index = event["event_id"] + 1
 
-            if event_store.is_terminal(task_id):
+            if events and events[-1]["status"] in SSE_TERMINAL_STATUS_VALUES:
                 break
             if not request.app.state.accepting_tasks:
                 break

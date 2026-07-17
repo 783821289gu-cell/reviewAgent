@@ -119,6 +119,33 @@ class ObservabilityTest(unittest.TestCase):
         self.assertNotIn(secret, logs[-1].error_message)
         self.assertNotIn("Traceback", logs[-1].error_message)
 
+        sensitive_prompt = "完整敏感合同提示词：不得向日志输出本段合同内容。"
+        with self.assertRaisesRegex(RuntimeError, "provider rejected prompt"):
+            invoke_tool(
+                "task_sensitive",
+                {
+                    "failing_tool": lambda _payload: self._raise_prompt(
+                        sensitive_prompt
+                    )
+                },
+                "failing_tool",
+                {"prompt": sensitive_prompt},
+                logs,
+            )
+        self.assertNotIn(sensitive_prompt, logs[-1].error_message)
+        self.assertNotIn("Traceback", logs[-1].error_message)
+        self.assertEqual(logs[-1].error_message, "provider rejected prompt: [redacted]")
+
+        with self.assertRaisesRegex(RuntimeError, "validation failed"):
+            invoke_tool(
+                "task_sensitive",
+                {"failing_tool": lambda _payload: self._raise_empty_sensitive_value()},
+                "failing_tool",
+                {"prompt": ""},
+                logs,
+            )
+        self.assertEqual(logs[-1].error_message, "validation failed")
+
     def test_embedding_metadata_has_explicit_local_cost_status(self):
         response = LocalSparseEmbeddingProvider().embed(EmbeddingRequest(["sample"]))
         self.assertEqual(response.metadata.cost_status, "no_external_embedding")
@@ -128,6 +155,14 @@ class ObservabilityTest(unittest.TestCase):
     @staticmethod
     def _raise_secret(secret: str):
         raise RuntimeError(f"Authorization: Bearer {secret}")
+
+    @staticmethod
+    def _raise_prompt(prompt: str):
+        raise RuntimeError(f"provider rejected prompt: {prompt}\nTraceback: internal stack")
+
+    @staticmethod
+    def _raise_empty_sensitive_value():
+        raise RuntimeError("validation failed")
 
 
 if __name__ == "__main__":

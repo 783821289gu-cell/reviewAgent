@@ -160,12 +160,13 @@ http://127.0.0.1:8000/health
 33. 上传 `backend/tests/fixtures/pdf/scanned_image.pdf`，确认任务进入 `PARSE_FAILED`、提示“需要 OCR”，且不生成文档、条款和风险。
 34. 使用加密、复杂字体映射失败或损坏 PDF 时，确认界面展示具体解析原因，不显示文档解析成功。
 35. 展开 Agent 执行记录，确认任务 Trace、工具 Step、恢复信息和 Provider 摘要可读，且不出现密钥、完整合同 prompt 或前端堆栈。
-36. 运行 Playwright，确认 7 个 Chromium 主流程和错误流用例均实际通过；浏览器和测试数据写入本机缓存或已忽略目录，不进入 Git。
+36. 运行 Playwright，确认 8 个 Chromium 主流程和错误流用例均实际通过；每次运行使用独立的数据库、上传、报告和评测目录，浏览器和测试数据写入本机缓存或已忽略目录，不进入 Git。
 
 默认上传请求大小上限为 10 MB，可通过 `REVIEW_AGENT_MAX_UPLOAD_BYTES` 调整。
 默认 CORS 不允许通配来源；可通过逗号分隔的 `REVIEW_AGENT_ALLOWED_ORIGINS` 配置明确来源。
 默认 SQLite 业务与 Memory 数据库路径为 `backend/app/data/review_agent_memory.sqlite3`，可通过 `REVIEW_AGENT_MEMORY_DB_PATH` 调整。
 默认上传目录为 `backend/app/data/uploads`，可通过 `REVIEW_AGENT_UPLOAD_DIR` 调整。
+默认报告目录为 `backend/app/reports`，可通过 `REVIEW_AGENT_REPORT_DIR` 调整；默认评测输出目录为 `evaluation`，可通过 `REVIEW_AGENT_EVALUATION_OUTPUT_DIR` 调整。
 默认 LLM 模式为 `local_structured`；外部模式通过 `REVIEW_AGENT_LLM_BASE_URL`、`REVIEW_AGENT_LLM_API_KEY`、`REVIEW_AGENT_LLM_MODEL` 和 `REVIEW_AGENT_LLM_TIMEOUT_SECONDS` 配置。
 可通过 `REVIEW_AGENT_LLM_PROMPT_COST_PER_1M` 和 `REVIEW_AGENT_LLM_COMPLETION_COST_PER_1M` 配置每百万 token 单价；未配置时日志显示“未配置”。
 默认 Embedding 模式为 `local_sparse`；外部模式通过 `REVIEW_AGENT_EMBEDDING_MODE=openai_compatible`、`REVIEW_AGENT_EMBEDDING_BASE_URL`、`REVIEW_AGENT_EMBEDDING_API_KEY`、`REVIEW_AGENT_EMBEDDING_MODEL` 和 `REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS` 配置。

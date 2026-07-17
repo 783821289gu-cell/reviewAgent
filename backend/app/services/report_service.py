@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 import re
 
 from services.event_service import review_event_store
@@ -24,7 +25,13 @@ def generate_report(tool_input: dict) -> dict:
     risks = _exportable_risks(task.get("risk_findings") or [])
     markdown = _build_markdown(task, risks)
 
-    report_dir = Path(str(tool_input.get("report_dir") or REPORT_DIR))
+    report_dir = Path(
+        str(
+            tool_input.get("report_dir")
+            or os.getenv("REVIEW_AGENT_REPORT_DIR")
+            or REPORT_DIR
+        )
+    )
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / f"{_safe_file_stem(task_id)}.md"
     report_path.write_text(markdown, encoding="utf-8")

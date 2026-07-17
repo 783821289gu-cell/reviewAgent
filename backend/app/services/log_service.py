@@ -53,7 +53,7 @@ def invoke_tool(
                 input_summary=_summarize_input(tool_input),
                 output_summary="",
                 token_cost_summary=_token_cost_summary(tool_name, llm_calls, embedding_calls),
-                error_message=_safe_error_message(exc),
+                error_message=_safe_error_message(exc, tool_input),
             )
         )
         raise
@@ -171,11 +171,29 @@ def _is_sensitive_key(key: str) -> bool:
     return any(part in key for part in _SENSITIVE_KEY_PARTS)
 
 
-def _safe_error_message(exc: Exception) -> str:
-    message = _redact_secrets(str(exc)).strip()
+def _safe_error_message(exc: Exception, tool_input: dict | None = None) -> str:
+    redacted_message = _redact_secrets(str(exc)).strip()
+    message = redacted_message.splitlines()[0] if redacted_message else ""
+    for sensitive_value in _sensitive_input_strings(tool_input or {}):
+        message = message.replace(sensitive_value, "[redacted]")
     if not message:
         return exc.__class__.__name__
     return message[:300]
+
+
+def _sensitive_input_strings(value, key: str = ""):
+    if isinstance(value, dict):
+        for child_key, child_value in value.items():
+            yield from _sensitive_input_strings(child_value, str(child_key))
+        return
+    if isinstance(value, (list, tuple, set)):
+        for child_value in value:
+            yield from _sensitive_input_strings(child_value, key)
+        return
+    if value and isinstance(value, str) and (
+        _is_sensitive_key(key.lower()) or len(value) >= 80
+    ):
+        yield value
 
 
 def _redact_secrets(value: str) -> str:

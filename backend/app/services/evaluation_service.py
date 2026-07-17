@@ -4,6 +4,7 @@ from uuid import uuid4
 from xml.sax.saxutils import escape
 from collections import Counter
 import json
+import os
 import re
 import subprocess
 from zipfile import ZipFile
@@ -74,7 +75,13 @@ class AnnotationLoadError(ValueError):
 def run_basic_evaluation(tool_input: dict | None = None) -> dict:
     tool_input = tool_input or {}
     samples_dir = Path(str(tool_input.get("samples_dir") or DEFAULT_SAMPLES_DIR))
-    output_dir = Path(str(tool_input.get("output_dir") or DEFAULT_OUTPUT_DIR))
+    output_dir = Path(
+        str(
+            tool_input.get("output_dir")
+            or os.getenv("REVIEW_AGENT_EVALUATION_OUTPUT_DIR")
+            or DEFAULT_OUTPUT_DIR
+        )
+    )
     report_dir = Path(str(tool_input.get("report_dir") or output_dir / "reports"))
     memory_db_path = str(tool_input.get("memory_db_path") or output_dir / "evaluation_memory.sqlite3")
 
@@ -107,7 +114,16 @@ def run_basic_evaluation(tool_input: dict | None = None) -> dict:
 def run_effect_evaluation(tool_input: dict | None = None) -> dict:
     tool_input = tool_input or {}
     samples_dir = Path(str(tool_input.get("samples_dir") or DEFAULT_SAMPLES_DIR))
-    output_dir = Path(str(tool_input.get("output_dir") or DEFAULT_OUTPUT_DIR)) / "effect"
+    output_dir = (
+        Path(
+            str(
+                tool_input.get("output_dir")
+                or os.getenv("REVIEW_AGENT_EVALUATION_OUTPUT_DIR")
+                or DEFAULT_OUTPUT_DIR
+            )
+        )
+        / "effect"
+    )
     evaluation_id = f"effect_{uuid4().hex[:12]}"
     created_at = datetime.now(timezone.utc).isoformat()
 
