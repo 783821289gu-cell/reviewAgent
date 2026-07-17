@@ -1,0 +1,291 @@
+{
+  "baseline_id": "agent-evolution-task1-2026-07-17",
+  "captured_at": "2026-07-17T03:11:57.535381+00:00",
+  "status": "captured_with_known_failure",
+  "claim": "This baseline records local deterministic behavior only. It does not prove a real DeepSeek call or production accuracy.",
+  "versions": {
+    "code": {
+      "commit": "historical-commit",
+      "git_dirty_at_capture": false
+    },
+    "playbook": {
+      "version": "nda-v1",
+      "path": "backend/app/playbooks/nda.json",
+      "sha256": "5584bebc0569ca41b05a7a88590a720049c8427a87bd2b28e73c1eb016b3e9dc"
+    },
+    "annotations": {
+      "sample_set": "synthetic_nda_v1",
+      "version": "effect-v1",
+      "manifest_path": "samples/manifest.json",
+      "manifest_sha256": "3c00cc7d0f24b1e4a2261fc069dfa3eeae64572a0dd97f39ada643ce57bc2198"
+    },
+    "prompt": {
+      "explicit_version": null,
+      "baseline_label": "unversioned-inline-2026-07-17",
+      "source_paths": [
+        "backend/app/providers/llm_provider.py",
+        "backend/app/services/llm_service.py"
+      ],
+      "provider_sha256": "134eb1bd46b65e73486d8e5ef108995f9c333280293cf2da7269b2124dc9654b",
+      "llm_service_sha256": "90a8fe503a2e45f8bfff224bb54b040bb6d7f981286854b20baef04babaf99f9",
+      "note": "The captured code has no explicit prompt version. The external provider builds an inline system schema instruction and a JSON user payload. Prompt version management remains unimplemented."
+    },
+    "llm": {
+      "mode": "local_structured",
+      "model": "no_external_llm",
+      "deepseek_real_call_verified": false
+    },
+    "embedding": {
+      "mode": "local_sparse",
+      "model": "local_sparse_hash_v1",
+      "vector_dimension": 256
+    }
+  },
+  "flow_evaluation": {
+    "evaluation_id": "eval_b3870347503e",
+    "created_at": "2026-07-17T03:11:57.533274+00:00",
+    "sample_count": 10,
+    "passed_count": 10,
+    "claim": "基础评测仅验证流程跑通，不代表生产级准确率。",
+    "samples": [
+      {
+        "sample_name": "NDA Sample 01 - Broad Definition",
+        "file": "nda_sample_01.txt",
+        "review_position": "甲方",
+        "task_ran": true,
+        "document_parsed": true,
+        "clauses_structured": true,
+        "playbook_hit": true,
+        "risk_has_evidence": true,
+        "feedback_memory_written": true,
+        "report_exported": true,
+        "failure_reason": ""
+      },
+      {
+        "sample_name": "NDA Sample 02 - Missing Exceptions",
+        "file": "nda_sample_02.txt",
+        "review_position": "乙方",
+        "task_ran": true,
+        "document_parsed": true,
+        "clauses_structured": true,
+        "playbook_hit": true,
+        "risk_has_evidence": true,
+        "feedback_memory_written": true,
+        "report_exported": true,
+        "failure_reason": ""
+      },
+      {
+        "sample_name": "NDA Sample 03 - Perpetual Term",
+        "file": "nda_sample_03.txt",
+        "review_position": "乙方",
+        "task_ran": true,
+        "document_parsed": true,
+        "clauses_structured": true,
+        "playbook_hit": true,
+        "risk_has_evidence": true,
+        "feedback_memory_written": true,
+        "report_exported": true,
+        "failure_reason": ""
+      },
+      {
+        "sample_name": "NDA Sample 04 - Unclear Use",
+        "file": "nda_sample_04.txt",
+        "review_position": "甲方",
+        "task_ran": true,
+        "document_parsed": true,
+        "clauses_structured": true,
+        "playbook_hit": true,
+        "risk_has_evidence": true,
+        "feedback_memory_written": true,
+        "report_exported": true,
+        "failure_reason": ""
+      },
+      {
+        "sample_name": "NDA Sample 05 - Broad Disclosure",
+        "file": "nda_sample_05.txt",
+        "review_position": "甲方",
+        "task_ran": true,
+        "document_parsed": true,
+        "clauses_structured": true,
+        "playbook_hit": true,
+        "risk_has_evidence": true,
+        "feedback_memory_written": true,
+        "report_exported": true,
+        "failure_reason": ""
+      },
+      {
+        "sample_name": "NDA Sample 06 - Unlimited Liability",
+        "file": "nda_sample_06.txt",
+        "review_position": "乙方",
+        "task_ran": true,
+        "document_parsed": true,
+        "clauses_structured": true,
+        "playbook_hit": true,
+        "risk_has_evidence": true,
+        "feedback_memory_written": true,
+        "report_exported": true,
+        "failure_reason": ""
+      },
+      {
+        "sample_name": "NDA Sample 07 - High Penalty",
+        "file": "nda_sample_07.txt",
+        "review_position": "乙方",
+        "task_ran": true,
+        "document_parsed": true,
+        "clauses_structured": true,
+        "playbook_hit": true,
+        "risk_has_evidence": true,
+        "feedback_memory_written": true,
+        "report_exported": true,
+        "failure_reason": ""
+      },
+      {
+        "sample_name": "NDA Sample 08 - Mixed Definition And Disclosure",
+        "file": "nda_sample_08.txt",
+        "review_position": "甲方",
+        "task_ran": true,
+        "document_parsed": true,
+        "clauses_structured": true,
+        "playbook_hit": true,
+        "risk_has_evidence": true,
+        "feedback_memory_written": true,
+        "report_exported": true,
+        "failure_reason": ""
+      },
+      {
+        "sample_name": "NDA Sample 09 - English Broad Definition",
+        "file": "nda_sample_09.txt",
+        "review_position": "乙方",
+        "task_ran": true,
+        "document_parsed": true,
+        "clauses_structured": true,
+        "playbook_hit": true,
+        "risk_has_evidence": true,
+        "feedback_memory_written": true,
+        "report_exported": true,
+        "failure_reason": ""
+      },
+      {
+        "sample_name": "NDA Sample 10 - Multi Clause Demo",
+        "file": "nda_sample_10.txt",
+        "review_position": "甲方",
+        "task_ran": true,
+        "document_parsed": true,
+        "clauses_structured": true,
+        "playbook_hit": true,
+        "risk_has_evidence": true,
+        "feedback_memory_written": true,
+        "report_exported": true,
+        "failure_reason": ""
+      }
+    ],
+    "required_checks_per_sample": [
+      "task_ran",
+      "document_parsed",
+      "clauses_structured",
+      "playbook_hit",
+      "risk_has_evidence",
+      "feedback_memory_written",
+      "report_exported"
+    ]
+  },
+  "effect_evaluation": {
+    "evaluation_id": "effect_f21796474d10",
+    "created_at": "2026-07-17T03:11:57.535381+00:00",
+    "status": "completed_with_failures",
+    "sample_count": 6,
+    "metric_count": 14,
+    "claim": "效果评测仅报告当前人工标注集上的实际指标和失败样本，不代表生产级准确率。",
+    "metrics": [
+      {"metric": "nda_classification_accuracy", "sample_count": 3, "passed_count": 3, "failed_count": 0, "score": 1.0, "threshold": 0.9, "threshold_met": true},
+      {"metric": "non_nda_rejection_rate", "sample_count": 2, "passed_count": 2, "failed_count": 0, "score": 1.0, "threshold": 1.0, "threshold_met": true},
+      {"metric": "clause_boundary_accuracy", "sample_count": 6, "passed_count": 6, "failed_count": 0, "score": 1.0, "threshold": 0.9, "threshold_met": true},
+      {"metric": "clause_type_accuracy", "sample_count": 6, "passed_count": 6, "failed_count": 0, "score": 1.0, "threshold": 0.9, "threshold_met": true},
+      {"metric": "playbook_recall_at_k", "sample_count": 4, "passed_count": 4, "failed_count": 0, "score": 1.0, "threshold": 0.9, "threshold_met": true},
+      {
+        "metric": "related_clause_recall_at_k",
+        "sample_count": 3,
+        "passed_count": 1,
+        "failed_count": 2,
+        "score": 0.3333,
+        "threshold": 0.8,
+        "threshold_met": false,
+        "failure_samples": [
+          {"sample_id": "return-destroy-synonym", "expected": "CL-022", "actual": ["CL-023"]},
+          {"sample_id": "compelled-disclosure-notice-synonym", "expected": "CL-032", "actual": ["CL-031"]}
+        ]
+      },
+      {"metric": "risk_precision", "sample_count": 3, "passed_count": 3, "failed_count": 0, "score": 1.0, "threshold": 0.8, "threshold_met": true},
+      {"metric": "risk_recall", "sample_count": 3, "passed_count": 3, "failed_count": 0, "score": 1.0, "threshold": 0.8, "threshold_met": true},
+      {"metric": "risk_f1", "sample_count": 3, "passed_count": 3, "failed_count": 0, "score": 1.0, "threshold": 0.8, "threshold_met": true},
+      {"metric": "evidence_span_hit_rate", "sample_count": 3, "passed_count": 3, "failed_count": 0, "score": 1.0, "threshold": 0.9, "threshold_met": true},
+      {"metric": "manual_review_trigger_rate", "sample_count": 3, "passed_count": 3, "failed_count": 0, "score": 1.0, "threshold": 1.0, "threshold_met": true},
+      {"metric": "report_filter_accuracy", "sample_count": 3, "passed_count": 3, "failed_count": 0, "score": 1.0, "threshold": 1.0, "threshold_met": true},
+      {"metric": "tool_call_success_rate", "sample_count": 54, "passed_count": 54, "failed_count": 0, "score": 1.0, "threshold": 0.95, "threshold_met": true},
+      {"metric": "end_to_end_success_rate", "sample_count": 6, "passed_count": 6, "failed_count": 0, "score": 1.0, "threshold": 0.9, "threshold_met": true}
+    ],
+    "evaluation_failures": [],
+    "known_failure": {
+      "metric": "related_clause_recall_at_k",
+      "score": 0.3333,
+      "threshold": 0.8,
+      "threshold_met": false,
+      "note": "The effect run status remains completed_with_failures even though evaluation_failures is empty because one metric is below threshold."
+    }
+  },
+  "api_contract": {
+    "runtime_transport": "FastAPI",
+    "source_fixture": "backend/tests/fixtures/api_contracts/current_http_server.json",
+    "source_note": "The source fixture retains its pre-migration filename and is enforced against the current FastAPI routes by backend/tests/test_api_fastapi.py.",
+    "success_fields": {
+      "health": ["status", "service", "scope"],
+      "task": ["task_id", "status", "file_name", "file_type", "review_position", "message", "document", "contract_classification", "clauses", "matched_rules", "review_contexts", "analysis_results", "risk_findings", "evidence_results", "report_file", "logs", "events"],
+      "local_review": ["review_id", "task_id", "scope", "clause_id", "clause_type", "selected_text", "matched_rules", "related_formal_risks", "local_findings", "skipped_rule_ids", "formal_risk_generated", "message", "logs"],
+      "feedback": ["status", "message", "risk", "memory_item", "task"],
+      "report": ["status", "message", "report_file", "task"],
+      "flow_evaluation": ["evaluation_id", "created_at", "sample_count", "passed_count", "claim", "results", "summary_path", "markdown_path"],
+      "effect_evaluation": ["evaluation_id", "evaluation_type", "created_at", "status", "claim", "sample_count", "metrics", "versions", "evaluation_failures", "summary_path", "markdown_path"]
+    },
+    "http_errors": {
+      "missing_task": 404,
+      "missing_route": 404,
+      "malformed_json": 400,
+      "missing_multipart": 400,
+      "unsupported_upload": 400,
+      "invalid_parameter": 400,
+      "unfinished_report": 400
+    },
+    "sse": {
+      "content_type": "text/event-stream; charset=utf-8",
+      "event_name": "review_event",
+      "required_keys": ["event_id", "task_id", "status", "message", "step_name", "tool_name", "created_at", "task"]
+    }
+  },
+  "deepseek_contract": {
+    "fixture": "backend/tests/fixtures/deepseek/chat_completions_contracts.json",
+    "endpoint": "https://api.deepseek.com/chat/completions",
+    "model": "deepseek-v4-pro",
+    "response_format": {"type": "json_object"},
+    "case_ids": ["success_json", "empty_content", "truncated_json", "schema_mismatch", "timeout", "rate_limit", "authentication_failure", "temporary_service_error"],
+    "current_schema_error_retryable": true,
+    "task_2_target_schema_error_retryable": false,
+    "contains_real_key": false,
+    "real_call_verified": false
+  },
+  "pre_change_test_runs": {
+    "backend": {
+      "command": "python -m unittest discover -s backend\\tests -p \"test_*.py\"",
+      "total": 134,
+      "passed": 134,
+      "duration_seconds": 11.591
+    },
+    "playwright": {
+      "command": "pnpm exec playwright test",
+      "total": 10,
+      "passed": 10,
+      "workbench_tests": 8,
+      "visual_tests": 2,
+      "duration_seconds": 24.4
+    }
+  }
+}

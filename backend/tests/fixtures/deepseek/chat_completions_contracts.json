@@ -1,0 +1,262 @@
+{
+  "fixture_version": "deepseek-chat-completions-contract-v1",
+  "fixture_type": "synthetic_mock_contract",
+  "source_note": "Synthetic and redacted MockTransport fixtures. These are not captured DeepSeek responses and do not prove a real DeepSeek call.",
+  "base_url": "https://api.deepseek.com",
+  "endpoint": "https://api.deepseek.com/chat/completions",
+  "model": "deepseek-v4-pro",
+  "contract_layers": {
+    "current_behavior": "Task 1 records the behavior that exists at the captured commit and keeps the current test suite passing.",
+    "task_2_target": "Task 2 must change retry behavior to the target policy below; documenting it here does not implement it."
+  },
+  "task_2_target_retry_policy": {
+    "retry_once_case_ids": [
+      "timeout",
+      "rate_limit",
+      "temporary_service_error"
+    ],
+    "non_retryable_case_ids": [
+      "empty_content",
+      "truncated_json",
+      "schema_mismatch",
+      "authentication_failure"
+    ],
+    "maximum_attempts": {
+      "retryable": 2,
+      "non_retryable": 1
+    }
+  },
+  "request_contract": {
+    "method": "POST",
+    "required_headers": {
+      "Authorization": "Bearer <redacted>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "model": "deepseek-v4-pro",
+      "temperature": 0,
+      "response_format": {
+        "type": "json_object"
+      },
+      "message_roles": [
+        "system",
+        "user"
+      ],
+      "system_content_contract": "Requires exactly one JSON object conforming to the supplied output schema.",
+      "user_content_contract": {
+        "required_keys": [
+          "operation",
+          "input"
+        ],
+        "operation": "analyze_risk"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "success_json",
+      "transport": "http_response",
+      "response": {
+        "status_code": 200,
+        "headers": {
+          "x-request-id": "req-fixture-success"
+        },
+        "body": {
+          "id": "chatcmpl-fixture-success",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "message": {
+                "role": "assistant",
+                "content": "{\"risk_type\":\"保密信息范围过宽\",\"severity\":\"中\",\"confidence\":0.9,\"risk_reason\":\"证据文本命中定义范围检查。\",\"clause_id\":\"CL-001\",\"evidence_text\":\"保密信息包括商业信息、技术资料。\",\"matched_rule_ids\":[\"NDA-R001\"],\"review_position\":\"甲方\",\"risk_focus\":\"确保甲方保密信息定义可识别且可执行。\",\"revision_suggestion\":\"限定保密信息范围。\",\"review_status\":\"CONFIRMED_RISK\"}"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150
+          }
+        }
+      },
+      "current_behavior": {
+        "outcome": "success",
+        "provider_request_id": "req-fixture-success",
+        "error_type": "",
+        "retryable": false
+      }
+    },
+    {
+      "id": "empty_content",
+      "transport": "http_response",
+      "response": {
+        "status_code": 200,
+        "headers": {
+          "x-request-id": "req-fixture-empty"
+        },
+        "body": {
+          "id": "chatcmpl-fixture-empty",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "message": {
+                "role": "assistant",
+                "content": ""
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 0,
+            "total_tokens": 100
+          }
+        }
+      },
+      "current_behavior": {
+        "outcome": "provider_error",
+        "error_type": "schema_error",
+        "retryable": true
+      }
+    },
+    {
+      "id": "truncated_json",
+      "transport": "http_response",
+      "response": {
+        "status_code": 200,
+        "headers": {
+          "x-request-id": "req-fixture-truncated"
+        },
+        "body": {
+          "id": "chatcmpl-fixture-truncated",
+          "choices": [
+            {
+              "finish_reason": "length",
+              "message": {
+                "role": "assistant",
+                "content": "{\"risk_type\":\"保密信息范围过宽\""
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 12,
+            "total_tokens": 112
+          }
+        }
+      },
+      "current_behavior": {
+        "outcome": "provider_error",
+        "error_type": "schema_error",
+        "retryable": true
+      }
+    },
+    {
+      "id": "schema_mismatch",
+      "transport": "http_response",
+      "response": {
+        "status_code": 200,
+        "headers": {
+          "x-request-id": "req-fixture-schema"
+        },
+        "body": {
+          "id": "chatcmpl-fixture-schema",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "message": {
+                "role": "assistant",
+                "content": "{\"risk_type\":\"保密信息范围过宽\"}"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 8,
+            "total_tokens": 108
+          }
+        }
+      },
+      "current_behavior": {
+        "outcome": "application_validation_error",
+        "error_type": "schema_error",
+        "retryable": true,
+        "attempt_count": 2
+      }
+    },
+    {
+      "id": "timeout",
+      "transport": "read_timeout",
+      "current_behavior": {
+        "outcome": "provider_error",
+        "error_type": "timeout",
+        "retryable": true
+      }
+    },
+    {
+      "id": "rate_limit",
+      "transport": "http_response",
+      "response": {
+        "status_code": 429,
+        "headers": {
+          "x-request-id": "req-fixture-429"
+        },
+        "body": {
+          "error": {
+            "message": "Synthetic rate limit response",
+            "type": "rate_limit_error",
+            "code": "rate_limit_exceeded"
+          }
+        }
+      },
+      "current_behavior": {
+        "outcome": "provider_error",
+        "error_type": "rate_limit",
+        "retryable": true
+      }
+    },
+    {
+      "id": "authentication_failure",
+      "transport": "http_response",
+      "response": {
+        "status_code": 401,
+        "headers": {
+          "x-request-id": "req-fixture-401"
+        },
+        "body": {
+          "error": {
+            "message": "Synthetic authentication failure",
+            "type": "authentication_error",
+            "code": "invalid_api_key"
+          }
+        }
+      },
+      "current_behavior": {
+        "outcome": "provider_error",
+        "error_type": "authentication_error",
+        "retryable": false
+      }
+    },
+    {
+      "id": "temporary_service_error",
+      "transport": "http_response",
+      "response": {
+        "status_code": 503,
+        "headers": {
+          "x-request-id": "req-fixture-503"
+        },
+        "body": {
+          "error": {
+            "message": "Synthetic temporary service failure",
+            "type": "service_unavailable",
+            "code": "service_unavailable"
+          }
+        }
+      },
+      "current_behavior": {
+        "outcome": "provider_error",
+        "error_type": "temporary_error",
+        "retryable": true
+      }
+    }
+  ]
+}

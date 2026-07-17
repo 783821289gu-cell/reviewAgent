@@ -9,6 +9,10 @@ from unittest.mock import patch
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+AGENT_BASELINE_PATH = PROJECT_ROOT / "evaluation" / "baseline" / "agent-evolution-baseline.json"
+API_CONTRACT_PATH = (
+    PROJECT_ROOT / "backend" / "tests" / "fixtures" / "api_contracts" / "current_http_server.json"
+)
 sys.path.insert(0, str(APP_DIR))
 
 from models.evaluation import AnnotationBundle
@@ -23,6 +27,82 @@ from services.evaluation_service import (
 
 
 class EffectEvaluationTest(unittest.TestCase):
+    def test_agent_evolution_baseline_is_complete_and_keeps_known_failure(self):
+        baseline = json.loads(AGENT_BASELINE_PATH.read_text(encoding="utf-8"))
+        api_contract = json.loads(API_CONTRACT_PATH.read_text(encoding="utf-8"))
+
+        self.assertEqual(baseline["status"], "captured_with_known_failure")
+        self.assertFalse(baseline["versions"]["code"]["git_dirty_at_capture"])
+        self.assertEqual(baseline["versions"]["playbook"]["version"], "nda-v1")
+        self.assertEqual(baseline["versions"]["annotations"]["version"], "effect-v1")
+        self.assertIsNone(baseline["versions"]["prompt"]["explicit_version"])
+        self.assertEqual(baseline["versions"]["llm"]["mode"], "local_structured")
+        self.assertFalse(baseline["versions"]["llm"]["deepseek_real_call_verified"])
+        self.assertEqual(baseline["versions"]["embedding"]["mode"], "local_sparse")
+
+        flow = baseline["flow_evaluation"]
+        self.assertEqual(flow["sample_count"], 10)
+        self.assertEqual(flow["passed_count"], 10)
+        self.assertEqual(len(flow["samples"]), 10)
+        for sample in flow["samples"]:
+            self.assertTrue(
+                all(sample[check_name] for check_name in flow["required_checks_per_sample"]),
+                sample["sample_name"],
+            )
+            self.assertEqual(sample["failure_reason"], "")
+
+        effect = baseline["effect_evaluation"]
+        metrics = {item["metric"]: item for item in effect["metrics"]}
+        self.assertEqual(effect["sample_count"], 6)
+        self.assertEqual(effect["metric_count"], 14)
+        self.assertEqual(len(metrics), 14)
+        related = metrics["related_clause_recall_at_k"]
+        self.assertEqual(related["score"], 0.3333)
+        self.assertEqual(related["threshold"], 0.8)
+        self.assertEqual(related["passed_count"], 1)
+        self.assertEqual(related["failed_count"], 2)
+        self.assertFalse(related["threshold_met"])
+
+        expected_success_fields = {
+            "health": list(api_contract["success"]["health"]["body"]),
+            "task": api_contract["success"]["task_create"]["required_keys"],
+            "local_review": api_contract["success"]["local_review"]["required_keys"],
+            "feedback": api_contract["success"]["feedback"]["required_keys"],
+            "report": api_contract["success"]["report"]["required_keys"],
+            "flow_evaluation": api_contract["success"]["evaluation"]["required_keys"],
+            "effect_evaluation": api_contract["success"]["effect_evaluation"]["required_keys"],
+        }
+        self.assertEqual(
+            baseline["api_contract"]["success_fields"],
+            expected_success_fields,
+        )
+        self.assertEqual(
+            baseline["api_contract"]["http_errors"],
+            {
+                name: contract["status"]
+                for name, contract in api_contract["errors"].items()
+            },
+        )
+        self.assertEqual(
+            baseline["api_contract"]["sse"]["content_type"],
+            api_contract["success"]["events"]["content_type"],
+        )
+        self.assertEqual(
+            baseline["api_contract"]["sse"]["event_name"],
+            api_contract["success"]["events"]["event_name"],
+        )
+        self.assertEqual(
+            baseline["api_contract"]["sse"]["required_keys"],
+            api_contract["success"]["events"]["event_required_keys"],
+        )
+        self.assertEqual(len(baseline["deepseek_contract"]["case_ids"]), 8)
+        self.assertTrue(baseline["deepseek_contract"]["current_schema_error_retryable"])
+        self.assertFalse(
+            baseline["deepseek_contract"]["task_2_target_schema_error_retryable"]
+        )
+        self.assertFalse(baseline["deepseek_contract"]["contains_real_key"])
+        self.assertFalse(baseline["deepseek_contract"]["real_call_verified"])
+
     def test_annotation_schema_and_source_policy_are_valid(self):
         samples_dir = PROJECT_ROOT / "samples"
         config = _load_effect_config(samples_dir)

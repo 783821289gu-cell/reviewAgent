@@ -8,6 +8,12 @@ import httpx
 
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
+DEEPSEEK_CONTRACT_PATH = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "deepseek"
+    / "chat_completions_contracts.json"
+)
 sys.path.insert(0, str(APP_DIR))
 
 from config import Settings
@@ -29,6 +35,163 @@ from services.risk_analyzer import analyze_risk
 
 
 class LLMProviderTest(unittest.TestCase):
+    def test_deepseek_fixture_request_contract_and_success_response(self):
+        fixture = _deepseek_contract_fixture()
+        success_case = _deepseek_case(fixture, "success_json")
+        captured_requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured_requests.append(request)
+            return _fixture_http_response(request, success_case)
+
+        provider = OpenAICompatibleProvider(
+            _external_settings(
+                llm_base_url=fixture["base_url"],
+                llm_api_key="test-deepseek-key",
+                llm_model=fixture["model"],
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+        response = provider.generate_structured(
+            LLMRequest(
+                operation="analyze_risk",
+                input_payload={"current_clause": {"clause_id": "CL-001"}},
+                output_schema={"type": "object", "required": ["risk_type"]},
+                local_output={},
+            )
+        )
+
+        self.assertEqual(len(captured_requests), 1)
+        captured = captured_requests[0]
+        request_body = json.loads(captured.content.decode("utf-8"))
+        self.assertEqual(str(captured.url), fixture["endpoint"])
+        self.assertEqual(captured.method, fixture["request_contract"]["method"])
+        self.assertEqual(captured.headers["authorization"], "Bearer test-deepseek-key")
+        self.assertEqual(request_body["model"], fixture["model"])
+        self.assertEqual(request_body["temperature"], 0)
+        self.assertEqual(
+            request_body["response_format"],
+            fixture["request_contract"]["body"]["response_format"],
+        )
+        self.assertEqual(
+            [message["role"] for message in request_body["messages"]],
+            fixture["request_contract"]["body"]["message_roles"],
+        )
+        self.assertIn("JSON object", request_body["messages"][0]["content"])
+        self.assertEqual(
+            json.loads(request_body["messages"][1]["content"])["operation"],
+            "analyze_risk",
+        )
+        self.assertEqual(response.output["risk_type"], "保密信息范围过宽")
+        self.assertEqual(
+            response.metadata.provider_request_id,
+            success_case["current_behavior"]["provider_request_id"],
+        )
+        raw_fixture = DEEPSEEK_CONTRACT_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("test-deepseek-key", raw_fixture)
+        self.assertNotIn("sk-", raw_fixture)
+
+    def test_deepseek_fixture_provider_error_contracts(self):
+        fixture = _deepseek_contract_fixture()
+        cases = {case["id"]: case for case in fixture["cases"]}
+        self.assertEqual(
+            set(cases),
+            {
+                "success_json",
+                "empty_content",
+                "truncated_json",
+                "schema_mismatch",
+                "timeout",
+                "rate_limit",
+                "authentication_failure",
+                "temporary_service_error",
+            },
+        )
+        target_policy = fixture["task_2_target_retry_policy"]
+        self.assertEqual(
+            set(target_policy["retry_once_case_ids"]),
+            {"timeout", "rate_limit", "temporary_service_error"},
+        )
+        self.assertEqual(
+            set(target_policy["non_retryable_case_ids"]),
+            {
+                "empty_content",
+                "truncated_json",
+                "schema_mismatch",
+                "authentication_failure",
+            },
+        )
+        self.assertEqual(
+            target_policy["maximum_attempts"],
+            {"retryable": 2, "non_retryable": 1},
+        )
+
+        for case_id in (
+            "empty_content",
+            "truncated_json",
+            "timeout",
+            "rate_limit",
+            "authentication_failure",
+            "temporary_service_error",
+        ):
+            case = cases[case_id]
+
+            def handler(request: httpx.Request, current_case=case) -> httpx.Response:
+                if current_case["transport"] == "read_timeout":
+                    raise httpx.ReadTimeout("synthetic timeout", request=request)
+                return _fixture_http_response(request, current_case)
+
+            provider = OpenAICompatibleProvider(
+                _external_settings(
+                    llm_base_url=fixture["base_url"],
+                    llm_model=fixture["model"],
+                ),
+                transport=httpx.MockTransport(handler),
+            )
+            calls = []
+            with self.subTest(case_id=case_id):
+                with self.assertRaises(LLMProviderError) as raised:
+                    provider.generate_structured(
+                        LLMRequest("analyze_risk", {}, {"type": "object"}, {}),
+                        call_records=calls,
+                    )
+                self.assertEqual(
+                    raised.exception.error_type,
+                    case["current_behavior"]["error_type"],
+                )
+                self.assertEqual(
+                    raised.exception.retryable,
+                    case["current_behavior"]["retryable"],
+                )
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(
+                    calls[0].error_type,
+                    case["current_behavior"]["error_type"],
+                )
+
+    def test_deepseek_fixture_records_current_schema_retry_baseline(self):
+        fixture = _deepseek_contract_fixture()
+        schema_case = _deepseek_case(fixture, "schema_mismatch")
+        attempts = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return _fixture_http_response(request, schema_case)
+
+        provider = OpenAICompatibleProvider(
+            _external_settings(
+                llm_base_url=fixture["base_url"],
+                llm_model=fixture["model"],
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+        with patch("services.llm_service.create_llm_provider", return_value=provider):
+            with self.assertRaises(LLMOutputInvalidError):
+                analyze_risk({"review_context": _review_context()})
+
+        self.assertEqual(attempts, schema_case["current_behavior"]["attempt_count"])
+
     def test_openai_compatible_success_records_real_metadata_without_secret(self):
         api_key = "test-secret-key"
 
@@ -294,6 +457,24 @@ def _external_settings(**overrides) -> Settings:
     }
     values.update(overrides)
     return Settings(**values)
+
+
+def _deepseek_contract_fixture() -> dict:
+    return json.loads(DEEPSEEK_CONTRACT_PATH.read_text(encoding="utf-8"))
+
+
+def _deepseek_case(fixture: dict, case_id: str) -> dict:
+    return next(case for case in fixture["cases"] if case["id"] == case_id)
+
+
+def _fixture_http_response(request: httpx.Request, case: dict) -> httpx.Response:
+    response = case["response"]
+    return httpx.Response(
+        response["status_code"],
+        request=request,
+        headers=response.get("headers") or {},
+        json=response.get("body") or {},
+    )
 
 
 def _success_response(request: httpx.Request, output: dict, request_id: str) -> httpx.Response:
