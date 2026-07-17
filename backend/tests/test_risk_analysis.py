@@ -10,6 +10,7 @@ sys.path.insert(0, str(APP_DIR))
 sys.path.insert(0, str(TEST_DIR))
 
 from models.risk import VALID_RISK_TYPES, validate_risk_finding
+from providers.llm_provider import LLMOutputInvalidError
 from services.evidence_service import verify_evidence
 from services.risk_analyzer import analyze_risk, generate_revision
 from test_retrieval_context import build_clause_payloads
@@ -34,7 +35,7 @@ class RiskAnalysisTest(unittest.TestCase):
         self.assertTrue(finding["revision_suggestion"])
         self.assertEqual(finding["review_status"], "CONFIRMED_RISK")
 
-    def test_analyze_risk_retries_once_after_invalid_output(self):
+    def test_analyze_risk_does_not_retry_after_invalid_output(self):
         context = build_review_context()
         context["debug_llm_outputs"] = [
             {"risk_type": "bad"},
@@ -53,18 +54,35 @@ class RiskAnalysisTest(unittest.TestCase):
             },
         ]
 
-        finding = analyze_risk({"review_context": context})
-
-        self.assertEqual(finding["risk_type"], "保密信息范围过宽")
-
-    def test_analyze_risk_invalid_after_retry_raises(self):
-        context = build_review_context()
-        context["debug_llm_outputs"] = [{"risk_type": "bad"}, {"risk_type": "still_bad"}]
-
-        with self.assertRaises(ValueError):
+        with self.assertRaises(LLMOutputInvalidError):
             analyze_risk({"review_context": context})
 
-    def test_analyze_risk_rejects_position_basis_mismatch_after_retry(self):
+    def test_analyze_risk_type_error_is_not_retried(self):
+        context = build_review_context()
+        invalid_output = {
+            "risk_type": "保密信息范围过宽",
+            "severity": "中",
+            "confidence": True,
+            "risk_reason": "证据文本命中检查点。",
+            "clause_id": "CL-001",
+            "evidence_text": "保密信息是指披露方提供的商业信息、技术资料和合作资料。",
+            "matched_rule_ids": ["NDA-R001"],
+            "review_position": "甲方",
+            "risk_focus": context["matched_rule"]["risk_focus"],
+            "revision_suggestion": "限定保密信息范围。",
+            "review_status": "CONFIRMED_RISK",
+        }
+
+        with patch(
+            "services.risk_analyzer.generate_structured_risk",
+            return_value=invalid_output,
+        ) as provider_call:
+            with self.assertRaisesRegex(LLMOutputInvalidError, "confidence must be numeric"):
+                analyze_risk({"review_context": context})
+
+        provider_call.assert_called_once()
+
+    def test_analyze_risk_rejects_position_basis_mismatch_without_retry(self):
         context = build_review_context()
         mismatched_output = {
             "risk_type": "保密信息范围过宽",
@@ -79,10 +97,17 @@ class RiskAnalysisTest(unittest.TestCase):
             "revision_suggestion": "限定保密信息范围。",
             "review_status": "CONFIRMED_RISK",
         }
-        context["debug_llm_outputs"] = [mismatched_output, mismatched_output]
+        with patch(
+            "services.risk_analyzer.generate_structured_risk",
+            return_value=mismatched_output,
+        ) as provider_call:
+            with self.assertRaisesRegex(
+                LLMOutputInvalidError,
+                "review_position does not match",
+            ):
+                analyze_risk({"review_context": context})
 
-        with self.assertRaisesRegex(ValueError, "review_position does not match"):
-            analyze_risk({"review_context": context})
+        provider_call.assert_called_once()
 
     def test_risk_model_rejects_weakly_typed_llm_output(self):
         context = build_review_context()
@@ -165,6 +190,23 @@ class RiskAnalysisTest(unittest.TestCase):
 
         provider_call.assert_called_once()
         self.assertEqual(revision["revision_suggestion"], "使用模型生成的结构化修改建议。")
+
+    def test_generate_revision_rejects_schema_errors_without_retry(self):
+        context = build_review_context()
+        finding = analyze_risk({"review_context": context})
+
+        for invalid_output in ({}, {"revision_suggestion": 123}):
+            with self.subTest(invalid_output=invalid_output):
+                with patch(
+                    "services.risk_analyzer.generate_structured_revision",
+                    return_value=invalid_output,
+                ) as provider_call:
+                    with self.assertRaises(LLMOutputInvalidError):
+                        generate_revision(
+                            {"finding": finding, "preferred_position": "甲方"}
+                        )
+
+                provider_call.assert_called_once()
 
     def test_generate_revision_rejects_position_mismatch(self):
         context = build_review_context()

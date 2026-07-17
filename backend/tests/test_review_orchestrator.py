@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
@@ -139,6 +140,58 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertEqual(payload["events"][-1]["status"], "HUMAN_REVIEW_PENDING")
         self.assertEqual(payload["risk_findings"][0]["review_status"], "NEED_MANUAL_REVIEW")
         self.assertEqual(payload["risk_findings"][0]["severity"], "高")
+
+    def test_invalid_risk_schema_never_enters_formal_risk_list(self):
+        event_store = ReviewEventStore()
+        agent = ReviewOrchestratorAgent(event_store)
+
+        with patch(
+            "services.risk_analyzer.generate_structured_risk",
+            return_value={"risk_type": "保密信息范围过宽"},
+        ) as provider_call:
+            state = agent.run_sync(
+                file_name="invalid-llm-output.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        provider_call.assert_called_once()
+        self.assertEqual(payload["status"], "LLM_OUTPUT_INVALID")
+        self.assertEqual(payload["analysis_results"], [])
+        self.assertEqual(payload["risk_findings"], [])
+        failed_log = next(
+            log for log in payload["logs"] if log["tool_name"] == "analyze_risk"
+        )
+        self.assertEqual(failed_log["status"], "failed")
+        self.assertIn("missing fields", failed_log["error_message"])
+
+    def test_invalid_revision_schema_never_enters_formal_risk_list(self):
+        event_store = ReviewEventStore()
+        agent = ReviewOrchestratorAgent(event_store)
+
+        with patch(
+            "services.risk_analyzer.generate_structured_revision",
+            return_value={"revision_suggestion": 123},
+        ) as provider_call:
+            state = agent.run_sync(
+                file_name="invalid-revision-output.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        provider_call.assert_called_once()
+        self.assertEqual(payload["status"], "LLM_OUTPUT_INVALID")
+        self.assertTrue(payload["analysis_results"])
+        self.assertEqual(payload["risk_findings"], [])
+        failed_log = next(
+            log for log in payload["logs"] if log["tool_name"] == "generate_revision"
+        )
+        self.assertEqual(failed_log["status"], "failed")
+        self.assertIn("non-empty string", failed_log["error_message"])
 
     def test_event_stream_payload_keeps_event_time_task_status(self):
         event_store = ReviewEventStore()

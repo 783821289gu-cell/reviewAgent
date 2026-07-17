@@ -32,7 +32,8 @@ def analyze_risk(tool_input: dict) -> dict:
         except Exception as exc:
             last_error = exc
             mark_latest_llm_call_schema_error(llm_calls)
-    raise LLMOutputInvalidError(f"LLM output invalid after retry: {last_error}")
+            break
+    raise LLMOutputInvalidError(f"LLM output invalid: {last_error}")
 
 
 def _validate_position_basis(finding: dict, review_context: dict) -> None:
@@ -96,8 +97,9 @@ def generate_revision(tool_input: dict) -> dict:
         except Exception as exc:
             last_error = exc
             mark_latest_llm_call_schema_error(llm_calls)
+            break
     if not revision_text:
-        raise LLMOutputInvalidError(f"revision output invalid after retry: {last_error}")
+        raise LLMOutputInvalidError(f"revision output invalid: {last_error}")
 
     memory_references = _memory_references(finding.get("related_memory") or [])
     if memory_references:

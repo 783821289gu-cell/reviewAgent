@@ -7,7 +7,8 @@ from unittest.mock import patch
 import httpx
 
 
-APP_DIR = Path(__file__).resolve().parents[1] / "app"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+APP_DIR = PROJECT_ROOT / "backend" / "app"
 DEEPSEEK_CONTRACT_PATH = (
     Path(__file__).resolve().parent
     / "fixtures"
@@ -18,6 +19,7 @@ sys.path.insert(0, str(APP_DIR))
 
 from config import Settings
 from models.review import ReviewPosition, ReviewStatus
+from models.risk import validate_risk_finding
 from providers.llm_provider import (
     LLMOutputInvalidError,
     LLMProviderError,
@@ -30,11 +32,29 @@ from services.clause_service import extract_key_fields
 from services.evaluation_service import _docx_bytes_from_text
 from services.event_service import ReviewEventStore
 from services.log_service import invoke_tool
+from services.llm_service import REVISION_OUTPUT_SCHEMA, RISK_OUTPUT_SCHEMA
 from services.review_service import ReviewOrchestratorAgent
 from services.risk_analyzer import analyze_risk
 
 
 class LLMProviderTest(unittest.TestCase):
+    def test_deepseek_example_configuration_is_explicit_and_secret_free(self):
+        values = {}
+        for raw_line in (PROJECT_ROOT / ".env.example").read_text(
+            encoding="utf-8"
+        ).splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, value = line.split("=", 1)
+            values[key] = value
+
+        self.assertEqual(values["REVIEW_AGENT_LLM_MODE"], "openai_compatible")
+        self.assertEqual(values["REVIEW_AGENT_LLM_BASE_URL"], "https://api.deepseek.com")
+        self.assertEqual(values["REVIEW_AGENT_LLM_API_KEY"], "")
+        self.assertEqual(values["REVIEW_AGENT_LLM_MODEL"], "deepseek-v4-pro")
+        self.assertEqual(values["REVIEW_AGENT_LLM_TIMEOUT_SECONDS"], "60")
+
     def test_deepseek_fixture_request_contract_and_success_response(self):
         fixture = _deepseek_contract_fixture()
         success_case = _deepseek_case(fixture, "success_json")
@@ -56,7 +76,7 @@ class LLMProviderTest(unittest.TestCase):
             LLMRequest(
                 operation="analyze_risk",
                 input_payload={"current_clause": {"clause_id": "CL-001"}},
-                output_schema={"type": "object", "required": ["risk_type"]},
+                output_schema=RISK_OUTPUT_SCHEMA,
                 local_output={},
             )
         )
@@ -77,7 +97,11 @@ class LLMProviderTest(unittest.TestCase):
             [message["role"] for message in request_body["messages"]],
             fixture["request_contract"]["body"]["message_roles"],
         )
-        self.assertIn("JSON object", request_body["messages"][0]["content"])
+        system_message = json.loads(request_body["messages"][0]["content"])
+        self.assertIn("JSON object", system_message["instruction"])
+        self.assertEqual(system_message["output_schema"], RISK_OUTPUT_SCHEMA)
+        validate_risk_finding(system_message["output_example"])
+        self.assertNotIn("商业信息", request_body["messages"][0]["content"])
         self.assertEqual(
             json.loads(request_body["messages"][1]["content"])["operation"],
             "analyze_risk",
@@ -161,7 +185,7 @@ class LLMProviderTest(unittest.TestCase):
                 )
                 self.assertEqual(
                     raised.exception.retryable,
-                    case["current_behavior"]["retryable"],
+                    case_id in target_policy["retry_once_case_ids"],
                 )
                 self.assertEqual(len(calls), 1)
                 self.assertEqual(
@@ -169,7 +193,7 @@ class LLMProviderTest(unittest.TestCase):
                     case["current_behavior"]["error_type"],
                 )
 
-    def test_deepseek_fixture_records_current_schema_retry_baseline(self):
+    def test_deepseek_schema_mismatch_is_not_retried(self):
         fixture = _deepseek_contract_fixture()
         schema_case = _deepseek_case(fixture, "schema_mismatch")
         attempts = 0
@@ -190,7 +214,10 @@ class LLMProviderTest(unittest.TestCase):
             with self.assertRaises(LLMOutputInvalidError):
                 analyze_risk({"review_context": _review_context()})
 
-        self.assertEqual(attempts, schema_case["current_behavior"]["attempt_count"])
+        self.assertEqual(
+            attempts,
+            fixture["task_2_target_retry_policy"]["maximum_attempts"]["non_retryable"],
+        )
 
     def test_openai_compatible_success_records_real_metadata_without_secret(self):
         api_key = "test-secret-key"
@@ -225,10 +252,50 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(call["provider_request_id"], "req-success")
         self.assertEqual(call["prompt_tokens"], 100)
         self.assertEqual(call["completion_tokens"], 50)
+        self.assertEqual(call["operation"], "analyze_risk")
+        self.assertGreaterEqual(call["latency_ms"], 0)
         self.assertEqual(call["cost_status"], "calculated")
         self.assertEqual(call["estimated_cost"], "0.0002")
+        self.assertEqual(call["error_type"], "")
         self.assertNotIn(api_key, logs[0].token_cost_summary)
         self.assertNotIn("商业信息、技术资料", logs[0].input_summary)
+
+    def test_revision_request_includes_schema_consistent_example(self):
+        captured_requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured_requests.append(request)
+            return _success_response(
+                request,
+                {"revision_suggestion": "限定保密信息范围。"},
+                request_id="req-revision",
+            )
+
+        provider = OpenAICompatibleProvider(
+            _external_settings(),
+            transport=httpx.MockTransport(handler),
+        )
+        response = provider.generate_structured(
+            LLMRequest(
+                operation="generate_revision",
+                input_payload={"preferred_position": "甲方"},
+                output_schema=REVISION_OUTPUT_SCHEMA,
+                local_output={},
+            )
+        )
+
+        request_body = json.loads(captured_requests[0].content.decode("utf-8"))
+        system_message = json.loads(request_body["messages"][0]["content"])
+        self.assertEqual(system_message["output_schema"], REVISION_OUTPUT_SCHEMA)
+        self.assertEqual(
+            set(system_message["output_example"]),
+            {"revision_suggestion"},
+        )
+        self.assertIsInstance(
+            system_message["output_example"]["revision_suggestion"],
+            str,
+        )
+        self.assertEqual(response.output["revision_suggestion"], "限定保密信息范围。")
 
     def test_timeout_is_retried_once_then_succeeds(self):
         calls = 0
@@ -256,14 +323,68 @@ class LLMProviderTest(unittest.TestCase):
         self._assert_retry_succeeds(handler)
         self.assertEqual(calls, 2)
 
-    def test_invalid_structured_output_is_retried_once(self):
+    def test_temporary_service_error_is_retried_once_then_succeeds(self):
+        calls = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return httpx.Response(503, request=request, headers={"x-request-id": "req-503"})
+            return _success_response(request, _risk_output(), request_id="req-after-503")
+
+        self._assert_retry_succeeds(handler)
+        self.assertEqual(calls, 2)
+
+    def test_invalid_structured_output_is_not_retried(self):
         outputs = [{"risk_type": "bad"}, _risk_output()]
 
         def handler(request: httpx.Request) -> httpx.Response:
             return _success_response(request, outputs.pop(0), request_id="req-schema")
 
-        self._assert_retry_succeeds(handler)
-        self.assertEqual(outputs, [])
+        provider = OpenAICompatibleProvider(
+            _external_settings(),
+            transport=httpx.MockTransport(handler),
+        )
+        with patch("services.llm_service.create_llm_provider", return_value=provider):
+            with self.assertRaises(LLMOutputInvalidError):
+                analyze_risk({"review_context": _review_context()})
+
+        self.assertEqual(len(outputs), 1)
+
+    def test_authentication_failure_is_not_retried(self):
+        calls = 0
+        api_key = "sensitive-test-key"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(
+                401,
+                request=request,
+                headers={"x-request-id": "req-401"},
+                json={"error": {"message": f"Authorization: Bearer {api_key}"}},
+            )
+
+        provider = OpenAICompatibleProvider(
+            _external_settings(llm_api_key=api_key),
+            transport=httpx.MockTransport(handler),
+        )
+        logs = []
+        with patch("services.llm_service.create_llm_provider", return_value=provider):
+            with self.assertRaises(LLMOutputInvalidError):
+                invoke_tool(
+                    "task-authentication-failure",
+                    {"analyze_risk": analyze_risk},
+                    "analyze_risk",
+                    {"review_context": _review_context()},
+                    logs,
+                )
+
+        self.assertEqual(calls, 1)
+        persisted_log = json.dumps(logs[0].to_dict(), ensure_ascii=False)
+        self.assertNotIn(api_key, persisted_log)
+        self.assertNotIn("Authorization", persisted_log)
 
     def test_external_failure_after_retry_is_explicit_without_local_fallback(self):
         calls = 0
@@ -323,6 +444,27 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].error_type, "configuration_error")
 
+    def test_missing_key_fails_on_call_without_local_fallback(self):
+        provider = OpenAICompatibleProvider(_external_settings(llm_api_key=""))
+        logs = []
+
+        with patch("services.llm_service.create_llm_provider", return_value=provider):
+            with self.assertRaisesRegex(LLMOutputInvalidError, "API Key is not configured"):
+                invoke_tool(
+                    "task-missing-key",
+                    {"analyze_risk": analyze_risk},
+                    "analyze_risk",
+                    {"review_context": _review_context()},
+                    logs,
+                )
+
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0].status, "failed")
+        summary = json.loads(logs[0].token_cost_summary)
+        self.assertEqual(len(summary["calls"]), 1)
+        self.assertEqual(summary["calls"][0]["error_type"], "configuration_error")
+        self.assertNotIn("local_structured", logs[0].token_cost_summary)
+
     def test_provider_mode_factory_is_explicit(self):
         self.assertIsInstance(
             create_llm_provider(Settings(llm_mode="local_structured")),
@@ -372,7 +514,7 @@ class LLMProviderTest(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.error_type, "schema_error")
-        self.assertTrue(raised.exception.retryable)
+        self.assertFalse(raised.exception.retryable)
         self.assertEqual(calls[0].error_type, "schema_error")
 
     def test_key_field_provider_is_only_used_when_rules_find_nothing(self):
@@ -391,6 +533,18 @@ class LLMProviderTest(unittest.TestCase):
                 {"clause": {"clause_id": "CL-002", "text": "信息仅限项目评估场景。"}}
             )
         self.assertEqual(supplemented["use_purpose"], ["项目评估"])
+        provider_call.assert_called_once()
+
+    def test_key_field_schema_failure_is_not_retried(self):
+        with patch(
+            "services.clause_service.generate_structured_key_fields",
+            return_value={"use_purpose": [123]},
+        ) as provider_call:
+            with self.assertRaisesRegex(LLMOutputInvalidError, "non-empty strings"):
+                extract_key_fields(
+                    {"clause": {"clause_id": "CL-002", "text": "信息仅限项目评估场景。"}}
+                )
+
         provider_call.assert_called_once()
 
     def test_revision_failure_after_retry_never_enters_formal_risk_list(self):

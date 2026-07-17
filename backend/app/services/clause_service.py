@@ -179,7 +179,8 @@ def extract_key_fields(tool_input: dict) -> dict:
         except Exception as exc:
             last_error = exc
             mark_latest_llm_call_schema_error(llm_calls)
-    raise LLMOutputInvalidError(f"key field output invalid after retry: {last_error}")
+            break
+    raise LLMOutputInvalidError(f"key field output invalid: {last_error}")
 
 
 def _validate_key_field_supplement(payload: dict) -> dict:

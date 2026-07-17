@@ -183,6 +183,20 @@ class ContractTypeTest(unittest.TestCase):
         self.assertEqual(result["decision"], "NEED_MANUAL_REVIEW")
         self.assertIn("temporary_error", result["evidence"][-1])
 
+    def test_low_confidence_schema_failure_is_not_retried(self):
+        with patch(
+            "services.contract_type_service.generate_structured_contract_type",
+            return_value={"contract_type": "UNKNOWN"},
+        ) as provider_call:
+            result = tool_registry["classify_contract_type"](
+                {"document": _document_payload("Cooperation Agreement\nGeneral terms.")}
+            )
+
+        provider_call.assert_called_once()
+        self.assertEqual(result["contract_type"], "UNKNOWN")
+        self.assertEqual(result["decision"], "NEED_MANUAL_REVIEW")
+        self.assertIn("schema_error", result["evidence"][-1])
+
     def test_common_non_nda_titles_are_rejected(self):
         for title, expected_type in {
             "Purchase Order": "PROCUREMENT",

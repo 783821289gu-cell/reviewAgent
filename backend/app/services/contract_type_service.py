@@ -92,6 +92,7 @@ def classify_contract_type(tool_input: dict) -> dict:
         except Exception as exc:
             last_error = exc
             mark_latest_llm_call_schema_error(llm_calls)
+            break
 
     fallback = dict(deterministic)
     fallback["evidence"] = [

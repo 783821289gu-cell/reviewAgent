@@ -154,7 +154,11 @@ class OpenAICompatibleProvider:
             self._record_error(request, request_id, start, error.error_type, call_records)
             raise error from exc
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-            error = LLMProviderError("schema_error", "LLM response is not valid structured JSON", True)
+            error = LLMProviderError(
+                "schema_error",
+                "LLM response is not valid structured JSON",
+                False,
+            )
             self._record_error(request, request_id, start, error.error_type, call_records)
             raise error from exc
 
@@ -180,6 +184,14 @@ class OpenAICompatibleProvider:
 
     def _post(self, request: LLMRequest) -> httpx.Response:
         base_url = self.settings.llm_base_url.rstrip("/")
+        system_message = {
+            "instruction": (
+                "Return only one JSON object. Do not include Markdown or explanatory text. "
+                "The object must conform to output_schema."
+            ),
+            "output_schema": request.output_schema,
+            "output_example": _schema_example(request.output_schema),
+        }
         with httpx.Client(
             timeout=self.settings.llm_timeout_seconds,
             transport=self.transport,
@@ -197,9 +209,10 @@ class OpenAICompatibleProvider:
                     "messages": [
                         {
                             "role": "system",
-                            "content": (
-                                "Return only one JSON object that conforms to this schema: "
-                                + json.dumps(request.output_schema, ensure_ascii=False, sort_keys=True)
+                            "content": json.dumps(
+                                system_message,
+                                ensure_ascii=False,
+                                sort_keys=True,
                             ),
                         },
                         {
@@ -302,6 +315,36 @@ def _structured_output(body: dict) -> dict:
     if not isinstance(output, dict):
         raise ValueError("structured output must be an object")
     return output
+
+
+def _schema_example(schema: dict):
+    enum_values = schema.get("enum")
+    if isinstance(enum_values, list) and enum_values:
+        return enum_values[0]
+
+    schema_type = schema.get("type")
+    if schema_type == "object" or isinstance(schema.get("properties"), dict):
+        properties = schema.get("properties") or {}
+        required = schema.get("required") or list(properties)
+        return {
+            field_name: _schema_example(properties[field_name])
+            for field_name in required
+            if field_name in properties
+        }
+    if schema_type == "array":
+        item_example = _schema_example(schema.get("items") or {})
+        item_count = max(0, int(schema.get("minItems") or 0))
+        return [item_example for _index in range(item_count)]
+    if schema_type == "number":
+        return schema.get("minimum", 0.0)
+    if schema_type == "integer":
+        return schema.get("minimum", 0)
+    if schema_type == "boolean":
+        return False
+    if schema_type == "string":
+        minimum_length = max(1, int(schema.get("minLength") or 1))
+        return "x" * minimum_length
+    return None
 
 
 def _usage(body: dict) -> tuple[int | None, int | None]:
