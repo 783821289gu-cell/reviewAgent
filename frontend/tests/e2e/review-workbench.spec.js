@@ -92,6 +92,7 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
   expect(reportText).not.toContain(secondRiskId);
   await expect(page.locator("[data-report-status]")).toContainText("共 1 项风险");
 
+  await page.getByRole("button", { name: "评测工作区" }).click();
   await page.getByRole("button", { name: "运行流程评测" }).click();
   await expect(page.locator(".evaluation-summary")).toContainText("10");
   await expect(page.locator(".evaluation-claim")).toContainText("不代表生产级准确率");

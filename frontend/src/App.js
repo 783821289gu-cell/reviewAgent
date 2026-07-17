@@ -127,6 +127,21 @@ export function renderApp(root) {
     focusClause(clauseId);
   }
 
+  function handleRiskFilter(riskFilter) {
+    const risks = (state.task?.risk_findings || []).filter((risk) => risk.clause_id && risk.evidence_text);
+    const filteredRisks = riskFilter === "all"
+      ? risks
+      : risks.filter((risk) => risk.severity === riskFilter);
+    const activeRisk = filteredRisks.find((risk) => risk.risk_id === state.activeRiskId)
+      || filteredRisks[0]
+      || null;
+    setState({
+      riskFilter,
+      activeRiskId: activeRisk?.risk_id || "",
+      activeClauseId: activeRisk?.clause_id || "",
+    });
+  }
+
   function handleSelectionChange(selection) {
     setState({
       activeClauseId: selection.clause_id || "",
@@ -553,7 +568,7 @@ export function renderApp(root) {
         onLocateRisk: handleRiskLocate,
         onSelectClause: handleClauseSelect,
         onSelectMobileView: (mobileView) => setState({ mobileView }),
-        onSelectRiskFilter: (riskFilter) => setState({ riskFilter }),
+        onSelectRiskFilter: handleRiskFilter,
         onExecutionLogToggle: (executionLogOpen) => setState({ executionLogOpen }),
         onSelectionChange: handleSelectionChange,
         onRunLocalReview: runLocalReview,

@@ -1,6 +1,6 @@
 # ContractReviewAgent
 
-当前实现范围：`TASKS.md` 的任务 9 和 `TASKS_2.md` 的任务 10。系统支持 AgentState、显式 Tool Registry、流式状态事件、执行日志、本地 NDA Playbook 规则检索、可配置 Embedding 的当前合同内相关条款检索、SQLite Memory 召回、风险分析上下文构建、结构化风险分析、证据验证、修改建议生成、Web 风险展示、原文高亮、风险跳转、局部审查、人工反馈动作、Memory 写入、Markdown 报告导出、流程评测、人工标注效果评测和文本型 PDF 页码/文本块定位；HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端。任务、上传文件、文档、条款、风险、日志和事件已接入 SQLite 持久化，并由 Playwright 覆盖浏览器主流程和错误流。
+当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10 和 `UI_REDESIGN_PLAN.md` 的工作台界面迭代。系统支持 AgentState、显式 Tool Registry、流式状态事件、执行日志、本地 NDA Playbook 规则检索、可配置 Embedding 的当前合同内相关条款检索、SQLite Memory 召回、风险分析上下文构建、结构化风险分析、证据验证、修改建议生成、Web 风险展示、原文高亮、风险跳转、局部审查、人工反馈动作、Memory 写入、Markdown 报告导出、流程评测、人工标注效果评测和文本型 PDF 页码/文本块定位；HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端。任务、上传文件、文档、条款、风险、日志和事件已接入 SQLite 持久化，并由 Playwright 覆盖浏览器主流程、错误流、三视口布局和基础可访问性。
 
 ## 当前已实现
 
@@ -8,9 +8,9 @@
 2. 后端健康检查接口。
 3. 审查状态模型：`START`、`UPLOAD_RECEIVED`、`DOCUMENT_PARSED`、`CONTRACT_TYPE_CLASSIFIED`、`CLAUSES_STRUCTURED`、`PLAYBOOK_RETRIEVED`、`CONTEXT_BUILT`、`RISK_ANALYZED`、`EVIDENCE_VERIFIED`、`HUMAN_REVIEW_PENDING`、`MEMORY_UPDATED`、`REPORT_READY`、`UNSUPPORTED_CONTRACT_TYPE`、`PARSE_FAILED`、`RETRIEVAL_FAILED`、`LLM_OUTPUT_INVALID`、`EVIDENCE_MISSING`、`NEED_MANUAL_REVIEW`、`TASK_ERROR`。
 4. FastAPI 同源托管前端页面和静态资源。
-5. 首页项目说明、合同上传入口、甲方 / 乙方审查立场选择。
+5. 独立的新建合同审查入口、合同文件上传和甲方 / 乙方审查立场选择。
 6. 未选择合同文件或审查立场时不能上传解析。
-7. Workbench 布局：顶部、左侧原文区、右侧结果区、底部执行记录区。
+7. Workbench 布局：全局工作区导航、顶部任务命令栏、左侧上下文与进度、中间合同原文与证据、右侧风险检查器、底部执行记录抽屉。
 8. DOCX 段落和表格文本解析。
 9. 基于 `pdfplumber` 的中英文文本型 PDF 解析，保留页码、文本块顺序和边界坐标，并将条款位置回溯到对应 PDF 页和块。
 10. 条款编号、条款正文、条款类型、关键字段和原文位置结构化。
@@ -67,12 +67,15 @@
 61. LLM/Embedding 执行摘要展示模型、供应商请求 ID、token 或输入量、耗时、成本状态和错误类型；日志摘要屏蔽密钥、Authorization、完整 prompt 和完整任务正文。
 62. SSE 在终态关闭但浏览器未消费最后一帧时，前端使用任务查询接口做一次真实状态对账，不自行构造成功状态。
 63. Playwright Chromium E2E 覆盖首页、上传、SSE、风险定位和高亮、框选局部审查、人工反馈、Memory、报告过滤下载、流程评测、非 NDA、超限、解析失败、扫描 PDF 和服务错误提示。
+64. Web 前端提供审查、Memory、评测三个真实数据工作区；风险筛选、条款导航、风险证据和人工操作状态在重渲染后保持一致。
+65. 桌面端使用独立滚动的三栏工作台，移动端提供风险、合同、执行记录三种模式和固定人工操作栏；本地 Lucide SVG 图标不依赖在线 CDN。
+66. Playwright 额外验证 1440×960、1280×800、390×844 三个视口无横向溢出、面板不重叠、图标资源可访问、键盘焦点和减少动态效果设置生效。
 
 ## 当前未实现
 
 后续待做包括：扩大人工标注样本规模，以及使用实际外部 LLM/Embedding 在标注集上复测。OCR 尚未实现，是否在下一轮引入必须单独评估和决策，不默认引入本地大型 OCR 模型。
 
-迭代技术方案、实施顺序和验收口径见 `NEXT_PLAN.md` 和 `TASKS_2.md`；这些文件保留计划形成过程，当前完成状态以代码、测试和本 README 为准。
+迭代技术方案、实施顺序和验收口径见 `NEXT_PLAN.md`、`TASKS_2.md` 和 `UI_REDESIGN_PLAN.md`；这些文件保留计划形成过程，当前完成状态以代码、测试和本 README 为准。
 
 当前基础评测只验证流程跑通，不声明生产级准确率。人工相关条款集目前只验证确定性测试 Stub 相对词频基线的受控提升，不代表实际外部 Embedding 模型质量；因此默认正式配置仍为 `local_sparse`。真实外部 LLM 和 Embedding 是否可用及是否有实际效果提升，仍取决于调用方提供的有效服务配置、凭据和后续实测结果。
 
@@ -160,7 +163,7 @@ http://127.0.0.1:8000/health
 33. 上传 `backend/tests/fixtures/pdf/scanned_image.pdf`，确认任务进入 `PARSE_FAILED`、提示“需要 OCR”，且不生成文档、条款和风险。
 34. 使用加密、复杂字体映射失败或损坏 PDF 时，确认界面展示具体解析原因，不显示文档解析成功。
 35. 展开 Agent 执行记录，确认任务 Trace、工具 Step、恢复信息和 Provider 摘要可读，且不出现密钥、完整合同 prompt 或前端堆栈。
-36. 运行 Playwright，确认 8 个 Chromium 主流程和错误流用例均实际通过；每次运行使用独立的数据库、上传、报告和评测目录，浏览器和测试数据写入本机缓存或已忽略目录，不进入 Git。
+36. 运行 Playwright，确认 10 个 Chromium 主流程、错误流、三视口和可访问性用例均实际通过；每次运行使用独立的数据库、上传、报告和评测目录，浏览器和测试数据写入本机缓存或已忽略目录，不进入 Git。
 
 默认上传请求大小上限为 10 MB，可通过 `REVIEW_AGENT_MAX_UPLOAD_BYTES` 调整。
 默认 CORS 不允许通配来源；可通过逗号分隔的 `REVIEW_AGENT_ALLOWED_ORIGINS` 配置明确来源。

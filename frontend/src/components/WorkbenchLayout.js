@@ -15,7 +15,9 @@ export function WorkbenchLayout(root, props) {
   const task = props.task;
   const risks = formalRisks(task);
   const filteredRisks = filterRisks(risks, props.riskFilter);
-  const activeRisk = risks.find((risk) => risk.risk_id === props.activeRiskId) || risks[0] || null;
+  const activeRisk = filteredRisks.find((risk) => risk.risk_id === props.activeRiskId)
+    || filteredRisks[0]
+    || null;
   const activeRiskId = activeRisk?.risk_id || "";
   const activeClauseId = props.activeClauseId || activeRisk?.clause_id || props.localReview?.clauseId || "";
   const activeRuleIds = activeRisk?.matched_rule_ids || [];
@@ -110,7 +112,7 @@ function renderReviewComponents(root, props, context) {
     onLocateRisk: props.onLocateRisk,
   });
   RiskDetail(root.querySelector("[data-risk-detail]"), {
-    risks,
+    risks: filteredRisks,
     activeRiskId,
     feedback: props.feedback,
     localReviewLoading: Boolean(props.localReview?.loading),
@@ -119,11 +121,11 @@ function renderReviewComponents(root, props, context) {
     onRequestLocalReview: props.onRequestLocalReview,
   });
   RuleDetail(root.querySelector("[data-rule-detail]"), {
-    matchedRules: filterRuleGroups(task?.matched_rules || [], activeRisk),
+    matchedRules: activeRisk ? filterRuleGroups(task?.matched_rules || [], activeRisk) : [],
     activeRuleIds,
   });
   ContextTrace(root.querySelector("[data-context-trace]"), {
-    contexts: filterContexts(task?.review_contexts || [], activeClauseId),
+    contexts: activeRisk ? filterContexts(task?.review_contexts || [], activeClauseId) : [],
   });
 
   root.querySelectorAll("[data-mobile-view]").forEach((button) => {
