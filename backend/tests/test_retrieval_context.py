@@ -170,7 +170,7 @@ class RetrievalContextTest(unittest.TestCase):
             },
             related_clauses=build_clause_payloads(),
             related_memory=[{"memory_id": "MEM-001", "note": "x" * 2000}],
-            max_chars=1300,
+            max_tokens=1200,
         )
 
         self.assertEqual(context["current_clause"]["clause_id"], "CL-002")
@@ -178,7 +178,24 @@ class RetrievalContextTest(unittest.TestCase):
         self.assertTrue(context["output_constraints"]["no_formal_risk_without_playbook_rule"])
         self.assertTrue(context["evidence_constraints"]["must_bind_to_original_clause"])
         self.assertFalse(context["formal_risk_generated"])
-        self.assertIn("reduced_memory", context["reduction_trace"])
+        self.assertEqual(context["reduction_trace"][0], "reduced_low_relevance_memory")
+        self.assertIn("reduced_low_rank_related_clause", context["reduction_trace"])
+        self.assertLessEqual(context["token_budget"]["final_prompt_tokens"], 1200)
+        self.assertEqual(context["token_budget"]["max_prompt_tokens"], 1200)
+        self.assertEqual(
+            set(context["token_budget"]["category_tokens"]),
+            {
+                "system_policy",
+                "task",
+                "playbook",
+                "contract_data",
+                "related_clauses",
+                "memory",
+                "evidence_constraint",
+                "output_schema",
+            },
+        )
+        self.assertNotIn("note", context["token_budget"])
 
     def test_context_builder_rejects_rule_without_resolved_position_config(self):
         with self.assertRaisesRegex(ValueError, "positions are required"):
@@ -195,6 +212,48 @@ class RetrievalContextTest(unittest.TestCase):
                 related_clauses=[],
                 related_memory=[],
             )
+
+    def test_context_builder_compresses_metadata_but_keeps_protected_prompt_sections(self):
+        position_config = {
+            "severity_default": "高",
+            "risk_focus": "限制乙方超范围使用甲方保密信息。",
+            "revision_template": "限定乙方使用目的。",
+        }
+        current_clause = dict(build_clause_payloads()[1])
+        current_clause["non_prompt_metadata"] = "x" * 1000
+        matched_rule = {
+            "rule_id": "NDA-R004",
+            "risk_type": "使用目的或使用限制不清",
+            "check_point": "检查是否明确使用目的。",
+            "review_position": "甲方",
+            "severity_default": position_config["severity_default"],
+            "risk_focus": position_config["risk_focus"],
+            "revision_template": position_config["revision_template"],
+            "positions": {"甲方": dict(position_config)},
+            "position_config": dict(position_config),
+            "non_prompt_metadata": "x" * 1000,
+        }
+
+        context = build_review_context(
+            contract_type="NDA",
+            review_position="甲方",
+            current_clause=current_clause,
+            matched_rule=matched_rule,
+            related_clauses=[],
+            related_memory=[],
+            max_tokens=1100,
+        )
+
+        self.assertEqual(
+            context["reduction_trace"],
+            ["compressed_protected_context_metadata"],
+        )
+        self.assertEqual(context["current_clause"]["text"], current_clause["text"])
+        self.assertEqual(context["matched_rule"]["rule_id"], "NDA-R004")
+        self.assertTrue(context["output_constraints"])
+        self.assertTrue(context["evidence_constraints"])
+        self.assertNotIn("non_prompt_metadata", context["current_clause"])
+        self.assertNotIn("non_prompt_metadata", context["matched_rule"])
 
 
 def build_clause_payloads() -> list[dict]:

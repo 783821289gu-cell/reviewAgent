@@ -5,7 +5,12 @@ from providers.llm_provider import (
     llm_call_records_from_tool_input,
     mark_latest_llm_call_schema_error,
 )
-from services.llm_service import generate_structured_revision, generate_structured_risk
+from services.llm_service import (
+    REVISION_OUTPUT_SCHEMA,
+    RISK_OUTPUT_SCHEMA,
+    generate_structured_revision,
+    generate_structured_risk,
+)
 
 
 def analyze_risk(tool_input: dict) -> dict:
@@ -22,6 +27,7 @@ def analyze_risk(tool_input: dict) -> dict:
                 attempt=attempt,
                 llm_calls=llm_calls,
             )
+            _validate_output_fields(candidate, RISK_OUTPUT_SCHEMA, "risk finding")
             finding = validate_risk_finding(candidate)
             _validate_position_basis(finding.to_dict(), review_context)
             return finding.to_dict()
@@ -53,10 +59,19 @@ def _validate_position_basis(finding: dict, review_context: dict) -> None:
         raise ValueError("risk finding risk_focus does not match position_config")
     if str(finding.get("risk_type", "")) != str(matched_rule.get("risk_type", "")):
         raise ValueError("risk finding risk_type does not match matched rule")
-    if str(matched_rule.get("rule_id", "")) not in [
-        str(rule_id) for rule_id in finding.get("matched_rule_ids") or []
-    ]:
-        raise ValueError("risk finding does not reference matched rule")
+    current_clause = review_context.get("current_clause")
+    if not isinstance(current_clause, dict):
+        raise ValueError("review_context current_clause must be a dict")
+    if str(finding.get("clause_id", "")).strip() != str(
+        current_clause.get("clause_id", "")
+    ).strip():
+        raise ValueError("risk finding clause_id is outside the current clause whitelist")
+    matched_rule_id = str(matched_rule.get("rule_id", "")).strip()
+    finding_rule_ids = [
+        str(rule_id).strip() for rule_id in finding.get("matched_rule_ids") or []
+    ]
+    if finding_rule_ids != [matched_rule_id]:
+        raise ValueError("risk finding rule IDs are outside the matched rule whitelist")
 
 
 def generate_revision(tool_input: dict) -> dict:
@@ -88,6 +103,7 @@ def generate_revision(tool_input: dict) -> dict:
                 local_revision,
                 llm_calls=llm_calls,
             )
+            _validate_output_fields(candidate, REVISION_OUTPUT_SCHEMA, "revision output")
             revision_text = _validate_revision_candidate(candidate)
             break
         except LLMProviderError as exc:
@@ -124,6 +140,18 @@ def _validate_revision_candidate(candidate: dict) -> str:
     if not isinstance(revision_text, str) or not revision_text.strip():
         raise ValueError("revision_suggestion must be a non-empty string")
     return revision_text.strip()
+
+
+def _validate_output_fields(candidate: dict, output_schema: dict, label: str) -> None:
+    if not isinstance(candidate, dict):
+        raise ValueError(f"{label} must be a dict")
+    allowed_fields = set((output_schema.get("properties") or {}).keys())
+    unexpected_fields = set(candidate) - allowed_fields
+    if unexpected_fields:
+        raise ValueError(
+            f"{label} contains fields outside the output whitelist: "
+            f"{', '.join(sorted(str(item) for item in unexpected_fields))}"
+        )
 
 
 def _memory_references(related_memory: list) -> list[dict]:

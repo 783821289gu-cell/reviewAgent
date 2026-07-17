@@ -35,6 +35,9 @@ class ReviewContext:
     related_memory: list[dict]
     output_constraints: dict
     evidence_constraints: dict
+    prompt_version: str
+    prompt_security: dict
+    token_budget: dict
     reduction_trace: list[str]
     formal_risk_generated: bool
 

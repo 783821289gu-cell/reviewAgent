@@ -8,6 +8,12 @@ from typing import Protocol
 import httpx
 
 from config import Settings, settings
+from services.prompt_service import (
+    PROMPT_VERSION,
+    PromptPackage,
+    build_prompt_package,
+    prompt_token_report,
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,11 @@ class LLMCallMetadata:
     prompt_cost_per_million: float | None
     completion_cost_per_million: float | None
     error_type: str
+    prompt_version: str
+    estimated_prompt_tokens: int | None
+    prompt_token_breakdown: dict
+    prompt_token_budget: int | None
+    prompt_reduction_trace: list[str]
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -97,6 +108,11 @@ class LocalStructuredProvider:
             prompt_cost_per_million=None,
             completion_cost_per_million=None,
             error_type="",
+            prompt_version="",
+            estimated_prompt_tokens=None,
+            prompt_token_breakdown={},
+            prompt_token_budget=None,
+            prompt_reduction_trace=[],
         )
         _record_call(metadata, call_records)
         return LLMResponse(output=dict(request.local_output), metadata=metadata)
@@ -118,9 +134,17 @@ class OpenAICompatibleProvider:
     ) -> LLMResponse:
         start = perf_counter()
         request_id = ""
+        prompt_report = None
         try:
             self._validate_settings()
-            response = self._post(request)
+            prompt = build_prompt_package(
+                request.operation,
+                request.input_payload,
+                request.output_schema,
+            )
+            prompt_report = prompt_token_report(prompt)
+            self._validate_prompt_budget(prompt_report)
+            response = self._post(prompt)
             request_id = response.headers.get("x-request-id", "")
             if response.status_code >= 400:
                 raise _http_error(response.status_code)
@@ -139,19 +163,56 @@ class OpenAICompatibleProvider:
                 completion_tokens,
                 _elapsed_ms(start),
                 "",
+                prompt_report,
             )
             _record_call(metadata, call_records)
             return LLMResponse(output=output, metadata=metadata)
         except LLMProviderError as exc:
-            self._record_error(request, request_id, start, exc.error_type, call_records)
+            self._record_error(
+                request,
+                request_id,
+                start,
+                exc.error_type,
+                prompt_report,
+                call_records,
+            )
             raise
         except httpx.TimeoutException as exc:
             error = LLMProviderError("timeout", "LLM request timed out", True)
-            self._record_error(request, request_id, start, error.error_type, call_records)
+            self._record_error(
+                request,
+                request_id,
+                start,
+                error.error_type,
+                prompt_report,
+                call_records,
+            )
             raise error from exc
         except (httpx.NetworkError, httpx.RemoteProtocolError) as exc:
             error = LLMProviderError("temporary_error", "LLM request failed temporarily", True)
-            self._record_error(request, request_id, start, error.error_type, call_records)
+            self._record_error(
+                request,
+                request_id,
+                start,
+                error.error_type,
+                prompt_report,
+                call_records,
+            )
+            raise error from exc
+        except (OSError, RuntimeError) as exc:
+            error = LLMProviderError(
+                "configuration_error",
+                "DeepSeek tokenizer is unavailable or invalid",
+                False,
+            )
+            self._record_error(
+                request,
+                request_id,
+                start,
+                error.error_type,
+                prompt_report,
+                call_records,
+            )
             raise error from exc
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             error = LLMProviderError(
@@ -159,7 +220,14 @@ class OpenAICompatibleProvider:
                 "LLM response is not valid structured JSON",
                 False,
             )
-            self._record_error(request, request_id, start, error.error_type, call_records)
+            self._record_error(
+                request,
+                request_id,
+                start,
+                error.error_type,
+                prompt_report,
+                call_records,
+            )
             raise error from exc
 
     def _validate_settings(self) -> None:
@@ -182,16 +250,16 @@ class OpenAICompatibleProvider:
                     False,
                 )
 
-    def _post(self, request: LLMRequest) -> httpx.Response:
+    def _validate_prompt_budget(self, report: dict) -> None:
+        if report["prompt_tokens"] > self.settings.llm_context_budget_tokens:
+            raise LLMProviderError(
+                "context_budget_error",
+                "LLM prompt exceeds the configured token budget",
+                False,
+            )
+
+    def _post(self, prompt: PromptPackage) -> httpx.Response:
         base_url = self.settings.llm_base_url.rstrip("/")
-        system_message = {
-            "instruction": (
-                "Return only one JSON object. Do not include Markdown or explanatory text. "
-                "The object must conform to output_schema."
-            ),
-            "output_schema": request.output_schema,
-            "output_example": _schema_example(request.output_schema),
-        }
         with httpx.Client(
             timeout=self.settings.llm_timeout_seconds,
             transport=self.transport,
@@ -206,27 +274,7 @@ class OpenAICompatibleProvider:
                     "model": self.settings.llm_model,
                     "temperature": 0,
                     "response_format": {"type": "json_object"},
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": json.dumps(
-                                system_message,
-                                ensure_ascii=False,
-                                sort_keys=True,
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": json.dumps(
-                                {
-                                    "operation": request.operation,
-                                    "input": request.input_payload,
-                                },
-                                ensure_ascii=False,
-                                sort_keys=True,
-                            ),
-                        },
-                    ],
+                    "messages": prompt.messages,
                 },
             )
 
@@ -238,6 +286,7 @@ class OpenAICompatibleProvider:
         completion_tokens: int | None,
         latency_ms: int,
         error_type: str,
+        prompt_report: dict | None,
     ) -> LLMCallMetadata:
         cost_status, estimated_cost = _cost(
             prompt_tokens,
@@ -245,6 +294,15 @@ class OpenAICompatibleProvider:
             self.settings.llm_prompt_cost_per_million,
             self.settings.llm_completion_cost_per_million,
         )
+        token_budget = request.input_payload.get("token_budget")
+        if not isinstance(token_budget, dict):
+            token_budget = {}
+        reduction_trace = token_budget.get("reduction_trace")
+        if not isinstance(reduction_trace, list):
+            reduction_trace = []
+        prompt_token_budget = token_budget.get("max_prompt_tokens")
+        if isinstance(prompt_token_budget, bool) or not isinstance(prompt_token_budget, int):
+            prompt_token_budget = self.settings.llm_context_budget_tokens
         return LLMCallMetadata(
             mode="openai_compatible",
             operation=request.operation,
@@ -258,6 +316,11 @@ class OpenAICompatibleProvider:
             prompt_cost_per_million=self.settings.llm_prompt_cost_per_million,
             completion_cost_per_million=self.settings.llm_completion_cost_per_million,
             error_type=error_type,
+            prompt_version=PROMPT_VERSION,
+            estimated_prompt_tokens=(prompt_report or {}).get("prompt_tokens"),
+            prompt_token_breakdown=dict((prompt_report or {}).get("category_tokens") or {}),
+            prompt_token_budget=prompt_token_budget,
+            prompt_reduction_trace=[str(item) for item in reduction_trace],
         )
 
     def _record_error(
@@ -266,6 +329,7 @@ class OpenAICompatibleProvider:
         request_id: str,
         start: float,
         error_type: str,
+        prompt_report: dict | None,
         call_records: list[LLMCallMetadata] | None,
     ) -> None:
         _record_call(
@@ -276,6 +340,7 @@ class OpenAICompatibleProvider:
                 None,
                 _elapsed_ms(start),
                 error_type,
+                prompt_report,
             ),
             call_records,
         )
@@ -315,36 +380,6 @@ def _structured_output(body: dict) -> dict:
     if not isinstance(output, dict):
         raise ValueError("structured output must be an object")
     return output
-
-
-def _schema_example(schema: dict):
-    enum_values = schema.get("enum")
-    if isinstance(enum_values, list) and enum_values:
-        return enum_values[0]
-
-    schema_type = schema.get("type")
-    if schema_type == "object" or isinstance(schema.get("properties"), dict):
-        properties = schema.get("properties") or {}
-        required = schema.get("required") or list(properties)
-        return {
-            field_name: _schema_example(properties[field_name])
-            for field_name in required
-            if field_name in properties
-        }
-    if schema_type == "array":
-        item_example = _schema_example(schema.get("items") or {})
-        item_count = max(0, int(schema.get("minItems") or 0))
-        return [item_example for _index in range(item_count)]
-    if schema_type == "number":
-        return schema.get("minimum", 0.0)
-    if schema_type == "integer":
-        return schema.get("minimum", 0)
-    if schema_type == "boolean":
-        return False
-    if schema_type == "string":
-        minimum_length = max(1, int(schema.get("minLength") or 1))
-        return "x" * minimum_length
-    return None
 
 
 def _usage(body: dict) -> tuple[int | None, int | None]:

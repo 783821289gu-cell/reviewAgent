@@ -5,7 +5,12 @@ from models.risk import (
     VALID_RISK_TYPES,
     VALID_SEVERITIES,
 )
-from providers.llm_provider import LLMCallMetadata, LLMRequest, create_llm_provider
+from providers.llm_provider import (
+    LLMCallMetadata,
+    LLMOutputInvalidError,
+    LLMRequest,
+    create_llm_provider,
+)
 
 
 BROAD_DEFINITION_TERMS = ("任何", "全部", "所有", "一切", "商业信息", "技术资料", "合作资料", "business information")
@@ -98,6 +103,14 @@ def generate_structured_risk(
     attempt: int = 1,
     llm_calls: list[LLMCallMetadata] | None = None,
 ) -> dict:
+    prompt_security = review_context.get("prompt_security")
+    if isinstance(prompt_security, dict) and prompt_security.get("detected") is True:
+        signal_codes = prompt_security.get("signal_codes") or []
+        raise LLMOutputInvalidError(
+            "PROMPT_INJECTION_DETECTED: untrusted context contains instruction-like input "
+            f"({','.join(str(item) for item in signal_codes)})"
+        )
+
     debug_outputs = review_context.get("debug_llm_outputs")
     if isinstance(debug_outputs, list) and attempt <= len(debug_outputs):
         local_output = dict(debug_outputs[attempt - 1])

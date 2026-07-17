@@ -33,6 +33,7 @@ from services.evaluation_service import _docx_bytes_from_text
 from services.event_service import ReviewEventStore
 from services.log_service import invoke_tool
 from services.llm_service import REVISION_OUTPUT_SCHEMA, RISK_OUTPUT_SCHEMA
+from services.prompt_service import PROMPT_VERSION
 from services.review_service import ReviewOrchestratorAgent
 from services.risk_analyzer import analyze_risk
 
@@ -54,6 +55,7 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(values["REVIEW_AGENT_LLM_API_KEY"], "")
         self.assertEqual(values["REVIEW_AGENT_LLM_MODEL"], "deepseek-v4-pro")
         self.assertEqual(values["REVIEW_AGENT_LLM_TIMEOUT_SECONDS"], "60")
+        self.assertEqual(values["REVIEW_AGENT_LLM_CONTEXT_BUDGET_TOKENS"], "6000")
 
     def test_deepseek_fixture_request_contract_and_success_response(self):
         fixture = _deepseek_contract_fixture()
@@ -98,13 +100,19 @@ class LLMProviderTest(unittest.TestCase):
             fixture["request_contract"]["body"]["message_roles"],
         )
         system_message = json.loads(request_body["messages"][0]["content"])
-        self.assertIn("JSON object", system_message["instruction"])
-        self.assertEqual(system_message["output_schema"], RISK_OUTPUT_SCHEMA)
-        validate_risk_finding(system_message["output_example"])
-        self.assertNotIn("商业信息", request_body["messages"][0]["content"])
+        self.assertEqual(system_message["prompt_version"], PROMPT_VERSION)
+        self.assertEqual(system_message["system_policy"]["trust_level"], "system")
         self.assertEqual(
-            json.loads(request_body["messages"][1]["content"])["operation"],
-            "analyze_risk",
+            system_message["output_schema"]["schema"],
+            RISK_OUTPUT_SCHEMA,
+        )
+        validate_risk_finding(system_message["output_schema"]["example"])
+        self.assertNotIn("商业信息", request_body["messages"][0]["content"])
+        user_message = json.loads(request_body["messages"][1]["content"])
+        self.assertEqual(user_message["contract_data"]["trust_level"], "untrusted")
+        self.assertEqual(
+            user_message["contract_data"]["data"]["current_clause"]["clause_id"],
+            "CL-001",
         )
         self.assertEqual(response.output["risk_type"], "保密信息范围过宽")
         self.assertEqual(
@@ -235,12 +243,17 @@ class LLMProviderTest(unittest.TestCase):
             transport=httpx.MockTransport(handler),
         )
         logs = []
+        review_context = _review_context()
+        review_context["token_budget"] = {
+            "max_prompt_tokens": 6000,
+            "reduction_trace": ["reduced_low_relevance_memory"],
+        }
         with patch("services.llm_service.create_llm_provider", return_value=provider):
             finding = invoke_tool(
                 "task-llm-success",
                 {"analyze_risk": analyze_risk},
                 "analyze_risk",
-                {"review_context": _review_context()},
+                {"review_context": review_context},
                 logs,
             )
 
@@ -257,6 +270,26 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(call["cost_status"], "calculated")
         self.assertEqual(call["estimated_cost"], "0.0002")
         self.assertEqual(call["error_type"], "")
+        self.assertEqual(call["prompt_version"], PROMPT_VERSION)
+        self.assertGreater(call["estimated_prompt_tokens"], 0)
+        self.assertEqual(call["prompt_token_budget"], 6000)
+        self.assertEqual(
+            call["prompt_reduction_trace"],
+            ["reduced_low_relevance_memory"],
+        )
+        self.assertEqual(
+            set(call["prompt_token_breakdown"]),
+            {
+                "system_policy",
+                "task",
+                "playbook",
+                "contract_data",
+                "related_clauses",
+                "memory",
+                "evidence_constraint",
+                "output_schema",
+            },
+        )
         self.assertNotIn(api_key, logs[0].token_cost_summary)
         self.assertNotIn("商业信息、技术资料", logs[0].input_summary)
 
@@ -286,16 +319,47 @@ class LLMProviderTest(unittest.TestCase):
 
         request_body = json.loads(captured_requests[0].content.decode("utf-8"))
         system_message = json.loads(request_body["messages"][0]["content"])
-        self.assertEqual(system_message["output_schema"], REVISION_OUTPUT_SCHEMA)
+        output_contract = system_message["output_schema"]
+        self.assertEqual(output_contract["schema"], REVISION_OUTPUT_SCHEMA)
         self.assertEqual(
-            set(system_message["output_example"]),
+            set(output_contract["example"]),
             {"revision_suggestion"},
         )
         self.assertIsInstance(
-            system_message["output_example"]["revision_suggestion"],
+            output_contract["example"]["revision_suggestion"],
             str,
         )
         self.assertEqual(response.output["revision_suggestion"], "限定保密信息范围。")
+
+    def test_prompt_over_budget_is_non_retryable_and_not_sent(self):
+        sent_requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent_requests.append(request)
+            return _success_response(request, _risk_output(), request_id="unexpected")
+
+        provider = OpenAICompatibleProvider(
+            _external_settings(llm_context_budget_tokens=10),
+            transport=httpx.MockTransport(handler),
+        )
+        records = []
+        with self.assertRaises(LLMProviderError) as raised:
+            provider.generate_structured(
+                LLMRequest(
+                    operation="analyze_risk",
+                    input_payload=_review_context(),
+                    output_schema=RISK_OUTPUT_SCHEMA,
+                    local_output={},
+                ),
+                call_records=records,
+            )
+
+        self.assertEqual(raised.exception.error_type, "context_budget_error")
+        self.assertFalse(raised.exception.retryable)
+        self.assertEqual(sent_requests, [])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].error_type, "context_budget_error")
+        self.assertEqual(records[0].prompt_token_budget, 10)
 
     def test_timeout_is_retried_once_then_succeeds(self):
         calls = 0

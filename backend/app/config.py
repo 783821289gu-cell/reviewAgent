@@ -36,6 +36,13 @@ def _positive_float(name: str, default: str) -> float:
     return value
 
 
+def _positive_int(name: str, default: str) -> int:
+    raw_value = os.getenv(name, default).strip()
+    if not raw_value.isdigit() or int(raw_value) <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(raw_value)
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str = os.getenv("REVIEW_AGENT_HOST", "127.0.0.1")
@@ -48,6 +55,11 @@ class Settings:
     llm_model: str = os.getenv("REVIEW_AGENT_LLM_MODEL", "").strip()
     llm_timeout_seconds: float = field(
         default_factory=lambda: _positive_float("REVIEW_AGENT_LLM_TIMEOUT_SECONDS", "60")
+    )
+    llm_context_budget_tokens: int = field(
+        default_factory=lambda: _positive_int(
+            "REVIEW_AGENT_LLM_CONTEXT_BUDGET_TOKENS", "6000"
+        )
     )
     llm_prompt_cost_per_million: float | None = field(
         default_factory=lambda: _optional_non_negative_float("REVIEW_AGENT_LLM_PROMPT_COST_PER_1M")
