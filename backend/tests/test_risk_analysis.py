@@ -220,18 +220,61 @@ class RiskAnalysisTest(unittest.TestCase):
         finding = analyze_risk({"review_context": context})
         finding["related_memory"] = [
             {
-                "memory_id": "MEM-001",
-                "user_action": "update_suggestion",
+                "memory_id": "PREF-001",
+                "memory_type": "semantic_preference",
+                "memory_source": "sqlite_semantic_preference",
+                "match_score": 8,
+                "confidence": 0.65,
+                "can_influence_suggestion": True,
                 "final_suggestion": "历史反馈要求限定披露场景。",
-                "source_finding_id": "RISK-OLD",
-                "created_at": "2026-01-01T00:00:00+00:00",
-            }
+                "source_memory_ids": ["MEM-001", "MEM-002"],
+                "memory_injection": {"trimmed": False},
+            },
+            {
+                "memory_id": "PREF-002",
+                "memory_type": "semantic_preference",
+                "memory_source": "sqlite_semantic_preference",
+                "match_score": 7,
+                "confidence": 0.55,
+                "can_influence_suggestion": True,
+                "final_suggestion": "This lower-ranked preference was not applied.",
+                "source_memory_ids": ["MEM-003"],
+                "memory_injection": {"trimmed": False},
+            },
         ]
 
         revision = generate_revision({"finding": finding, "preferred_position": "甲方"})
 
         self.assertIn("历史反馈参考", revision["revision_suggestion"])
-        self.assertEqual(revision["memory_references"][0]["memory_id"], "MEM-001")
+        self.assertNotIn("lower-ranked", revision["revision_suggestion"])
+        self.assertEqual(len(revision["memory_references"]), 1)
+        self.assertEqual(revision["memory_references"][0]["memory_id"], "PREF-001")
+        self.assertTrue(revision["memory_references"][0]["suggestion_affected"])
+        self.assertEqual(revision["basis_rule_ids"], finding["matched_rule_ids"])
+
+    def test_generate_revision_does_not_use_conflicted_or_episodic_memory(self):
+        context = build_review_context()
+        finding = analyze_risk({"review_context": context})
+        baseline = generate_revision({"finding": finding, "preferred_position": "甲方"})
+        finding["related_memory"] = [
+            {
+                "memory_id": "PREF-CONFLICT",
+                "memory_type": "semantic_preference",
+                "can_influence_suggestion": False,
+                "final_suggestion": "Conflicted suggestion must not be used.",
+            },
+            {
+                "memory_id": "MEM-RAW",
+                "memory_type": "human_feedback",
+                "can_influence_suggestion": True,
+                "final_suggestion": "Raw feedback must not be used directly.",
+            },
+        ]
+
+        revision = generate_revision({"finding": finding, "preferred_position": "甲方"})
+
+        self.assertEqual(revision["revision_suggestion"], baseline["revision_suggestion"])
+        self.assertEqual(revision["memory_references"], [])
 
 
 def build_review_context() -> dict:

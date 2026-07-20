@@ -38,6 +38,7 @@ class ReviewContext:
     matched_rule: dict
     related_clauses: list[dict]
     related_memory: list[dict]
+    memory_trace: list[dict]
     output_constraints: dict
     evidence_constraints: dict
     prompt_version: str

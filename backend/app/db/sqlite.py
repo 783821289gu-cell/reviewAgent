@@ -143,6 +143,26 @@ def initialize(connection: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS semantic_preferences (
+            preference_id TEXT PRIMARY KEY,
+            contract_type TEXT NOT NULL,
+            clause_type TEXT NOT NULL,
+            risk_type TEXT NOT NULL,
+            review_position TEXT NOT NULL,
+            support_count INTEGER NOT NULL,
+            opposition_count INTEGER NOT NULL,
+            source_memory_ids_json TEXT NOT NULL,
+            variants_json TEXT NOT NULL,
+            conflict_status TEXT NOT NULL,
+            base_confidence REAL NOT NULL,
+            confidence REAL NOT NULL,
+            lifecycle_status TEXT NOT NULL,
+            last_feedback_at TEXT NOT NULL,
+            last_used_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (contract_type, clause_type, risk_type, review_position)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_review_tasks_status
         ON review_tasks (status, updated_at);
 
@@ -157,6 +177,11 @@ def initialize(connection: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_task_events_lookup
         ON task_events (task_id, event_id, status, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_semantic_preferences_lookup
+        ON semantic_preferences (
+            contract_type, clause_type, risk_type, review_position, confidence
+        );
         """
     )
     _ensure_column(connection, "review_tasks", "contract_classification_json", "TEXT")

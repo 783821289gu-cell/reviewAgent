@@ -1,6 +1,4 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://review-agent.local/schemas/effect-annotations-v1.json",
   "$defs": {
     "AnnotationSource": {
       "additionalProperties": false,
@@ -131,6 +129,124 @@
         "source"
       ],
       "title": "ContractAnnotation",
+      "type": "object"
+    },
+    "MemoryComparisonAnnotation": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "minLength": 1,
+          "title": "Case Id",
+          "type": "string"
+        },
+        "contract_type": {
+          "minLength": 1,
+          "title": "Contract Type",
+          "type": "string"
+        },
+        "clause_type": {
+          "minLength": 1,
+          "title": "Clause Type",
+          "type": "string"
+        },
+        "risk_type": {
+          "minLength": 1,
+          "title": "Risk Type",
+          "type": "string"
+        },
+        "review_position": {
+          "minLength": 1,
+          "title": "Review Position",
+          "type": "string"
+        },
+        "baseline_suggestion": {
+          "minLength": 1,
+          "title": "Baseline Suggestion",
+          "type": "string"
+        },
+        "expected_suggestion": {
+          "minLength": 1,
+          "title": "Expected Suggestion",
+          "type": "string"
+        },
+        "evaluation_time": {
+          "format": "date-time",
+          "title": "Evaluation Time",
+          "type": "string"
+        },
+        "stale_after_days": {
+          "exclusiveMinimum": 0,
+          "title": "Stale After Days",
+          "type": "integer"
+        },
+        "episodes": {
+          "items": {
+            "$ref": "#/$defs/MemoryEpisodeAnnotation"
+          },
+          "minItems": 1,
+          "title": "Episodes",
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/AnnotationSource"
+        }
+      },
+      "required": [
+        "case_id",
+        "contract_type",
+        "clause_type",
+        "risk_type",
+        "review_position",
+        "baseline_suggestion",
+        "expected_suggestion",
+        "evaluation_time",
+        "stale_after_days",
+        "episodes",
+        "source"
+      ],
+      "title": "MemoryComparisonAnnotation",
+      "type": "object"
+    },
+    "MemoryEpisodeAnnotation": {
+      "additionalProperties": false,
+      "properties": {
+        "memory_id": {
+          "minLength": 1,
+          "title": "Memory Id",
+          "type": "string"
+        },
+        "user_action": {
+          "enum": [
+            "accept",
+            "ignore",
+            "update_severity",
+            "update_suggestion"
+          ],
+          "title": "User Action",
+          "type": "string"
+        },
+        "final_severity": {
+          "title": "Final Severity",
+          "type": "string"
+        },
+        "final_suggestion": {
+          "title": "Final Suggestion",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "memory_id",
+        "user_action",
+        "final_severity",
+        "final_suggestion",
+        "created_at"
+      ],
+      "title": "MemoryEpisodeAnnotation",
       "type": "object"
     },
     "RelatedClauseAnnotation": {
@@ -334,6 +450,14 @@
       "minItems": 1,
       "title": "Related Clauses",
       "type": "array"
+    },
+    "memory": {
+      "items": {
+        "$ref": "#/$defs/MemoryComparisonAnnotation"
+      },
+      "minItems": 1,
+      "title": "Memory",
+      "type": "array"
     }
   },
   "required": [
@@ -341,7 +465,8 @@
     "contracts",
     "clauses",
     "risks",
-    "related_clauses"
+    "related_clauses",
+    "memory"
   ],
   "title": "EffectAnnotationBundle",
   "type": "object",
@@ -349,6 +474,7 @@
     "contracts.json",
     "clauses.json",
     "risks.json",
-    "related_clauses.json"
+    "related_clauses.json",
+    "memory.json"
   ]
 }

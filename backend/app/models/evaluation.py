@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -91,6 +92,37 @@ class RelatedClauseAnnotation(StrictModel):
         return _require_unique(values, "relevant_clause_ids")
 
 
+class MemoryEpisodeAnnotation(StrictModel):
+    memory_id: str = Field(min_length=1)
+    user_action: Literal["accept", "ignore", "update_severity", "update_suggestion"]
+    final_severity: str
+    final_suggestion: str
+    created_at: datetime
+
+
+class MemoryComparisonAnnotation(StrictModel):
+    case_id: str = Field(min_length=1)
+    contract_type: str = Field(min_length=1)
+    clause_type: str = Field(min_length=1)
+    risk_type: str = Field(min_length=1)
+    review_position: str = Field(min_length=1)
+    baseline_suggestion: str = Field(min_length=1)
+    expected_suggestion: str = Field(min_length=1)
+    evaluation_time: datetime
+    stale_after_days: int = Field(gt=0)
+    episodes: list[MemoryEpisodeAnnotation] = Field(min_length=1)
+    source: AnnotationSource
+
+    @field_validator("episodes")
+    @classmethod
+    def validate_unique_memory_ids(
+        cls,
+        values: list[MemoryEpisodeAnnotation],
+    ) -> list[MemoryEpisodeAnnotation]:
+        _require_unique([item.memory_id for item in values], "memory episode IDs")
+        return values
+
+
 class AnnotationBundle(StrictModel):
     model_config = ConfigDict(extra="forbid", title="EffectAnnotationBundle")
 
@@ -99,6 +131,7 @@ class AnnotationBundle(StrictModel):
     clauses: list[ClauseAnnotation] = Field(min_length=1)
     risks: list[RiskAnnotation] = Field(min_length=1)
     related_clauses: list[RelatedClauseAnnotation] = Field(min_length=1)
+    memory: list[MemoryComparisonAnnotation] = Field(min_length=1)
 
 
 class FailureSample(StrictModel):

@@ -27,6 +27,7 @@ from providers.embedding_provider import create_embedding_provider
 from services.event_service import ReviewEventStore
 from services.feedback_service import apply_feedback_to_task
 from services.log_service import invoke_tool
+from services.memory_service import evaluate_memory_comparison
 from services.review_service import ReviewOrchestratorAgent
 from tools.registry import tool_registry
 
@@ -169,6 +170,12 @@ def run_effect_evaluation(tool_input: dict | None = None) -> dict:
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    _write_memory_comparison(
+        output_dir,
+        evaluation_id,
+        created_at,
+        evaluate_memory_comparison(annotations.memory),
+    )
     report_dir = output_dir / "reports" / evaluation_id
     memory_db_path = str(output_dir / "effect_evaluation_memory.sqlite3")
     runs = [
@@ -233,7 +240,16 @@ def _load_effect_config(samples_dir: Path) -> dict:
             "manifest.json",
             "effect_evaluation config is missing",
         )
-    required = {"annotation_version", "schema", "contracts", "clauses", "risks", "related_clauses", "parameters"}
+    required = {
+        "annotation_version",
+        "schema",
+        "contracts",
+        "clauses",
+        "risks",
+        "related_clauses",
+        "memory",
+        "parameters",
+    }
     missing = sorted(required - set(config))
     if missing:
         raise AnnotationLoadError(
@@ -267,7 +283,7 @@ def _load_annotations(samples_dir: Path, config: dict) -> AnnotationBundle:
     _validate_annotation_schema(schema)
 
     payloads = {}
-    for key in ("contracts", "clauses", "risks", "related_clauses"):
+    for key in ("contracts", "clauses", "risks", "related_clauses", "memory"):
         path = _safe_annotation_path(samples_dir, str(config[key]))
         payload = _read_annotation_json(path, path.name)
         if payload.get("annotation_version") != config["annotation_version"]:
@@ -389,6 +405,33 @@ def _validate_annotation_references(bundle: AnnotationBundle) -> None:
                 case.case_id,
                 f"related clause candidates are missing labels: {', '.join(sorted(missing))}",
             )
+    memory_case_ids = [item.case_id for item in bundle.memory]
+    if len(memory_case_ids) != len(set(memory_case_ids)):
+        raise AnnotationLoadError(
+            "invalid_annotation",
+            "memory.json",
+            "memory comparison case_id values must be unique",
+        )
+
+
+def _write_memory_comparison(
+    output_dir: Path,
+    evaluation_id: str,
+    created_at: str,
+    comparison: dict,
+) -> Path:
+    path = output_dir / f"{evaluation_id}_memory_comparison.json"
+    payload = {
+        "evaluation_id": evaluation_id,
+        "created_at": created_at,
+        "claim": (
+            "Memory effect is measured on the declared synthetic comparison cases; "
+            "no improvement is claimed unless the measured consistency delta is positive."
+        ),
+        **comparison,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
 
 
 def _collect_versions(annotation_version: str, parameters: dict) -> EvaluationVersion:

@@ -1,0 +1,108 @@
+{
+  "annotation_version": "effect-v1",
+  "items": [
+    {
+      "case_id": "memory-aligned-improves-001",
+      "contract_type": "NDA",
+      "clause_type": "use_restriction",
+      "risk_type": "unclear_use_restriction",
+      "review_position": "party_b",
+      "baseline_suggestion": "Use standard wording.",
+      "expected_suggestion": "Limit use to evaluation of the proposed transaction.",
+      "evaluation_time": "2026-01-15T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-001",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Limit use to evaluation of the proposed transaction.",
+          "created_at": "2026-01-10T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic feedback fixture for Memory comparison testing."
+      }
+    },
+    {
+      "case_id": "memory-aligned-regresses-002",
+      "contract_type": "NDA",
+      "clause_type": "permitted_disclosure",
+      "risk_type": "broad_permitted_disclosure",
+      "review_position": "party_a",
+      "baseline_suggestion": "Require prior written consent.",
+      "expected_suggestion": "Require prior written consent.",
+      "evaluation_time": "2026-01-15T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-002",
+          "user_action": "update_suggestion",
+          "final_severity": "low",
+          "final_suggestion": "Allow disclosure to any affiliate.",
+          "created_at": "2026-01-11T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic counterexample that prevents preset Memory effectiveness."
+      }
+    },
+    {
+      "case_id": "memory-conflict-blocked-003",
+      "contract_type": "NDA",
+      "clause_type": "confidentiality_term",
+      "risk_type": "unreasonable_confidentiality_term",
+      "review_position": "party_b",
+      "baseline_suggestion": "Use a three-year confidentiality term.",
+      "expected_suggestion": "Use a three-year confidentiality term.",
+      "evaluation_time": "2026-01-15T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-003-A",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use a two-year confidentiality term.",
+          "created_at": "2026-01-09T00:00:00+00:00"
+        },
+        {
+          "memory_id": "MEM-ANN-003-B",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use a five-year confidentiality term.",
+          "created_at": "2026-01-12T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic conflicting feedback fixture for Memory comparison testing."
+      }
+    },
+    {
+      "case_id": "memory-expired-blocked-004",
+      "contract_type": "NDA",
+      "clause_type": "liability",
+      "risk_type": "unlimited_liability",
+      "review_position": "party_b",
+      "baseline_suggestion": "Add a reasonable liability cap.",
+      "expected_suggestion": "Add a reasonable liability cap.",
+      "evaluation_time": "2026-06-01T00:00:00+00:00",
+      "stale_after_days": 30,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-004",
+          "user_action": "accept",
+          "final_severity": "medium",
+          "final_suggestion": "Use the prior uncapped language.",
+          "created_at": "2025-01-01T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic expired feedback fixture for Memory lifecycle testing."
+      }
+    }
+  ]
+}

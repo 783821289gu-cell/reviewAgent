@@ -24,6 +24,7 @@ from services.evaluation_service import (
     _load_effect_config,
     run_effect_evaluation,
 )
+from services.memory_service import evaluate_memory_comparison
 
 
 class EffectEvaluationTest(unittest.TestCase):
@@ -118,6 +119,7 @@ class EffectEvaluationTest(unittest.TestCase):
         self.assertEqual(len(bundle.clauses), 6)
         self.assertEqual(len(bundle.risks), 3)
         self.assertEqual(len(bundle.related_clauses), 11)
+        self.assertEqual(len(bundle.memory), 4)
         self.assertEqual(config["related_clause_dataset"]["revision"], "hybrid-retrieval-v1")
         self.assertEqual(config["related_clause_dataset"]["case_count"], 11)
         self.assertEqual(config["related_clause_dataset"]["risk_type_count"], 8)
@@ -125,7 +127,15 @@ class EffectEvaluationTest(unittest.TestCase):
         self.assertTrue(
             all(item.source.source_type == "synthetic" for item in bundle.contracts)
         )
+        self.assertTrue(all(item.source.source_type == "synthetic" for item in bundle.memory))
         self.assertTrue(all("客户合同" in item.source.note or "测试夹具" in item.source.note for item in bundle.contracts))
+
+        comparison = evaluate_memory_comparison(bundle.memory)
+        self.assertEqual(comparison["without_memory_consistent_count"], 3)
+        self.assertEqual(comparison["with_memory_consistent_count"], 3)
+        self.assertEqual(comparison["consistency_delta"], 0)
+        self.assertFalse(comparison["improved"])
+        self.assertEqual(comparison["conclusion"], "not_improved")
 
     def test_schema_drift_is_recorded_as_invalid_annotation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -188,6 +198,11 @@ class EffectEvaluationTest(unittest.TestCase):
             markdown_path = Path(summary["markdown_path"])
             persisted = json.loads(summary_path.read_text(encoding="utf-8"))
             markdown = markdown_path.read_text(encoding="utf-8")
+            memory_paths = list(
+                (Path(temp_dir) / "effect").glob("*_memory_comparison.json")
+            )
+            self.assertEqual(len(memory_paths), 1)
+            memory_comparison = json.loads(memory_paths[0].read_text(encoding="utf-8"))
 
         metrics = {item["metric"]: item for item in summary["metrics"]}
         expected_metrics = {
@@ -211,6 +226,9 @@ class EffectEvaluationTest(unittest.TestCase):
         self.assertEqual(summary["sample_count"], 6)
         self.assertEqual(summary["claim"], EFFECT_NO_PRODUCTION_CLAIM)
         self.assertEqual(summary["status"], "completed")
+        self.assertEqual(memory_comparison["consistency_delta"], 0)
+        self.assertFalse(memory_comparison["improved"])
+        self.assertEqual(memory_comparison["conclusion"], "not_improved")
         self.assertEqual(metrics["related_clause_recall_at_k"]["sample_count"], 11)
         self.assertEqual(metrics["related_clause_recall_at_k"]["passed_count"], 11)
         self.assertEqual(metrics["related_clause_recall_at_k"]["failed_count"], 0)

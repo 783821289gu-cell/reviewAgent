@@ -268,7 +268,9 @@ class RetrievalContextTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual([item["memory_id"] for item in memories], ["MEM-001"])
+        self.assertEqual(len(memories), 1)
+        self.assertEqual(memories[0]["memory_type"], "semantic_preference")
+        self.assertEqual(memories[0]["source_memory_ids"], ["MEM-001"])
         self.assertEqual(memories[0]["memory_source"], "provided_memory_items")
 
     def test_memory_retrieval_without_provided_items_returns_empty(self):
@@ -324,6 +326,12 @@ class RetrievalContextTest(unittest.TestCase):
         self.assertTrue(context["evidence_constraints"]["must_bind_to_original_clause"])
         self.assertFalse(context["formal_risk_generated"])
         self.assertEqual(context["reduction_trace"][0], "reduced_low_relevance_memory")
+        self.assertEqual(context["memory_trace"][0]["memory_id"], "MEM-001")
+        self.assertTrue(context["memory_trace"][0]["trimmed"])
+        self.assertEqual(
+            context["memory_trace"][0]["trim_reason"],
+            "context_token_budget",
+        )
         self.assertIn("reduced_low_rank_related_clause", context["reduction_trace"])
         self.assertLessEqual(context["token_budget"]["final_prompt_tokens"], 1200)
         self.assertEqual(context["token_budget"]["max_prompt_tokens"], 1200)

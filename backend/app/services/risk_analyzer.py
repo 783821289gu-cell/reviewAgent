@@ -156,17 +156,29 @@ def _validate_output_fields(candidate: dict, output_schema: dict, label: str) ->
 
 def _memory_references(related_memory: list) -> list[dict]:
     references = []
-    for item in related_memory[:3]:
+    for item in related_memory:
         if not isinstance(item, dict):
+            continue
+        injection = item.get("memory_injection") or {}
+        if item.get("memory_type") != "semantic_preference":
+            continue
+        if not item.get("can_influence_suggestion"):
+            continue
+        if injection.get("trimmed"):
             continue
         references.append(
             {
                 "memory_id": str(item.get("memory_id", "")),
-                "user_action": str(item.get("user_action", "")),
+                "memory_type": "semantic_preference",
+                "memory_source": str(item.get("memory_source", "")),
+                "match_score": item.get("match_score", 0),
+                "confidence": item.get("confidence", 0.0),
                 "final_severity": str(item.get("final_severity", "")),
                 "final_suggestion": str(item.get("final_suggestion", "")),
-                "source_finding_id": str(item.get("source_finding_id", "")),
-                "created_at": str(item.get("created_at", "")),
+                "source_memory_ids": list(item.get("source_memory_ids") or []),
+                "suggestion_affected": True,
+                "trimmed": False,
             }
         )
+        break
     return references

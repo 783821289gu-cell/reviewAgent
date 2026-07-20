@@ -1,6 +1,8 @@
 import sqlite3
+import json
 
 from db.sqlite import connect
+from models.memory import build_semantic_preference
 
 
 class MemoryRepository:
@@ -47,6 +49,7 @@ class MemoryRepository:
                     idempotency_key,
                 ),
             )
+            self._rebuild_preference(connection, item)
             connection.commit()
             return item
         except Exception:
@@ -80,6 +83,90 @@ class MemoryRepository:
         finally:
             connection.close()
 
+    def find_preferences(
+        self,
+        contract_type: str,
+        clause_type: str,
+        risk_type: str,
+        review_position: str,
+    ) -> list[sqlite3.Row]:
+        connection = connect(self.db_path)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._backfill_missing_preferences(
+                connection,
+                contract_type,
+                clause_type,
+                risk_type,
+                review_position,
+            )
+            rows = connection.execute(
+                """
+                SELECT * FROM semantic_preferences
+                WHERE contract_type = ?
+                  AND clause_type = ?
+                  AND risk_type = ?
+                  AND review_position IN ('', ?)
+                ORDER BY
+                    CASE WHEN review_position = ? THEN 0 ELSE 1 END,
+                    confidence DESC,
+                    last_feedback_at DESC
+                """,
+                (
+                    contract_type,
+                    clause_type,
+                    risk_type,
+                    review_position,
+                    review_position,
+                ),
+            ).fetchall()
+            connection.commit()
+            return rows
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def update_preference_lifecycle(
+        self,
+        preference_id: str,
+        *,
+        lifecycle_status: str,
+        confidence: float,
+        updated_at: str,
+        last_used_at: str | None = None,
+    ) -> None:
+        connection = connect(self.db_path)
+        try:
+            if last_used_at is None:
+                connection.execute(
+                    """
+                    UPDATE semantic_preferences
+                    SET lifecycle_status = ?, confidence = ?, updated_at = ?
+                    WHERE preference_id = ?
+                    """,
+                    (lifecycle_status, confidence, updated_at, preference_id),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE semantic_preferences
+                    SET lifecycle_status = ?, confidence = ?, last_used_at = ?, updated_at = ?
+                    WHERE preference_id = ?
+                    """,
+                    (
+                        lifecycle_status,
+                        confidence,
+                        last_used_at,
+                        updated_at,
+                        preference_id,
+                    ),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+
     def _get_by_idempotency(
         self,
         connection: sqlite3.Connection,
@@ -90,6 +177,123 @@ class MemoryRepository:
             (idempotency_key,),
         ).fetchone()
         return _row_to_dict(row) if row is not None else None
+
+    def _backfill_missing_preferences(
+        self,
+        connection: sqlite3.Connection,
+        contract_type: str,
+        clause_type: str,
+        risk_type: str,
+        review_position: str,
+    ) -> None:
+        positions = connection.execute(
+            """
+            SELECT DISTINCT review_position FROM memory_items
+            WHERE contract_type = ?
+              AND clause_type = ?
+              AND risk_type = ?
+              AND review_position IN ('', ?)
+            """,
+            (contract_type, clause_type, risk_type, review_position),
+        ).fetchall()
+        for position_row in positions:
+            position = str(position_row["review_position"])
+            exists = connection.execute(
+                """
+                SELECT 1 FROM semantic_preferences
+                WHERE contract_type = ? AND clause_type = ? AND risk_type = ?
+                  AND review_position = ?
+                """,
+                (contract_type, clause_type, risk_type, position),
+            ).fetchone()
+            if exists is None:
+                self._rebuild_preference(
+                    connection,
+                    {
+                        "contract_type": contract_type,
+                        "clause_type": clause_type,
+                        "risk_type": risk_type,
+                        "review_position": position,
+                    },
+                )
+
+    def _rebuild_preference(
+        self,
+        connection: sqlite3.Connection,
+        item: dict,
+    ) -> None:
+        group = (
+            str(item["contract_type"]),
+            str(item["clause_type"]),
+            str(item["risk_type"]),
+            str(item["review_position"]),
+        )
+        rows = connection.execute(
+            """
+            SELECT * FROM memory_items
+            WHERE contract_type = ? AND clause_type = ? AND risk_type = ?
+              AND review_position = ?
+            ORDER BY created_at, memory_id
+            """,
+            group,
+        ).fetchall()
+        if not rows:
+            return
+        existing = connection.execute(
+            """
+            SELECT last_used_at FROM semantic_preferences
+            WHERE contract_type = ? AND clause_type = ? AND risk_type = ?
+              AND review_position = ?
+            """,
+            group,
+        ).fetchone()
+        preference = build_semantic_preference(
+            [_row_to_dict(row) for row in rows],
+            last_used_at=str(existing["last_used_at"]) if existing is not None else "",
+        ).to_dict()
+        connection.execute(
+            """
+            INSERT INTO semantic_preferences (
+                preference_id, contract_type, clause_type, risk_type, review_position,
+                support_count, opposition_count, source_memory_ids_json, variants_json,
+                conflict_status, base_confidence, confidence, lifecycle_status,
+                last_feedback_at, last_used_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(contract_type, clause_type, risk_type, review_position)
+            DO UPDATE SET
+                preference_id = excluded.preference_id,
+                support_count = excluded.support_count,
+                opposition_count = excluded.opposition_count,
+                source_memory_ids_json = excluded.source_memory_ids_json,
+                variants_json = excluded.variants_json,
+                conflict_status = excluded.conflict_status,
+                base_confidence = excluded.base_confidence,
+                confidence = excluded.confidence,
+                lifecycle_status = excluded.lifecycle_status,
+                last_feedback_at = excluded.last_feedback_at,
+                last_used_at = excluded.last_used_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                preference["preference_id"],
+                preference["contract_type"],
+                preference["clause_type"],
+                preference["risk_type"],
+                preference["review_position"],
+                preference["support_count"],
+                preference["opposition_count"],
+                json.dumps(preference["source_memory_ids"], ensure_ascii=False),
+                json.dumps(preference["variants"], ensure_ascii=False),
+                preference["conflict_status"],
+                preference["base_confidence"],
+                preference["confidence"],
+                preference["lifecycle_status"],
+                preference["last_feedback_at"],
+                preference["last_used_at"],
+                preference["updated_at"],
+            ),
+        )
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:

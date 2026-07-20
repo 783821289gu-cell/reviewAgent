@@ -43,7 +43,7 @@ def build_review_context(
     retained_clause = dict(current_clause)
     retained_rule = dict(matched_rule)
     retained_related_clauses = list(related_clauses)
-    retained_memory = list(related_memory)
+    retained_memory, memory_trace = _prepare_memory_trace(related_memory)
     reduction_trace: list[str] = []
     protected_context_compacted = False
     prompt_security = detect_prompt_injection(
@@ -60,6 +60,7 @@ def build_review_context(
             retained_rule,
             retained_related_clauses,
             retained_memory,
+            memory_trace,
             prompt_security,
             {},
             reduction_trace,
@@ -83,13 +84,15 @@ def build_review_context(
                 retained_rule,
                 retained_related_clauses,
                 retained_memory,
+                memory_trace,
                 prompt_security,
                 token_budget,
                 reduction_trace,
             ).to_dict()
 
         if retained_memory:
-            retained_memory.pop()
+            removed_memory = retained_memory.pop()
+            _mark_memory_trimmed(memory_trace, removed_memory)
             reduction_trace.append("reduced_low_relevance_memory")
             continue
         if retained_related_clauses:
@@ -116,6 +119,7 @@ def _make_context(
     matched_rule: dict,
     related_clauses: list[dict],
     related_memory: list[dict],
+    memory_trace: list[dict],
     prompt_security: dict,
     token_budget: dict,
     reduction_trace: list[str],
@@ -133,6 +137,7 @@ def _make_context(
         matched_rule=resolved_rule,
         related_clauses=related_clauses,
         related_memory=related_memory,
+        memory_trace=memory_trace,
         output_constraints=dict(OUTPUT_CONSTRAINTS),
         evidence_constraints=dict(EVIDENCE_CONSTRAINTS),
         prompt_version=PROMPT_VERSION,
@@ -141,6 +146,43 @@ def _make_context(
         reduction_trace=list(reduction_trace),
         formal_risk_generated=False,
     )
+
+
+def _prepare_memory_trace(related_memory: list[dict]) -> tuple[list[dict], list[dict]]:
+    retained = []
+    trace = []
+    for raw_item in related_memory:
+        if not isinstance(raw_item, dict):
+            continue
+        item = dict(raw_item)
+        injection = dict(item.get("memory_injection") or {})
+        injection.setdefault("source", str(item.get("memory_source", "unknown")))
+        injection.setdefault("match_score", item.get("match_score", 0))
+        injection.setdefault(
+            "suggestion_eligible",
+            bool(item.get("can_influence_suggestion", False)),
+        )
+        injection.setdefault("suggestion_affected", False)
+        injection["trimmed"] = False
+        injection["trim_reason"] = ""
+        item["memory_injection"] = injection
+        retained.append(item)
+        trace.append(
+            {
+                "memory_id": str(item.get("memory_id", "")),
+                **injection,
+            }
+        )
+    return retained, trace
+
+
+def _mark_memory_trimmed(memory_trace: list[dict], removed_memory: dict) -> None:
+    memory_id = str(removed_memory.get("memory_id", ""))
+    for item in memory_trace:
+        if item["memory_id"] == memory_id:
+            item["trimmed"] = True
+            item["trim_reason"] = "context_token_budget"
+            return
 
 
 def _review_context_token_report(context: dict) -> dict:

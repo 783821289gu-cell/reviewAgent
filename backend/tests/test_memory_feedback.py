@@ -44,9 +44,11 @@ class MemoryFeedbackTest(unittest.TestCase):
         self.assertEqual(memory_item["memory_type"], "human_feedback")
         self.assertEqual(memory_item["user_action"], "update_suggestion")
         self.assertEqual(memory_item["source_finding_id"], "RISK-001")
-        self.assertEqual([item["memory_id"] for item in memories], [memory_item["memory_id"]])
-        self.assertEqual(memories[0]["memory_source"], "sqlite_memory")
+        self.assertEqual(memories[0]["memory_type"], "semantic_preference")
+        self.assertEqual(memories[0]["source_memory_ids"], [memory_item["memory_id"]])
+        self.assertEqual(memories[0]["memory_source"], "sqlite_semantic_preference")
         self.assertEqual(memories[0]["final_suggestion"], "限定使用目的为评估合作。")
+        self.assertTrue(memories[0]["can_influence_suggestion"])
 
     def test_feedback_updates_task_and_writes_memory_through_registry(self):
         event_store = ReviewEventStore()
@@ -96,7 +98,9 @@ class MemoryFeedbackTest(unittest.TestCase):
         self.assertEqual(updated_risk["review_status"], "IGNORED_RISK")
         self.assertFalse(updated_risk["include_in_report"])
         self.assertEqual(updated_risk["feedback"]["memory_id"], result["memory_item"]["memory_id"])
-        self.assertEqual(memories[0]["user_action"], "ignore")
+        self.assertEqual(memories[0]["opposition_count"], 1)
+        self.assertEqual(memories[0]["support_count"], 0)
+        self.assertFalse(memories[0]["can_influence_suggestion"])
         self.assertEqual(updated_task["logs"][-1]["tool_name"], "write_memory")
         self.assertEqual(updated_task["logs"][-1]["status"], "success")
 
