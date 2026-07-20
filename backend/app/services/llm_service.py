@@ -1,5 +1,7 @@
 from config import settings
 from models.risk import (
+    CriticDecision,
+    CriticReasonCode,
     VALID_REVIEW_POSITIONS,
     VALID_REVIEW_STATUSES,
     VALID_RISK_TYPES,
@@ -141,6 +143,15 @@ PLANNER_OUTPUT_SCHEMA = {
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     },
 }
+CRITIC_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["decision", "reason_code"],
+    "properties": {
+        "decision": {"enum": [decision.value for decision in CriticDecision]},
+        "reason_code": {"enum": [reason.value for reason in CriticReasonCode]},
+    },
+}
 
 
 def generate_structured_risk(
@@ -226,6 +237,20 @@ def generate_structured_planner(
         operation="plan_review_action",
         input_payload=planner_input,
         output_schema=PLANNER_OUTPUT_SCHEMA,
+        local_output=local_output,
+        llm_calls=llm_calls,
+    )
+
+
+def generate_structured_critic(
+    critic_input: dict,
+    local_output: dict,
+    llm_calls: list[LLMCallMetadata] | None = None,
+) -> dict:
+    return _generate_structured(
+        operation="criticize_risk",
+        input_payload=critic_input,
+        output_schema=CRITIC_OUTPUT_SCHEMA,
         local_output=local_output,
         llm_calls=llm_calls,
     )

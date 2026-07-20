@@ -53,7 +53,7 @@
       "method": "GET",
       "path": "/api/tools",
       "status": 200,
-      "tool_count": 13,
+      "tool_count": 14,
       "tools": [
         {
           "name": "parse_document",
@@ -118,6 +118,14 @@
           "calls_llm": true,
           "runtime_calls_llm": false,
           "runtime_llm_mode": "local_structured_no_external_llm"
+        },
+        {
+          "name": "criticize_risk",
+          "input_keys": ["finding", "current_clause", "matched_rule"],
+          "output_keys": ["decision", "reason_code"],
+          "calls_llm": true,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "deterministic_support_check_no_external_llm"
         },
         {
           "name": "plan_review_action",
@@ -235,7 +243,7 @@
         "status": "HUMAN_REVIEW_PENDING",
         "clause_count": 4,
         "risk_count": 4,
-        "log_count": 34
+        "log_count": 38
       }
     },
     "events": {

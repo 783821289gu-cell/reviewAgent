@@ -5,6 +5,7 @@ from db.repositories import RecoveryError
 from models.contract import clause_from_dict, contract_document_from_dict
 from models.log import StepLog
 from models.planner import PlannerAction, PlannerReasonCode
+from models.risk import CriticDecision, CriticReasonCode
 from models.review import AgentState, ReviewPosition, ReviewStatus
 from parsers.pdf_parser import PdfParseError
 from providers.llm_provider import LLMOutputInvalidError
@@ -12,6 +13,7 @@ from services.context_builder import build_review_context
 from services.event_service import ReviewEventStore, review_event_store
 from services.log_service import invoke_tool
 from services.planner_service import PlannerOutputInvalidError
+from services.risk_critic import CriticOutputInvalidError
 from tools.registry import tool_registry
 
 
@@ -502,6 +504,7 @@ class ReviewOrchestratorAgent:
                         raise ValueError("risk finding cannot be mapped back to review context")
                     active_context = review_context
                     planner_requested_human = False
+                    critic_requested_human = False
 
                     if _is_low_confidence(finding):
                         decision = _invoke_planner(
@@ -548,25 +551,59 @@ class ReviewOrchestratorAgent:
                             return
 
                     while finding["review_status"] != "NO_RISK":
-                        finding = dict(finding)
-                        finding["related_memory"] = list(
-                            review_context.get("related_memory") or []
-                        )
-                        revision = invoke_tool(
+                        critic_result = invoke_tool(
                             task_id,
                             tool_registry,
-                            "generate_revision",
+                            "criticize_risk",
                             {
                                 "finding": finding,
-                                "preferred_position": state.review_position.value,
+                                "current_clause": review_context["current_clause"],
+                                "matched_rule": review_context["matched_rule"],
                             },
                             logs,
-                            step_name="revision_generation",
+                            step_name="risk_critique",
                         )
-                        finding["revision_suggestion"] = revision["revision_suggestion"]
-                        if revision.get("memory_references"):
-                            finding["memory_references"] = revision["memory_references"]
-                        finding.pop("related_memory", None)
+                        _append_critic_trace(review_context, finding, critic_result)
+                        if (
+                            critic_result["reason_code"]
+                            == CriticReasonCode.PROMPT_INJECTION_DETECTED.value
+                        ):
+                            self.event_store.update_task(
+                                task_id,
+                                ReviewStatus.NEED_MANUAL_REVIEW,
+                                "Critic 检测到不可信指令文本，已停止该候选进入正式风险流程。",
+                                step_name="critic_injection_blocked",
+                                tool_name="criticize_risk",
+                                review_contexts=review_contexts,
+                                analysis_results=analysis_results,
+                                evidence_results=evidence_results,
+                                risk_findings=[],
+                                logs=[log.to_dict() for log in logs],
+                            )
+                            return
+                        critic_requested_human = (
+                            critic_result["decision"] != CriticDecision.PASS.value
+                        )
+                        finding = dict(finding)
+                        if not critic_requested_human:
+                            finding["related_memory"] = list(
+                                review_context.get("related_memory") or []
+                            )
+                            revision = invoke_tool(
+                                task_id,
+                                tool_registry,
+                                "generate_revision",
+                                {
+                                    "finding": finding,
+                                    "preferred_position": state.review_position.value,
+                                },
+                                logs,
+                                step_name="revision_generation",
+                            )
+                            finding["revision_suggestion"] = revision["revision_suggestion"]
+                            if revision.get("memory_references"):
+                                finding["memory_references"] = revision["memory_references"]
+                            finding.pop("related_memory", None)
                         evidence_result = invoke_tool(
                             task_id,
                             tool_registry,
@@ -642,9 +679,46 @@ class ReviewOrchestratorAgent:
                         continue
                     if evidence_result.get("source_location"):
                         finding["evidence_location"] = evidence_result["source_location"]
-                    if planner_requested_human or _requires_manual_review(finding):
+                    if (
+                        planner_requested_human
+                        or critic_requested_human
+                        or _requires_manual_review(finding)
+                    ):
                         finding["review_status"] = "NEED_MANUAL_REVIEW"
                     risk_findings.append(finding)
+            except CriticOutputInvalidError as exc:
+                if isinstance(active_context, dict):
+                    try:
+                        decision = _invoke_planner(
+                            task_id,
+                            logs,
+                            PlannerReasonCode.STRUCTURED_OUTPUT_INVALID,
+                            ReviewStatus.RISK_ANALYZED,
+                            str(active_context["current_clause"]["clause_id"]),
+                            clauses_payload,
+                            retrieval_repair_count,
+                            str(exc),
+                        )
+                        _append_planner_trace(
+                            active_context,
+                            decision,
+                            retrieval_repair_count,
+                        )
+                    except Exception:
+                        pass
+                self.event_store.update_task(
+                    task_id,
+                    ReviewStatus.LLM_OUTPUT_INVALID,
+                    f"Critic 结构化输出无效：{exc}",
+                    step_name="critic_output_invalid",
+                    tool_name="criticize_risk",
+                    review_contexts=review_contexts,
+                    analysis_results=analysis_results,
+                    evidence_results=evidence_results,
+                    risk_findings=[],
+                    logs=[log.to_dict() for log in logs],
+                )
+                return
             except PlannerOutputInvalidError as exc:
                 self.event_store.update_task(
                     task_id,
@@ -865,6 +939,22 @@ def _append_planner_trace(
         review_context["planner_retry_count"] = retry_count
 
 
+def _append_critic_trace(
+    review_context: dict,
+    finding: dict,
+    critic_result: dict,
+) -> None:
+    trace = list(review_context.get("critic_trace") or [])
+    trace.append(
+        {
+            "risk_id": str(finding.get("risk_id", "")),
+            "decision": critic_result["decision"],
+            "reason_code": critic_result["reason_code"],
+        }
+    )
+    review_context["critic_trace"] = trace
+
+
 def _planner_retry_count(review_contexts: list[dict]) -> int:
     counts = [
         int(context.get("planner_retry_count", 0))
@@ -921,6 +1011,7 @@ def _rebuild_review_context(
     )
     rebuilt["planner_trace"] = list(review_context.get("planner_trace") or [])
     rebuilt["planner_retry_count"] = retry_count
+    rebuilt["critic_trace"] = list(review_context.get("critic_trace") or [])
     return rebuilt
 
 

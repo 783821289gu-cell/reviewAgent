@@ -1,4 +1,5 @@
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from math import isfinite
 
 
@@ -16,6 +17,35 @@ VALID_RISK_TYPES = {
 VALID_SEVERITIES = {"高", "中", "低"}
 VALID_REVIEW_STATUSES = {"CONFIRMED_RISK", "NEED_MANUAL_REVIEW", "NO_RISK"}
 VALID_REVIEW_POSITIONS = {"甲方", "乙方"}
+
+
+class CriticDecision(StrEnum):
+    PASS = "PASS"
+    REJECT = "REJECT"
+    REQUEST_HUMAN_REVIEW = "REQUEST_HUMAN_REVIEW"
+
+
+class CriticReasonCode(StrEnum):
+    SUPPORTED_BY_EVIDENCE_AND_PLAYBOOK = "SUPPORTED_BY_EVIDENCE_AND_PLAYBOOK"
+    CLAUSE_MISMATCH = "CLAUSE_MISMATCH"
+    EVIDENCE_UNSUPPORTED = "EVIDENCE_UNSUPPORTED"
+    PLAYBOOK_MISMATCH = "PLAYBOOK_MISMATCH"
+    REASON_SUPPORT_AMBIGUOUS = "REASON_SUPPORT_AMBIGUOUS"
+    PROMPT_INJECTION_DETECTED = "PROMPT_INJECTION_DETECTED"
+
+
+CRITIC_REASONS_BY_DECISION = {
+    CriticDecision.PASS: {CriticReasonCode.SUPPORTED_BY_EVIDENCE_AND_PLAYBOOK},
+    CriticDecision.REJECT: {
+        CriticReasonCode.CLAUSE_MISMATCH,
+        CriticReasonCode.EVIDENCE_UNSUPPORTED,
+        CriticReasonCode.PLAYBOOK_MISMATCH,
+    },
+    CriticDecision.REQUEST_HUMAN_REVIEW: {
+        CriticReasonCode.REASON_SUPPORT_AMBIGUOUS,
+        CriticReasonCode.PROMPT_INJECTION_DETECTED,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -49,6 +79,36 @@ class EvidenceResult:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class CriticResult:
+    decision: CriticDecision
+    reason_code: CriticReasonCode
+
+    def to_dict(self) -> dict:
+        return {
+            "decision": self.decision.value,
+            "reason_code": self.reason_code.value,
+        }
+
+
+def validate_critic_result(payload: dict) -> CriticResult:
+    if not isinstance(payload, dict):
+        raise ValueError("critic result must be a dict")
+    if set(payload) != {"decision", "reason_code"}:
+        raise ValueError("critic result fields do not match the output whitelist")
+    try:
+        decision = CriticDecision(payload["decision"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("critic decision is not allowed") from exc
+    try:
+        reason_code = CriticReasonCode(payload["reason_code"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("critic reason_code is not allowed") from exc
+    if reason_code not in CRITIC_REASONS_BY_DECISION[decision]:
+        raise ValueError("critic reason_code is not allowed for decision")
+    return CriticResult(decision=decision, reason_code=reason_code)
 
 
 def validate_risk_finding(payload: dict) -> RiskFinding:

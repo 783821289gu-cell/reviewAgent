@@ -6,6 +6,7 @@ LOCAL_NO_EXTERNAL_LLM_MODES = {
     "classify_contract_type": "deterministic_features_no_external_llm",
     "extract_key_fields": "rule_based_no_external_llm",
     "analyze_risk": "local_structured_no_external_llm",
+    "criticize_risk": "deterministic_support_check_no_external_llm",
     "plan_review_action": "deterministic_policy_no_external_llm",
     "generate_revision": "local_template_no_external_llm",
 }
@@ -106,6 +107,20 @@ tool_contracts = {
         output_schema={"risk_finding": "dict"},
         calls_llm=True,
         description="基于审查上下文输出结构化风险判断。",
+    ),
+    "criticize_risk": ToolContract(
+        name="criticize_risk",
+        input_schema={
+            "finding": "validated RiskFinding",
+            "current_clause": "current contract clause",
+            "matched_rule": "matched Playbook rule",
+        },
+        output_schema={
+            "decision": "PASS|REJECT|REQUEST_HUMAN_REVIEW",
+            "reason_code": "fixed enum",
+        },
+        calls_llm=True,
+        description="独立检查 Analyzer 风险原因是否得到当前条款原文和 Playbook 支持；不生成或修改证据、风险和规则。",
     ),
     "plan_review_action": ToolContract(
         name="plan_review_action",

@@ -7,6 +7,7 @@ from services.planner_service import plan_review_action
 from services.playbook_service import retrieve_playbook_rules
 from services.report_service import generate_report
 from services.risk_analyzer import analyze_risk, generate_revision
+from services.risk_critic import criticize_risk
 from services.evidence_service import verify_evidence
 from tools.contracts import runtime_calls_llm, runtime_llm_mode, tool_contracts
 
@@ -20,6 +21,7 @@ tool_registry = {
     "retrieve_related_clauses": retrieve_related_clauses,
     "retrieve_memory": retrieve_memory,
     "analyze_risk": analyze_risk,
+    "criticize_risk": criticize_risk,
     "plan_review_action": plan_review_action,
     "verify_evidence": verify_evidence,
     "generate_revision": generate_revision,

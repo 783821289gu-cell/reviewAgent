@@ -244,6 +244,11 @@ def _summarize_output(output) -> str:
                 f"target_clause={output.get('target_clause_id')}, "
                 f"adjustments={','.join(sorted(str(item) for item in adjustments)) or 'none'}"
             )
+        if "decision" in output and "reason_code" in output:
+            return (
+                f"decision={output.get('decision')}, "
+                f"reason={output.get('reason_code')}"
+            )
         return f"keys={','.join(output.keys())}"
     contract_id = getattr(output, "contract_id", "")
     if contract_id:

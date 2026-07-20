@@ -27,6 +27,7 @@ EXPECTED_TOOL_NAMES = {
     "retrieve_related_clauses",
     "retrieve_memory",
     "analyze_risk",
+    "criticize_risk",
     "plan_review_action",
     "verify_evidence",
     "generate_revision",
@@ -70,8 +71,13 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertTrue(tool_contracts["extract_key_fields"].calls_llm)
         self.assertFalse(runtime_calls_llm("extract_key_fields"))
         self.assertFalse(runtime_calls_llm("analyze_risk"))
+        self.assertFalse(runtime_calls_llm("criticize_risk"))
         self.assertFalse(runtime_calls_llm("plan_review_action"))
         self.assertEqual(runtime_llm_mode("analyze_risk"), "local_structured_no_external_llm")
+        self.assertEqual(
+            runtime_llm_mode("criticize_risk"),
+            "deterministic_support_check_no_external_llm",
+        )
         self.assertEqual(
             runtime_llm_mode("plan_review_action"),
             "deterministic_policy_no_external_llm",
@@ -120,9 +126,12 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertIn("retrieve_related_clauses", log_tools)
         self.assertIn("retrieve_memory", log_tools)
         self.assertIn("analyze_risk", log_tools)
+        self.assertIn("criticize_risk", log_tools)
         self.assertIn("generate_revision", log_tools)
         self.assertIn("verify_evidence", log_tools)
         self.assertNotIn("plan_review_action", log_tools)
+        self.assertLess(log_tools.index("analyze_risk"), log_tools.index("criticize_risk"))
+        self.assertLess(log_tools.index("criticize_risk"), log_tools.index("verify_evidence"))
         self.assertEqual(payload["review_contexts"][0]["matched_rule"]["rule_id"], "NDA-R001")
         self.assertTrue(payload["review_contexts"][0]["related_clauses"])
         self.assertEqual(payload["risk_findings"][0]["matched_rule_ids"], ["NDA-R001"])
@@ -359,6 +368,111 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertEqual(len(planner_logs), 1)
         self.assertIn("reason=LOW_CONFIDENCE", planner_logs[0]["output_summary"])
         self.assertEqual(payload["risk_findings"][0]["review_status"], "NEED_MANUAL_REVIEW")
+
+    def test_critic_rejection_requires_human_but_evidence_remains_final(self):
+        critic_result = {
+            "decision": "REJECT",
+            "reason_code": "EVIDENCE_UNSUPPORTED",
+        }
+
+        with patch.dict(tool_registry, {"criticize_risk": lambda _tool_input: critic_result}):
+            state = ReviewOrchestratorAgent(ReviewEventStore()).run_sync(
+                file_name="critic-conflict.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        tools = [log["tool_name"] for log in payload["logs"]]
+        self.assertEqual(payload["status"], "HUMAN_REVIEW_PENDING")
+        self.assertEqual(payload["risk_findings"][0]["review_status"], "NEED_MANUAL_REVIEW")
+        self.assertIn("criticize_risk", tools)
+        self.assertIn("verify_evidence", tools)
+        self.assertNotIn("generate_revision", tools)
+        self.assertTrue(payload["evidence_results"][0]["is_valid"])
+        self.assertEqual(
+            payload["review_contexts"][0]["critic_trace"][0]["decision"],
+            "REJECT",
+        )
+
+    def test_cross_clause_evidence_is_never_admitted_after_critic(self):
+        original_analyzer = tool_registry["analyze_risk"]
+
+        def forged_analyzer(tool_input):
+            finding = original_analyzer(tool_input)
+            finding["evidence_text"] = "接收方仅可为评估合作目的使用保密信息，不得用于其他目的。"
+            finding["risk_reason"] = f"证据文本“{finding['evidence_text']}”支持该风险。"
+            return finding
+
+        with patch.dict(tool_registry, {"analyze_risk": forged_analyzer}):
+            state = ReviewOrchestratorAgent(ReviewEventStore()).run_sync(
+                file_name="cross-clause-evidence.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        tools = [log["tool_name"] for log in payload["logs"]]
+        self.assertEqual(payload["status"], "EVIDENCE_MISSING")
+        self.assertEqual(payload["risk_findings"], [])
+        self.assertEqual(tools.count("criticize_risk"), 2)
+        self.assertEqual(tools.count("verify_evidence"), 2)
+        self.assertEqual(tools.count("generate_revision"), 0)
+        self.assertTrue(all(not item["is_valid"] for item in payload["evidence_results"]))
+
+    def test_invalid_critic_output_never_reaches_evidence_or_formal_risks(self):
+        invalid_output = {
+            "decision": "PASS",
+            "reason_code": "SUPPORTED_BY_EVIDENCE_AND_PLAYBOOK",
+            "evidence_text": "模型创造的证据",
+        }
+
+        with patch(
+            "services.risk_critic.generate_structured_critic",
+            return_value=invalid_output,
+        ):
+            state = ReviewOrchestratorAgent(ReviewEventStore()).run_sync(
+                file_name="invalid-critic-output.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        tools = [log["tool_name"] for log in payload["logs"]]
+        critic_log = next(
+            log for log in payload["logs"] if log["tool_name"] == "criticize_risk"
+        )
+        self.assertEqual(payload["status"], "LLM_OUTPUT_INVALID")
+        self.assertEqual(payload["risk_findings"], [])
+        self.assertNotIn("verify_evidence", tools)
+        self.assertEqual(critic_log["status"], "failed")
+        self.assertIn("output whitelist", critic_log["error_message"])
+        self.assertIn("Critic 结构化输出无效", payload["message"])
+
+    def test_critic_injection_signal_stops_before_formal_risk_admission(self):
+        critic_result = {
+            "decision": "REQUEST_HUMAN_REVIEW",
+            "reason_code": "PROMPT_INJECTION_DETECTED",
+        }
+
+        with patch.dict(tool_registry, {"criticize_risk": lambda _tool_input: critic_result}):
+            state = ReviewOrchestratorAgent(ReviewEventStore()).run_sync(
+                file_name="critic-injection.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        tools = [log["tool_name"] for log in payload["logs"]]
+        self.assertEqual(payload["status"], "NEED_MANUAL_REVIEW")
+        self.assertEqual(payload["risk_findings"], [])
+        self.assertNotIn("generate_revision", tools)
+        self.assertNotIn("verify_evidence", tools)
+        self.assertIn("不可信指令文本", payload["message"])
 
     def test_event_stream_payload_keeps_event_time_task_status(self):
         event_store = ReviewEventStore()

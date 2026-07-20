@@ -52,6 +52,11 @@ _OPERATION_INSTRUCTIONS = {
         "Choose exactly one allowed planner action for the supplied trigger. Do not call tools, "
         "create findings, change Playbook rules, or target a clause outside the whitelist."
     ),
+    "criticize_risk": (
+        "Check whether the Analyzer finding is supported by the supplied current clause and "
+        "Playbook rule. Return only a decision and reason code. Do not create evidence, clauses, "
+        "rules, revisions, severities, findings, or tool calls."
+    ),
 }
 
 _INJECTION_PATTERNS = (
@@ -264,6 +269,22 @@ def _input_sections(operation: str, input_payload: dict) -> dict:
         return {
             "playbook": {"trust_level": "application", "data": input_payload},
             "contract_data": {"trust_level": "untrusted", "data": {}},
+            "related_clauses": dict(empty_untrusted),
+            "memory": dict(empty_untrusted),
+        }
+    if operation == "criticize_risk":
+        return {
+            "playbook": {
+                "trust_level": "application",
+                "data": input_payload.get("matched_rule") or {},
+            },
+            "contract_data": {
+                "trust_level": "untrusted",
+                "data": {
+                    "finding": input_payload.get("finding") or {},
+                    "current_clause": input_payload.get("current_clause") or {},
+                },
+            },
             "related_clauses": dict(empty_untrusted),
             "memory": dict(empty_untrusted),
         }
