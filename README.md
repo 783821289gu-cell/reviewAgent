@@ -21,7 +21,7 @@
 15. 本地 JSON NDA Risk Playbook，覆盖第一版 8 类核心风险。
 16. `retrieve_playbook_rules` 已通过显式 `tool_registry` 调用，并按合同类型、条款类型、关键字段和审查立场检索规则。
 17. 前端展示命中的 Playbook 规则；未命中规则时不会生成正式风险。
-18. `retrieve_related_clauses` 已通过显式 `tool_registry` 调用；支持 `local_sparse` 离线测试模式和 `openai_compatible` 真实 Embedding 模式，在当前合同条款内执行余弦召回和规则 rerank。
+18. `retrieve_related_clauses` 已通过显式 `tool_registry` 调用；支持 `local_sparse` 离线测试模式和 `openai_compatible` 真实 Embedding 模式，在当前合同条款内合并关键词与 Embedding 候选、去重，并执行动态 Top-K 和可解释 rerank。
 19. `retrieve_memory` 已通过显式 `tool_registry` 调用；支持从调用方提供的 `memory_items` 中过滤召回，也支持从 SQLite Memory 中按合同类型、条款类型、风险类型和审查立场检索历史反馈。
 20. 后端构建风险分析上下文，包含当前条款、命中规则、相关条款、相关 Memory 字段、输出约束和证据约束。
 21. `analyze_risk` 已通过显式 `tool_registry` 调用；`REVIEW_AGENT_LLM_MODE` 支持 `local_structured` 和 `openai_compatible`，本地模式不会记录为真实外部 LLM 调用。
@@ -55,7 +55,7 @@
 49. Embedding 查询包含当前条款正文、条款类型、风险类型、Playbook 检查点和关键字段；合同条款向量在单次任务上下文构建期间缓存，恢复时使用相同模型和输入重建。
 50. 相关条款结果包含 Embedding 模式、模型、向量维度、余弦相似度、rerank 因子和最终分数；前端 Context Trace 展示模型、相似度和最终分数。
 51. 外部 Embedding 调用日志记录模型、供应商请求 ID、输入数量、向量维度、耗时和错误类型，不记录 API Key 或完整合同文本；失败时进入 `RETRIEVAL_FAILED`，未启用静默词频降级。
-52. `samples/annotations/related_clauses.json` 提供人工相关条款标注；离线测试使用通用法律同义词确定性 Stub 计算 Recall@1，并与旧词频稀疏基线比较。
+52. `samples/annotations/related_clauses.json` 提供 11 组人工相关条款标注，覆盖 8 类 NDA 风险；离线测试直接运行本地混合检索并计算 Recall@1，不使用语义命中 Stub 代替实际检索结果。
 53. `samples/annotations/` 提供 `effect-v1` 人工标注 schema，覆盖合同类型、条款边界和类型、预期规则、风险、可接受等级、证据 span、相关条款、人工复核和报告选择；当前数据全部为项目内合成夹具。
 54. `POST /api/evaluation/effect/run` 独立运行效果评测，不改写现有 `POST /api/evaluation/run` 流程评测响应。
 55. 效果评测分别计算 NDA 分类准确率、非 NDA 拒绝率、条款切分和类型准确率、Playbook/相关条款 Recall@K、风险 Precision/Recall/F1、证据 span、人工复核、报告过滤、工具调用和端到端指标。
@@ -79,7 +79,7 @@
 
 当前基础评测只验证流程跑通，不声明生产级准确率。人工相关条款集目前只验证确定性测试 Stub 相对词频基线的受控提升，不代表实际外部 Embedding 模型质量；因此默认正式配置仍为 `local_sparse`。真实外部 LLM 和 Embedding 是否可用及是否有实际效果提升，仍取决于调用方提供的有效服务配置、凭据和后续实测结果。
 
-当前 `effect-v1` 只有 6 份合同类型样本、6 条条款、3 条风险和 3 组相关条款标注。默认本地模式的已运行结果中，相关条款 Recall@1 为 `1/3`，低于清单阈值 `0.8`，效果摘要按 `completed_with_failures` 展示；其他指标的当前结果不能外推为生产准确率。
+当前 `effect-v1` 包含 6 份合同类型样本、6 条条款、3 条风险和 11 组相关条款标注。默认本地模式的已运行结果中，扩大后的相关条款 Recall@1 为 `11/11`，达到清单阈值 `0.8`，效果摘要为 `completed`；这些合成样本结果不能外推为生产准确率或真实外部 Embedding 效果。
 
 当前 12 个工具均已在 `tool_registry` 中注册契约。`classify_contract_type`、`extract_key_fields`、`analyze_risk` 和 `generate_revision` 具备 LLM Provider 调用边界；默认 `local_structured` 模式不记录为真实外部 LLM 调用。
 
@@ -157,7 +157,7 @@ http://127.0.0.1:8000/health
 27. 在默认 `local_sparse` 模式下完成审查，确认相关条款结果包含 `local_sparse_hash_v1`、固定 256 维向量、余弦相似度、rerank 因子和最终分数，且执行日志标记 `local_sparse_no_external_embedding`。
 28. 配置 `openai_compatible` Embedding 后，确认日志显示实际模型、供应商请求 ID、输入数量、向量维度和耗时；让供应商返回错误时，确认任务进入 `RETRIEVAL_FAILED` 且没有 `lexical_fallback`。
 29. 在评测面板切换“流程摘要”和“效果摘要”，确认两者结果和加载/失败状态彼此独立。
-30. 运行效果评测，确认返回 14 个指标，且每项包含样本数、通过数、失败数、阈值、达标状态和失败样本；当前默认本地模式下相关条款 Recall@1 应显示 `1/3` 且未达阈值。
+30. 运行效果评测，确认返回 14 个指标，且每项包含样本数、通过数、失败数、阈值、达标状态和失败样本；当前默认本地模式下相关条款 Recall@1 应显示 `11/11` 且达到 `0.8` 阈值。
 31. 确认效果摘要显示 Git、Playbook、标注、LLM 和 Embedding 版本，并在 `evaluation/effect/` 生成以评测 ID 命名的 JSON 和 Markdown 文件。
 32. 上传 `samples/pdf/nda_text_zh.pdf` 和 `samples/pdf/nda_text_en.pdf`，确认正文按页解析，条款 `source_location` 包含页码、块 ID 和 `bbox`；正式风险的 `evidence_location` 精确到证据命中的 PDF 块和块内字符范围。
 33. 上传 `backend/tests/fixtures/pdf/scanned_image.pdf`，确认任务进入 `PARSE_FAILED`、提示“需要 OCR”，且不生成文档、条款和风险。

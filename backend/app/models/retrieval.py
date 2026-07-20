@@ -10,6 +10,11 @@ class RelatedClause:
     key_fields: dict
     source_location: dict
     vector_similarity: float
+    keyword_score: float
+    keyword_matches: list[str]
+    retrieval_sources: list[str]
+    vector_rank: int | None
+    keyword_rank: int | None
     embedding_mode: str
     embedding_model: str
     vector_dimension: int

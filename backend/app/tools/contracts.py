@@ -82,7 +82,7 @@ tool_contracts = {
         },
         output_schema={"related_clauses": "list"},
         calls_llm=False,
-        description="按配置使用定长 Embedding 在当前合同条款内执行余弦召回和规则 rerank。",
+        description="在当前合同内合并关键词与 Embedding 候选，去重后执行动态 Top-K 和可解释 rerank。",
     ),
     "retrieve_memory": ToolContract(
         name="retrieve_memory",

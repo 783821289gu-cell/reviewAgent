@@ -117,7 +117,11 @@ class EffectEvaluationTest(unittest.TestCase):
         self.assertEqual(len(bundle.contracts), 6)
         self.assertEqual(len(bundle.clauses), 6)
         self.assertEqual(len(bundle.risks), 3)
-        self.assertEqual(len(bundle.related_clauses), 3)
+        self.assertEqual(len(bundle.related_clauses), 11)
+        self.assertEqual(config["related_clause_dataset"]["revision"], "hybrid-retrieval-v1")
+        self.assertEqual(config["related_clause_dataset"]["case_count"], 11)
+        self.assertEqual(config["related_clause_dataset"]["risk_type_count"], 8)
+        self.assertEqual(len({item.risk_type for item in bundle.related_clauses}), 8)
         self.assertTrue(
             all(item.source.source_type == "synthetic" for item in bundle.contracts)
         )
@@ -206,13 +210,24 @@ class EffectEvaluationTest(unittest.TestCase):
         self.assertEqual(summary["evaluation_type"], "effect")
         self.assertEqual(summary["sample_count"], 6)
         self.assertEqual(summary["claim"], EFFECT_NO_PRODUCTION_CLAIM)
-        self.assertEqual(summary["status"], "completed_with_failures")
-        self.assertEqual(metrics["related_clause_recall_at_k"]["sample_count"], 3)
-        self.assertEqual(metrics["related_clause_recall_at_k"]["passed_count"], 1)
-        self.assertEqual(metrics["related_clause_recall_at_k"]["failed_count"], 2)
-        self.assertEqual(metrics["related_clause_recall_at_k"]["score"], 0.3333)
-        self.assertFalse(metrics["related_clause_recall_at_k"]["threshold_met"])
-        self.assertEqual(len(metrics["related_clause_recall_at_k"]["failure_samples"]), 2)
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(metrics["related_clause_recall_at_k"]["sample_count"], 11)
+        self.assertEqual(metrics["related_clause_recall_at_k"]["passed_count"], 11)
+        self.assertEqual(metrics["related_clause_recall_at_k"]["failed_count"], 0)
+        self.assertEqual(metrics["related_clause_recall_at_k"]["score"], 1.0)
+        self.assertTrue(metrics["related_clause_recall_at_k"]["threshold_met"])
+        self.assertEqual(metrics["related_clause_recall_at_k"]["failure_samples"], [])
+        for metric_name in [
+            "playbook_recall_at_k",
+            "evidence_span_hit_rate",
+            "end_to_end_success_rate",
+        ]:
+            self.assertTrue(metrics[metric_name]["threshold_met"], metric_name)
+            self.assertGreaterEqual(
+                metrics[metric_name]["score"],
+                metrics[metric_name]["threshold"],
+                metric_name,
+            )
         self.assertTrue(
             all(
                 set(["sample_count", "passed_count", "failed_count", "failure_samples"]).issubset(metric)

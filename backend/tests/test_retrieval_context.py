@@ -7,7 +7,13 @@ import unittest
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 sys.path.insert(0, str(APP_DIR))
 
-from services.clause_index_service import _key_fields_text, retrieve_related_clauses
+from services.clause_index_service import (
+    MAX_DYNAMIC_TOP_K,
+    _dynamic_top_k,
+    _key_fields_text,
+    build_retrieval_query,
+    retrieve_related_clauses,
+)
 from services.context_builder import build_review_context
 from services.memory_service import retrieve_memory
 from services.log_service import invoke_tool
@@ -43,11 +49,36 @@ class RetrievalContextTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual(len(related_clauses), 2)
+        self.assertGreaterEqual(len(related_clauses), 1)
+        self.assertLessEqual(len(related_clauses), 2)
         self.assertNotIn("CL-002", [item["clause_id"] for item in related_clauses])
         self.assertTrue(all(item["retrieval_scope"] == "current_contract" for item in related_clauses))
-        self.assertEqual(related_clauses[0]["query_context"]["current_clause_id"], "CL-002")
-        self.assertIn("playbook_check_point", related_clauses[0]["query_context"])
+        query_context = related_clauses[0]["query_context"]
+        self.assertEqual(query_context["current_clause_id"], "CL-002")
+        self.assertEqual(query_context["current_clause_type"], "使用限制")
+        self.assertEqual(query_context["risk_type"], "使用目的或使用限制不清")
+        self.assertEqual(
+            query_context["playbook_check_point"],
+            "检查是否明确保密信息只能用于约定合作目的。",
+        )
+        self.assertEqual(query_context["key_fields"], clauses[1]["key_fields"])
+        self.assertTrue(query_context["keyword_terms"])
+        self.assertTrue(query_context["playbook_keywords"])
+        self.assertTrue(query_context["playbook_check_point_terms"])
+        self.assertEqual(query_context["effective_top_k"], len(related_clauses))
+        query_text = build_retrieval_query(
+            clauses[1],
+            "使用目的或使用限制不清",
+            "检查是否明确保密信息只能用于约定合作目的。",
+        )
+        for expected in [
+            clauses[1]["text"],
+            clauses[1]["clause_type"],
+            "使用目的或使用限制不清",
+            "检查是否明确保密信息只能用于约定合作目的。",
+            "use_purpose",
+        ]:
+            self.assertIn(expected, query_text)
         self.assertEqual(related_clauses[0]["embedding_mode"], "local_sparse")
         self.assertEqual(related_clauses[0]["embedding_model"], "local_sparse_hash_v1")
         self.assertEqual(related_clauses[0]["vector_dimension"], 256)
@@ -64,11 +95,75 @@ class RetrievalContextTest(unittest.TestCase):
         for factor_name in [
             "vector_similarity",
             "clause_type_relatedness",
-            "key_clause_weight",
-            "risk_type_relation",
-            "key_field_hit",
+            "keyword_overlap",
+            "keyword_matches",
+            "field_match",
+            "field_matches",
+            "playbook_check_point_overlap",
+            "playbook_check_point_matches",
+            "playbook_applicability",
+            "playbook_keyword_matches",
+            "final_score",
         ]:
             self.assertIn(factor_name, related_clauses[0]["rerank_factors"])
+        self.assertIn("embedding", related_clauses[0]["retrieval_sources"])
+        self.assertIn("keyword", related_clauses[0]["retrieval_sources"])
+        self.assertIsInstance(related_clauses[0]["vector_rank"], int)
+        self.assertIsInstance(related_clauses[0]["keyword_rank"], int)
+
+    def test_hybrid_recall_deduplicates_current_contract_and_caps_dynamic_top_k(self):
+        current_clause = {
+            "clause_id": "CL-CURRENT",
+            "clause_type": "允许披露",
+            "text": "接收方可以向员工和顾问披露保密信息。",
+            "key_fields": {"permitted_disclosure_targets": ["员工", "顾问"]},
+        }
+        candidates = [
+            {
+                "clause_id": f"CL-{index:03d}",
+                "clause_type": "允许披露",
+                "text": f"仅可向必要知悉且承担保密义务的员工或顾问披露，序号 {index}。",
+                "key_fields": {"permitted_disclosure_targets": ["必要知悉人员"]},
+            }
+            for index in range(1, 9)
+        ]
+        clauses = [current_clause, *candidates, dict(candidates[0])]
+
+        related = retrieve_related_clauses(
+            {
+                "contract_type": "NDA",
+                "current_clause": current_clause,
+                "clauses": clauses,
+                "risk_type": "允许披露对象过宽",
+                "playbook_check_point": "检查披露对象是否限于必要知悉人员。",
+                "limit": 99,
+            }
+        )
+
+        clause_ids = [item["clause_id"] for item in related]
+        self.assertEqual(len(clause_ids), len(set(clause_ids)))
+        self.assertLessEqual(len(related), MAX_DYNAMIC_TOP_K)
+        self.assertTrue(set(clause_ids).issubset({item["clause_id"] for item in candidates}))
+        self.assertTrue(all(item["retrieval_scope"] == "current_contract" for item in related))
+        context = related[0]["query_context"]
+        self.assertEqual(context["candidate_count"], 8)
+        self.assertEqual(context["requested_top_k"], 99)
+        self.assertEqual(context["max_top_k"], MAX_DYNAMIC_TOP_K)
+        self.assertEqual(context["effective_top_k"], len(related))
+        self.assertTrue(all(item["rerank_score"] >= context["score_cutoff"] for item in related))
+        self.assertTrue(all(len(item["retrieval_sources"]) == len(set(item["retrieval_sources"])) for item in related))
+
+    def test_dynamic_top_k_uses_score_band_and_hard_cap(self):
+        candidates = [
+            {"rerank_score": score}
+            for score in [0.9, 0.85, 0.8, 0.75, 0.72, 0.71, 0.69, 0.2]
+        ]
+
+        selected, cutoff = _dynamic_top_k(candidates, requested_top_k=20)
+
+        self.assertEqual(cutoff, 0.7)
+        self.assertEqual(len(selected), MAX_DYNAMIC_TOP_K)
+        self.assertTrue(all(item["rerank_score"] >= cutoff for item in selected))
 
     def test_related_clause_tool_logs_rerank_summary(self):
         logs = []
@@ -92,6 +187,8 @@ class RetrievalContextTest(unittest.TestCase):
         self.assertTrue(related_clauses)
         self.assertEqual(logs[0].status, "success")
         self.assertIn("rerank_score", logs[0].output_summary)
+        self.assertIn("sources=embedding+keyword", logs[0].output_summary)
+        self.assertIn("effective_top_k=", logs[0].output_summary)
         self.assertEqual(logs[0].token_cost_summary, "local_sparse_no_external_embedding")
 
     def test_memory_retrieval_filters_provided_items(self):

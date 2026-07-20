@@ -214,7 +214,13 @@ def _redact_secrets(value: str) -> str:
 def _summarize_output(output) -> str:
     if isinstance(output, list):
         if output and isinstance(output[0], dict) and "rerank_score" in output[0]:
-            return f"items={len(output)}, top={output[0].get('clause_id')}, rerank_score={output[0].get('rerank_score')}"
+            query_context = output[0].get("query_context") or {}
+            sources = "+".join(str(item) for item in output[0].get("retrieval_sources") or [])
+            return (
+                f"items={len(output)}, top={output[0].get('clause_id')}, "
+                f"rerank_score={output[0].get('rerank_score')}, sources={sources}, "
+                f"effective_top_k={query_context.get('effective_top_k', len(output))}"
+            )
         if output and isinstance(output[0], dict) and "memory_id" in output[0]:
             return f"items={len(output)}, top_memory={output[0].get('memory_id')}"
         return f"items={len(output)}"

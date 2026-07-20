@@ -1,11 +1,19 @@
 from models.retrieval import RelatedClause
 from providers.embedding_provider import embedding_call_records_from_tool_input
 from services.embedding_service import cosine_similarity, embed_texts
-from services.rerank_service import rerank_candidates
+from services.rerank_service import (
+    build_keyword_query,
+    keyword_candidate_factors,
+    rerank_candidates,
+)
 
 
 DEFAULT_RELATED_CLAUSE_LIMIT = 3
+MAX_DYNAMIC_TOP_K = 5
 VECTOR_RECALL_MULTIPLIER = 4
+KEYWORD_RECALL_MULTIPLIER = 4
+MIN_RERANK_SCORE = 0.12
+DYNAMIC_SCORE_BAND = 0.2
 
 
 def retrieve_related_clauses(tool_input: dict) -> list[dict]:
@@ -36,11 +44,25 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
         raise ValueError("embedding_cache must be a dict")
 
     current_clause_id = str(current_clause.get("clause_id", ""))
+    candidate_clauses = _current_contract_candidates(clauses, current_clause_id)
+    if not candidate_clauses:
+        return []
+
+    keyword_query = build_keyword_query(
+        current_clause,
+        risk_type,
+        playbook_check_point,
+    )
     query_context = {
+        "query_version": "hybrid-retrieval-v1",
         "current_clause_id": current_clause_id,
         "current_clause_type": current_clause.get("clause_type", ""),
         "risk_type": risk_type,
         "playbook_check_point": playbook_check_point,
+        "key_fields": current_clause.get("key_fields") or {},
+        "keyword_terms": keyword_query["query_terms"],
+        "playbook_keywords": keyword_query["playbook_terms"],
+        "playbook_check_point_terms": keyword_query["check_point_terms"],
         "embedding_query_components": [
             "current_clause_text",
             "current_clause_type",
@@ -49,12 +71,6 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
             "current_clause_key_fields",
         ],
     }
-    candidate_clauses = [
-        clause
-        for clause in clauses
-        if isinstance(clause, dict)
-        and str(clause.get("clause_id", "")) != current_clause_id
-    ]
     texts = [
         build_retrieval_query(current_clause, risk_type, playbook_check_point),
         *[build_clause_embedding_text(clause) for clause in candidate_clauses],
@@ -72,19 +88,31 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
             {
                 "clause": clause,
                 "vector_similarity": cosine_similarity(query_vector, candidate_vector),
+                "keyword_factors": keyword_candidate_factors(keyword_query, clause),
             }
         )
 
-    recall_limit = max(limit, limit * VECTOR_RECALL_MULTIPLIER)
-    recalled = sorted(
-        candidates,
-        key=lambda item: (item["vector_similarity"], item["clause"].get("clause_id", "")),
-        reverse=True,
-    )[:recall_limit]
-    reranked = rerank_candidates(recalled, current_clause=current_clause, risk_type=risk_type)
+    requested_top_k = min(limit, MAX_DYNAMIC_TOP_K)
+    recalled = _merge_recall_candidates(candidates, requested_top_k)
+    reranked = rerank_candidates(
+        recalled,
+        current_clause=current_clause,
+        risk_type=risk_type,
+    )
+    selected, score_cutoff = _dynamic_top_k(reranked, requested_top_k)
+    query_context.update(
+        {
+            "candidate_count": len(candidate_clauses),
+            "merged_candidate_count": len(recalled),
+            "requested_top_k": limit,
+            "max_top_k": MAX_DYNAMIC_TOP_K,
+            "effective_top_k": len(selected),
+            "score_cutoff": score_cutoff,
+        }
+    )
 
     related_clauses = []
-    for item in reranked[:limit]:
+    for item in selected:
         clause = item["clause"]
         related_clauses.append(
             RelatedClause(
@@ -95,6 +123,11 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
                 key_fields=clause.get("key_fields") or {},
                 source_location=clause.get("source_location") or {},
                 vector_similarity=round(float(item["vector_similarity"]), 4),
+                keyword_score=float(item["keyword_factors"]["keyword_score"]),
+                keyword_matches=list(item["keyword_factors"]["keyword_matches"]),
+                retrieval_sources=list(item["retrieval_sources"]),
+                vector_rank=item.get("vector_rank"),
+                keyword_rank=item.get("keyword_rank"),
                 embedding_mode=embedding_batch.mode,
                 embedding_model=embedding_batch.model,
                 vector_dimension=embedding_batch.vector_dimension,
@@ -131,6 +164,77 @@ def build_clause_embedding_text(clause: dict) -> str:
             _key_fields_text(clause.get("key_fields") or {}),
         ]
     )
+
+
+def _current_contract_candidates(clauses: list[dict], current_clause_id: str) -> list[dict]:
+    candidates = []
+    seen_ids = set()
+    for clause in clauses:
+        if not isinstance(clause, dict):
+            continue
+        clause_id = str(clause.get("clause_id", "")).strip()
+        if not clause_id or clause_id == current_clause_id or clause_id in seen_ids:
+            continue
+        seen_ids.add(clause_id)
+        candidates.append(clause)
+    return candidates
+
+
+def _merge_recall_candidates(candidates: list[dict], requested_top_k: int) -> list[dict]:
+    vector_limit = min(
+        len(candidates),
+        max(requested_top_k, requested_top_k * VECTOR_RECALL_MULTIPLIER),
+    )
+    keyword_limit = min(
+        len(candidates),
+        max(requested_top_k, requested_top_k * KEYWORD_RECALL_MULTIPLIER),
+    )
+    vector_ranked = sorted(
+        candidates,
+        key=lambda item: (
+            -item["vector_similarity"],
+            str(item["clause"].get("clause_id", "")),
+        ),
+    )[:vector_limit]
+    keyword_ranked = sorted(
+        [item for item in candidates if item["keyword_factors"]["keyword_score"] > 0],
+        key=lambda item: (
+            -item["keyword_factors"]["keyword_score"],
+            str(item["clause"].get("clause_id", "")),
+        ),
+    )[:keyword_limit]
+
+    merged = {}
+    for source, ranked in (("embedding", vector_ranked), ("keyword", keyword_ranked)):
+        for rank, item in enumerate(ranked, start=1):
+            clause_id = str(item["clause"].get("clause_id", ""))
+            if clause_id not in merged:
+                merged[clause_id] = {
+                    **item,
+                    "retrieval_sources": [],
+                    "vector_rank": None,
+                    "keyword_rank": None,
+                }
+            merged_item = merged[clause_id]
+            merged_item["retrieval_sources"].append(source)
+            rank_field = "vector_rank" if source == "embedding" else "keyword_rank"
+            merged_item[rank_field] = rank
+    return list(merged.values())
+
+
+def _dynamic_top_k(candidates: list[dict], requested_top_k: int) -> tuple[list[dict], float]:
+    if not candidates or requested_top_k <= 0:
+        return [], MIN_RERANK_SCORE
+    top_score = float(candidates[0]["rerank_score"])
+    score_cutoff = round(max(MIN_RERANK_SCORE, top_score - DYNAMIC_SCORE_BAND), 4)
+    qualified = [
+        candidate
+        for candidate in candidates
+        if float(candidate["rerank_score"]) >= score_cutoff
+    ]
+    if not qualified:
+        qualified = candidates[:1]
+    return qualified[: min(requested_top_k, MAX_DYNAMIC_TOP_K)], score_cutoff
 
 
 def _key_fields_text(key_fields: dict) -> str:

@@ -22,15 +22,10 @@ from providers.embedding_provider import (
     OpenAICompatibleEmbeddingProvider,
     create_embedding_provider,
 )
-from services.clause_index_service import (
-    build_clause_embedding_text,
-    build_retrieval_query,
-)
+from services.clause_index_service import retrieve_related_clauses
 from services.embedding_service import (
     cosine_similarity,
     embed_texts,
-    lexical_sparse_similarity,
-    lexical_sparse_vector,
 )
 from services.evaluation_service import _docx_bytes_from_text
 from services.event_service import ReviewEventStore
@@ -264,55 +259,34 @@ class EmbeddingProviderTest(unittest.TestCase):
             "dict optional (runtime only)",
         )
 
-    def test_manually_annotated_semantic_stub_improves_recall_at_k(self):
+    def test_hybrid_retrieval_meets_expanded_manually_annotated_recall_at_k(self):
         annotation_path = ROOT_DIR / "samples" / "annotations" / "related_clauses.json"
         benchmark = json.loads(annotation_path.read_text(encoding="utf-8"))
         k = benchmark["k"]
-        semantic_recalls = []
-        lexical_recalls = []
+        recalls = []
 
         for case in benchmark["cases"]:
-            query_text = build_retrieval_query(
-                case["current_clause"],
-                case["risk_type"],
-                case["playbook_check_point"],
+            related = retrieve_related_clauses(
+                {
+                    "contract_type": "NDA",
+                    "current_clause": case["current_clause"],
+                    "clauses": [case["current_clause"], *case["candidates"]],
+                    "risk_type": case["risk_type"],
+                    "playbook_check_point": case["playbook_check_point"],
+                    "limit": k,
+                }
             )
-            candidate_texts = [
-                build_clause_embedding_text(clause) for clause in case["candidates"]
-            ]
-            semantic_batch = embed_texts(
-                [query_text, *candidate_texts],
-                provider=DeterministicSemanticStub(),
-            )
-            semantic_ids = _top_k_ids(
-                case["candidates"],
-                [
-                    cosine_similarity(semantic_batch.vectors[0], vector)
-                    for vector in semantic_batch.vectors[1:]
-                ],
-                k,
-            )
-            lexical_query = lexical_sparse_vector(query_text)
-            lexical_ids = _top_k_ids(
-                case["candidates"],
-                [
-                    lexical_sparse_similarity(
-                        lexical_query,
-                        lexical_sparse_vector(candidate_text),
-                    )
-                    for candidate_text in candidate_texts
-                ],
-                k,
-            )
+            actual_ids = {item["clause_id"] for item in related}
             relevant = set(case["relevant_clause_ids"])
-            semantic_recalls.append(len(set(semantic_ids) & relevant) / len(relevant))
-            lexical_recalls.append(len(set(lexical_ids) & relevant) / len(relevant))
+            recalls.append(len(actual_ids & relevant) / len(relevant))
+            self.assertTrue(all(item["retrieval_scope"] == "current_contract" for item in related))
 
-        semantic_recall = sum(semantic_recalls) / len(semantic_recalls)
-        lexical_recall = sum(lexical_recalls) / len(lexical_recalls)
-        self.assertEqual(semantic_recall, 1.0)
-        self.assertEqual(lexical_recall, 0.0)
-        self.assertGreater(semantic_recall, lexical_recall)
+        current_recall = sum(recalls[:3]) / len(recalls[:3])
+        expanded_recall = sum(recalls) / len(recalls)
+        self.assertGreaterEqual(len(benchmark["cases"]), 11)
+        self.assertEqual(len({case["risk_type"] for case in benchmark["cases"]}), 8)
+        self.assertGreaterEqual(current_recall, 0.8)
+        self.assertGreaterEqual(expanded_recall, 0.8)
 
 
 class CountingEmbeddingProvider:
@@ -339,26 +313,6 @@ class CountingEmbeddingProvider:
         return EmbeddingResponse(vectors=vectors, metadata=metadata)
 
 
-class DeterministicSemanticStub:
-    mode = "deterministic_test_stub"
-    model = "legal-synonym-stub-v1"
-
-    def embed(self, request, call_records=None):
-        vectors = [_semantic_vector(text) for text in request.texts]
-        metadata = EmbeddingCallMetadata(
-            mode=self.mode,
-            model=self.model,
-            provider_request_id="",
-            input_count=len(request.texts),
-            vector_dimension=len(SEMANTIC_CONCEPTS),
-            latency_ms=0,
-            error_type="",
-        )
-        if call_records is not None:
-            call_records.append(metadata)
-        return EmbeddingResponse(vectors=vectors, metadata=metadata)
-
-
 def _external_settings(**overrides) -> Settings:
     values = {
         "embedding_mode": "openai_compatible",
@@ -375,30 +329,6 @@ def _hash_vector(text: str) -> list[float]:
     vector = [0.0] * 4
     vector[sum(text.encode("utf-8")) % 4] = 1.0
     return vector
-
-
-def _semantic_vector(text: str) -> list[float]:
-    return [
-        1.0 if any(term in text for term in synonyms) else 0.0
-        for synonyms in SEMANTIC_CONCEPTS
-    ]
-
-
-SEMANTIC_CONCEPTS = (
-    ("使用", "用途", "目的", "挪作", "查阅"),
-    ("返还", "销毁", "删除", "清除", "副本", "处置"),
-    ("监管", "行政机关", "命令", "指令", "法定"),
-    ("提前告知", "事先通知", "告知", "通知"),
-)
-
-
-def _top_k_ids(candidates: list[dict], scores: list[float], k: int) -> list[str]:
-    ranked = sorted(
-        zip(candidates, scores),
-        key=lambda item: (item[1], item[0]["clause_id"]),
-        reverse=True,
-    )
-    return [item[0]["clause_id"] for item in ranked[:k]]
 
 
 if __name__ == "__main__":
