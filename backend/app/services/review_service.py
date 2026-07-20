@@ -4,12 +4,14 @@ from threading import Thread
 from db.repositories import RecoveryError
 from models.contract import clause_from_dict, contract_document_from_dict
 from models.log import StepLog
+from models.planner import PlannerAction, PlannerReasonCode
 from models.review import AgentState, ReviewPosition, ReviewStatus
 from parsers.pdf_parser import PdfParseError
 from providers.llm_provider import LLMOutputInvalidError
 from services.context_builder import build_review_context
 from services.event_service import ReviewEventStore, review_event_store
 from services.log_service import invoke_tool
+from services.planner_service import PlannerOutputInvalidError
 from tools.registry import tool_registry
 
 
@@ -279,10 +281,10 @@ class ReviewOrchestratorAgent:
 
             clauses_payload = [clause.to_dict() for clause in clauses_with_fields]
             clauses_by_id = {clause["clause_id"]: clause for clause in clauses_payload}
+            embedding_cache = {}
             if _before(state.status, ReviewStatus.CONTEXT_BUILT):
                 try:
                     review_contexts = []
-                    embedding_cache = {}
                     for rule_group in rule_matches:
                         current_clause = clauses_by_id.get(rule_group["clause_id"])
                         if current_clause is None:
@@ -353,6 +355,74 @@ class ReviewOrchestratorAgent:
             else:
                 review_contexts = list(state.review_contexts or [])
 
+            retrieval_repair_count = _planner_retry_count(review_contexts)
+            for context_index, review_context in enumerate(list(review_contexts)):
+                if not _retrieval_is_insufficient(review_context, clauses_payload):
+                    continue
+                try:
+                    decision = _invoke_planner(
+                        task_id,
+                        logs,
+                        PlannerReasonCode.RETRIEVAL_INSUFFICIENT,
+                        ReviewStatus.CONTEXT_BUILT,
+                        str(review_context["current_clause"]["clause_id"]),
+                        clauses_payload,
+                        retrieval_repair_count,
+                        "related clause retrieval returned no candidates",
+                    )
+                    _append_planner_trace(
+                        review_context,
+                        decision,
+                        retrieval_repair_count,
+                    )
+                    if decision["action"] != PlannerAction.RETRIEVE_AGAIN.value:
+                        self.event_store.update_task(
+                            task_id,
+                            ReviewStatus.RETRIEVAL_FAILED,
+                            "相关条款召回不足，Planner 未授权再次检索。",
+                            step_name="planner_retrieval_stopped",
+                            tool_name="plan_review_action",
+                            review_contexts=review_contexts,
+                            analysis_results=[],
+                            risk_findings=[],
+                            logs=[log.to_dict() for log in logs],
+                        )
+                        return
+                    retrieval_repair_count += 1
+                    review_contexts[context_index] = _rebuild_review_context(
+                        task_id,
+                        logs,
+                        review_context,
+                        clauses_payload,
+                        decision["query_adjustments"],
+                        embedding_cache,
+                        retrieval_repair_count,
+                    )
+                except Exception as exc:
+                    self.event_store.update_task(
+                        task_id,
+                        ReviewStatus.RETRIEVAL_FAILED,
+                        f"相关条款修复被拒绝：{exc}",
+                        step_name="planner_retrieval_rejected",
+                        tool_name="plan_review_action",
+                        review_contexts=review_contexts,
+                        analysis_results=[],
+                        risk_findings=[],
+                        logs=[log.to_dict() for log in logs],
+                    )
+                    return
+
+            if retrieval_repair_count != _planner_retry_count(state.review_contexts or []):
+                state = self.event_store.update_task(
+                    task_id,
+                    ReviewStatus.CONTEXT_BUILT,
+                    "Planner 已完成一次受控相关条款检索修复，开始风险分析。",
+                    step_name="planner_retrieval_repaired",
+                    tool_name="plan_review_action",
+                    review_contexts=review_contexts,
+                    logs=[log.to_dict() for log in logs],
+                )
+
             if _before(state.status, ReviewStatus.RISK_ANALYZED):
                 try:
                     analysis_results = []
@@ -367,12 +437,33 @@ class ReviewOrchestratorAgent:
                         )
                         analysis_results.append(finding)
                 except Exception as exc:
+                    target_context = review_context if "review_context" in locals() else None
+                    if isinstance(target_context, dict):
+                        try:
+                            decision = _invoke_planner(
+                                task_id,
+                                logs,
+                                PlannerReasonCode.STRUCTURED_OUTPUT_INVALID,
+                                ReviewStatus.CONTEXT_BUILT,
+                                str(target_context["current_clause"]["clause_id"]),
+                                clauses_payload,
+                                _planner_retry_count(review_contexts),
+                                str(exc),
+                            )
+                            _append_planner_trace(
+                                target_context,
+                                decision,
+                                _planner_retry_count(review_contexts),
+                            )
+                        except Exception:
+                            pass
                     self.event_store.update_task(
                         task_id,
                         ReviewStatus.LLM_OUTPUT_INVALID,
                         f"风险分析结构化输出无效：{exc}",
                         step_name="llm_output_invalid",
                         tool_name="analyze_risk",
+                        review_contexts=review_contexts,
                         analysis_results=[],
                         risk_findings=[],
                         logs=[log.to_dict() for log in logs],
@@ -392,10 +483,16 @@ class ReviewOrchestratorAgent:
                 analysis_results = list(state.analysis_results or [])
 
             context_by_id = {context["context_id"]: context for context in review_contexts}
+            context_index_by_id = {
+                context["context_id"]: index
+                for index, context in enumerate(review_contexts)
+            }
             evidence_results = []
             risk_findings = []
+            active_context = None
             try:
-                for finding in analysis_results:
+                for finding_index in range(len(analysis_results)):
+                    finding = analysis_results[finding_index]
                     if finding["review_status"] == "NO_RISK":
                         continue
                     finding = dict(finding)
@@ -403,60 +500,192 @@ class ReviewOrchestratorAgent:
                     review_context = context_by_id.get(context_key)
                     if review_context is None:
                         raise ValueError("risk finding cannot be mapped back to review context")
-                    finding["related_memory"] = list(review_context.get("related_memory") or [])
-                    revision = invoke_tool(
-                        task_id,
-                        tool_registry,
-                        "generate_revision",
-                        {
-                            "finding": finding,
-                            "preferred_position": state.review_position.value,
-                        },
-                        logs,
-                        step_name="revision_generation",
-                    )
-                    finding["revision_suggestion"] = revision["revision_suggestion"]
-                    if revision.get("memory_references"):
-                        finding["memory_references"] = revision["memory_references"]
-                    finding.pop("related_memory", None)
-                    evidence_result = invoke_tool(
-                        task_id,
-                        tool_registry,
-                        "verify_evidence",
-                        {
-                            "finding": finding,
-                            "clauses": clauses_payload,
-                            "matched_rule": review_context["matched_rule"],
-                        },
-                        logs,
-                        step_name="evidence_verification",
-                    )
-                    evidence_results.append(evidence_result)
-                    if not evidence_result["is_valid"]:
-                        self.event_store.update_task(
+                    active_context = review_context
+                    planner_requested_human = False
+
+                    if _is_low_confidence(finding):
+                        decision = _invoke_planner(
                             task_id,
-                            ReviewStatus.EVIDENCE_MISSING,
-                            f"证据验证失败：{evidence_result['failure_reason']}",
-                            step_name="evidence_missing",
-                            tool_name="verify_evidence",
-                            analysis_results=analysis_results,
-                            evidence_results=evidence_results,
-                            risk_findings=[],
-                            logs=[log.to_dict() for log in logs],
+                            logs,
+                            PlannerReasonCode.LOW_CONFIDENCE,
+                            ReviewStatus.RISK_ANALYZED,
+                            finding["clause_id"],
+                            clauses_payload,
+                            retrieval_repair_count,
+                            "risk confidence is below the deterministic threshold",
                         )
-                        return
+                        _append_planner_trace(
+                            review_context,
+                            decision,
+                            retrieval_repair_count,
+                        )
+                        if decision["action"] == PlannerAction.ANALYZE_AGAIN.value:
+                            retrieval_repair_count += 1
+                            finding = invoke_tool(
+                                task_id,
+                                tool_registry,
+                                "analyze_risk",
+                                {"review_context": review_context},
+                                logs,
+                                step_name="planner_risk_reanalysis",
+                            )
+                            analysis_results[finding_index] = finding
+                        elif decision["action"] == PlannerAction.REQUEST_HUMAN_REVIEW.value:
+                            planner_requested_human = True
+                        else:
+                            self.event_store.update_task(
+                                task_id,
+                                ReviewStatus.NEED_MANUAL_REVIEW,
+                                "低置信度风险被 Planner 终止，需要人工确认。",
+                                step_name="planner_low_confidence_stopped",
+                                tool_name="plan_review_action",
+                                review_contexts=review_contexts,
+                                analysis_results=analysis_results,
+                                evidence_results=evidence_results,
+                                risk_findings=[],
+                                logs=[log.to_dict() for log in logs],
+                            )
+                            return
+
+                    while finding["review_status"] != "NO_RISK":
+                        finding = dict(finding)
+                        finding["related_memory"] = list(
+                            review_context.get("related_memory") or []
+                        )
+                        revision = invoke_tool(
+                            task_id,
+                            tool_registry,
+                            "generate_revision",
+                            {
+                                "finding": finding,
+                                "preferred_position": state.review_position.value,
+                            },
+                            logs,
+                            step_name="revision_generation",
+                        )
+                        finding["revision_suggestion"] = revision["revision_suggestion"]
+                        if revision.get("memory_references"):
+                            finding["memory_references"] = revision["memory_references"]
+                        finding.pop("related_memory", None)
+                        evidence_result = invoke_tool(
+                            task_id,
+                            tool_registry,
+                            "verify_evidence",
+                            {
+                                "finding": finding,
+                                "clauses": clauses_payload,
+                                "matched_rule": review_context["matched_rule"],
+                            },
+                            logs,
+                            step_name="evidence_verification",
+                        )
+                        evidence_results.append(evidence_result)
+                        if evidence_result["is_valid"]:
+                            break
+
+                        reason_code = _evidence_planner_reason(evidence_result)
+                        decision = _invoke_planner(
+                            task_id,
+                            logs,
+                            reason_code,
+                            ReviewStatus.RISK_ANALYZED,
+                            finding["clause_id"],
+                            clauses_payload,
+                            retrieval_repair_count,
+                            str(evidence_result["failure_reason"]),
+                        )
+                        _append_planner_trace(
+                            review_context,
+                            decision,
+                            retrieval_repair_count,
+                        )
+                        if decision["action"] != PlannerAction.RETRIEVE_AGAIN.value:
+                            self.event_store.update_task(
+                                task_id,
+                                ReviewStatus.EVIDENCE_MISSING,
+                                "证据验证失败且检索修复预算已停止，转入人工处理。",
+                                step_name="evidence_repair_stopped",
+                                tool_name="plan_review_action",
+                                review_contexts=review_contexts,
+                                analysis_results=analysis_results,
+                                evidence_results=evidence_results,
+                                risk_findings=[],
+                                logs=[log.to_dict() for log in logs],
+                            )
+                            return
+
+                        retrieval_repair_count += 1
+                        repaired_context = _rebuild_review_context(
+                            task_id,
+                            logs,
+                            review_context,
+                            clauses_payload,
+                            decision["query_adjustments"],
+                            embedding_cache,
+                            retrieval_repair_count,
+                        )
+                        review_contexts[context_index_by_id[context_key]] = repaired_context
+                        review_context = repaired_context
+                        active_context = repaired_context
+                        context_by_id[context_key] = repaired_context
+                        finding = invoke_tool(
+                            task_id,
+                            tool_registry,
+                            "analyze_risk",
+                            {"review_context": repaired_context},
+                            logs,
+                            step_name="planner_risk_reanalysis",
+                        )
+                        analysis_results[finding_index] = finding
+
+                    if finding["review_status"] == "NO_RISK":
+                        continue
                     if evidence_result.get("source_location"):
                         finding["evidence_location"] = evidence_result["source_location"]
-                    if _requires_manual_review(finding):
+                    if planner_requested_human or _requires_manual_review(finding):
                         finding["review_status"] = "NEED_MANUAL_REVIEW"
                     risk_findings.append(finding)
+            except PlannerOutputInvalidError as exc:
+                self.event_store.update_task(
+                    task_id,
+                    ReviewStatus.EVIDENCE_MISSING,
+                    f"Planner 决策被拒绝，未执行任何修复动作：{exc}",
+                    step_name="planner_decision_rejected",
+                    tool_name="plan_review_action",
+                    review_contexts=review_contexts,
+                    analysis_results=analysis_results,
+                    evidence_results=evidence_results,
+                    risk_findings=[],
+                    logs=[log.to_dict() for log in logs],
+                )
+                return
             except LLMOutputInvalidError as exc:
+                if isinstance(active_context, dict):
+                    try:
+                        decision = _invoke_planner(
+                            task_id,
+                            logs,
+                            PlannerReasonCode.STRUCTURED_OUTPUT_INVALID,
+                            ReviewStatus.RISK_ANALYZED,
+                            str(active_context["current_clause"]["clause_id"]),
+                            clauses_payload,
+                            retrieval_repair_count,
+                            str(exc),
+                        )
+                        _append_planner_trace(
+                            active_context,
+                            decision,
+                            retrieval_repair_count,
+                        )
+                    except Exception:
+                        pass
                 self.event_store.update_task(
                     task_id,
                     ReviewStatus.LLM_OUTPUT_INVALID,
                     f"修改建议结构化输出无效：{exc}",
                     step_name="llm_output_invalid",
                     tool_name="generate_revision",
+                    review_contexts=review_contexts,
                     analysis_results=analysis_results,
                     evidence_results=evidence_results,
                     risk_findings=[],
@@ -470,6 +699,7 @@ class ReviewOrchestratorAgent:
                     f"证据验证失败：{exc}",
                     step_name="evidence_missing",
                     tool_name="verify_evidence",
+                    review_contexts=review_contexts,
                     analysis_results=analysis_results,
                     evidence_results=evidence_results,
                     risk_findings=[],
@@ -484,6 +714,7 @@ class ReviewOrchestratorAgent:
                     "证据验证完成，存在需要人工复核的风险。",
                     step_name="human_review_pending",
                     tool_name="verify_evidence",
+                    review_contexts=review_contexts,
                     analysis_results=analysis_results,
                     evidence_results=evidence_results,
                     risk_findings=risk_findings,
@@ -497,6 +728,7 @@ class ReviewOrchestratorAgent:
                 "证据验证完成，正式风险列表已生成。",
                 step_name="evidence_verified",
                 tool_name="verify_evidence",
+                review_contexts=review_contexts,
                 analysis_results=analysis_results,
                 evidence_results=evidence_results,
                 risk_findings=risk_findings,
@@ -574,6 +806,141 @@ def _validate_recovery_checkpoint(state: AgentState) -> None:
     for checkpoint, payload, label in required_payloads:
         if current_order >= RECOVERABLE_STATUS_ORDER[checkpoint] and payload is None:
             raise RecoveryError(f"{label}缺失，无法从 {state.status.value} 节点安全恢复。")
+
+
+def _invoke_planner(
+    task_id: str,
+    logs: list[StepLog],
+    reason_code: PlannerReasonCode,
+    current_status: ReviewStatus,
+    target_clause_id: str,
+    clauses: list[dict],
+    retry_count: int,
+    failure_reason: str,
+) -> dict:
+    return invoke_tool(
+        task_id,
+        tool_registry,
+        "plan_review_action",
+        {
+            "trigger_reason": reason_code.value,
+            "current_status": current_status.value,
+            "target_clause_id": target_clause_id,
+            "contract_clause_ids": [
+                str(clause.get("clause_id", ""))
+                for clause in clauses
+                if isinstance(clause, dict) and str(clause.get("clause_id", ""))
+            ],
+            "retry_count": retry_count,
+            "failure_reason": failure_reason,
+        },
+        logs,
+        step_name="planner_route",
+    )
+
+
+def _append_planner_trace(
+    review_context: dict,
+    decision: dict,
+    retry_count: int,
+) -> None:
+    trace = list(review_context.get("planner_trace") or [])
+    trace.append(
+        {
+            "action": decision["action"],
+            "reason_code": decision["reason_code"],
+            "target_clause_id": decision["target_clause_id"],
+            "query_adjustment_fields": sorted(decision["query_adjustments"]),
+            "confidence": decision["confidence"],
+            "retry_count_before_action": retry_count,
+        }
+    )
+    review_context["planner_trace"] = trace
+    if decision["action"] in {
+        PlannerAction.RETRIEVE_AGAIN.value,
+        PlannerAction.ANALYZE_AGAIN.value,
+    }:
+        review_context["planner_retry_count"] = retry_count + 1
+    else:
+        review_context["planner_retry_count"] = retry_count
+
+
+def _planner_retry_count(review_contexts: list[dict]) -> int:
+    counts = [
+        int(context.get("planner_retry_count", 0))
+        for context in review_contexts
+        if isinstance(context, dict)
+        and isinstance(context.get("planner_retry_count", 0), int)
+        and not isinstance(context.get("planner_retry_count", 0), bool)
+    ]
+    return max(counts, default=0)
+
+
+def _retrieval_is_insufficient(
+    review_context: dict,
+    clauses: list[dict],
+) -> bool:
+    return len(clauses) > 1 and not list(review_context.get("related_clauses") or [])
+
+
+def _rebuild_review_context(
+    task_id: str,
+    logs: list[StepLog],
+    review_context: dict,
+    clauses: list[dict],
+    query_adjustments: dict,
+    embedding_cache: dict,
+    retry_count: int,
+) -> dict:
+    current_clause = review_context["current_clause"]
+    matched_rule = review_context["matched_rule"]
+    related_clauses = invoke_tool(
+        task_id,
+        tool_registry,
+        "retrieve_related_clauses",
+        {
+            "contract_type": review_context["contract_type"],
+            "current_clause": current_clause,
+            "clauses": clauses,
+            "risk_type": matched_rule["risk_type"],
+            "playbook_check_point": matched_rule["check_point"],
+            "limit": 3,
+            "query_adjustments": query_adjustments,
+            "embedding_cache": embedding_cache,
+        },
+        logs,
+        step_name="planner_related_clause_retrieval",
+    )
+    rebuilt = build_review_context(
+        contract_type=review_context["contract_type"],
+        review_position=review_context["review_position"],
+        current_clause=current_clause,
+        matched_rule=matched_rule,
+        related_clauses=related_clauses,
+        related_memory=list(review_context.get("related_memory") or []),
+    )
+    rebuilt["planner_trace"] = list(review_context.get("planner_trace") or [])
+    rebuilt["planner_retry_count"] = retry_count
+    return rebuilt
+
+
+def _evidence_planner_reason(evidence_result: dict) -> PlannerReasonCode:
+    failure_reason = str(evidence_result.get("failure_reason", ""))
+    if failure_reason in {
+        "risk_type does not match matched rule",
+        "matched rule id missing from finding",
+        "risk_reason is not related to evidence_text",
+    }:
+        return PlannerReasonCode.ANALYZER_VERIFIER_CONFLICT
+    return PlannerReasonCode.EVIDENCE_MISSING
+
+
+def _is_low_confidence(finding: dict) -> bool:
+    try:
+        confidence = float(finding.get("confidence", 0))
+    except (TypeError, ValueError):
+        return True
+    return confidence < 0.7
 
 
 def _requires_manual_review(finding: dict) -> bool:

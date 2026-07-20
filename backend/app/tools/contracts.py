@@ -6,6 +6,7 @@ LOCAL_NO_EXTERNAL_LLM_MODES = {
     "classify_contract_type": "deterministic_features_no_external_llm",
     "extract_key_fields": "rule_based_no_external_llm",
     "analyze_risk": "local_structured_no_external_llm",
+    "plan_review_action": "deterministic_policy_no_external_llm",
     "generate_revision": "local_template_no_external_llm",
 }
 
@@ -78,6 +79,7 @@ tool_contracts = {
             "risk_type": "str",
             "playbook_check_point": "str",
             "limit": "int",
+            "query_adjustments": "restricted dict optional",
             "embedding_cache": "dict optional (runtime only)",
         },
         output_schema={"related_clauses": "list"},
@@ -104,6 +106,26 @@ tool_contracts = {
         output_schema={"risk_finding": "dict"},
         calls_llm=True,
         description="基于审查上下文输出结构化风险判断。",
+    ),
+    "plan_review_action": ToolContract(
+        name="plan_review_action",
+        input_schema={
+            "trigger_reason": "fixed enum",
+            "current_status": "str",
+            "target_clause_id": "str",
+            "contract_clause_ids": "list[str]",
+            "retry_count": "int (0..1)",
+            "failure_reason": "str summary",
+        },
+        output_schema={
+            "action": "RETRIEVE_AGAIN|ANALYZE_AGAIN|REQUEST_HUMAN_REVIEW|TERMINATE",
+            "reason_code": "fixed enum",
+            "target_clause_id": "str",
+            "query_adjustments": "restricted dict",
+            "confidence": "float",
+        },
+        calls_llm=True,
+        description="在固定异常节点返回受白名单、当前合同条款和一次重试预算约束的结构化决策。",
     ),
     "verify_evidence": ToolContract(
         name="verify_evidence",

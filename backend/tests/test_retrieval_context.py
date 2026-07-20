@@ -165,6 +165,54 @@ class RetrievalContextTest(unittest.TestCase):
         self.assertEqual(len(selected), MAX_DYNAMIC_TOP_K)
         self.assertTrue(all(item["rerank_score"] >= cutoff for item in selected))
 
+    def test_planner_query_adjustments_are_restricted_and_traced(self):
+        clauses = build_clause_payloads()
+
+        related = retrieve_related_clauses(
+            {
+                "contract_type": "NDA",
+                "current_clause": clauses[1],
+                "clauses": clauses,
+                "risk_type": "使用目的或使用限制不清",
+                "playbook_check_point": "检查使用目的。",
+                "limit": 1,
+                "query_adjustments": {
+                    "additional_keywords": ["约定用途", "原文证据"],
+                    "top_k": 5,
+                },
+            }
+        )
+
+        self.assertTrue(related)
+        context = related[0]["query_context"]
+        self.assertEqual(
+            context["query_adjustments"],
+            {
+                "additional_keywords": ["约定用途", "原文证据"],
+                "top_k": 5,
+            },
+        )
+        self.assertEqual(context["requested_top_k"], 5)
+
+        for adjustments in [
+            {"tool_name": "generate_report"},
+            {"top_k": 6},
+            {"additional_keywords": ["x"] * 6},
+        ]:
+            with self.subTest(adjustments=adjustments):
+                with self.assertRaises(ValueError):
+                    retrieve_related_clauses(
+                        {
+                            "contract_type": "NDA",
+                            "current_clause": clauses[1],
+                            "clauses": clauses,
+                            "risk_type": "使用目的或使用限制不清",
+                            "playbook_check_point": "检查使用目的。",
+                            "limit": 1,
+                            "query_adjustments": adjustments,
+                        }
+                    )
+
     def test_related_clause_tool_logs_rerank_summary(self):
         logs = []
 

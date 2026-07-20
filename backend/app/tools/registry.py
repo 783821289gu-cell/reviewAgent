@@ -3,6 +3,7 @@ from services.clause_index_service import retrieve_related_clauses
 from services.contract_type_service import classify_contract_type
 from services.document_service import parse_document
 from services.memory_service import retrieve_memory, write_memory
+from services.planner_service import plan_review_action
 from services.playbook_service import retrieve_playbook_rules
 from services.report_service import generate_report
 from services.risk_analyzer import analyze_risk, generate_revision
@@ -19,6 +20,7 @@ tool_registry = {
     "retrieve_related_clauses": retrieve_related_clauses,
     "retrieve_memory": retrieve_memory,
     "analyze_risk": analyze_risk,
+    "plan_review_action": plan_review_action,
     "verify_evidence": verify_evidence,
     "generate_revision": generate_revision,
     "write_memory": write_memory,

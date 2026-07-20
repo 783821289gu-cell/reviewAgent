@@ -48,6 +48,10 @@ _OPERATION_INSTRUCTIONS = {
     ),
     "extract_key_fields": "Extract only the key fields defined by output_schema.",
     "classify_contract_type": "Classify the supplied contract data using output_schema.",
+    "plan_review_action": (
+        "Choose exactly one allowed planner action for the supplied trigger. Do not call tools, "
+        "create findings, change Playbook rules, or target a clause outside the whitelist."
+    ),
 }
 
 _INJECTION_PATTERNS = (
@@ -256,6 +260,13 @@ def _input_sections(operation: str, input_payload: dict) -> dict:
                 "data": input_payload.get("related_memory") or [],
             },
         }
+    if operation == "plan_review_action":
+        return {
+            "playbook": {"trust_level": "application", "data": input_payload},
+            "contract_data": {"trust_level": "untrusted", "data": {}},
+            "related_clauses": dict(empty_untrusted),
+            "memory": dict(empty_untrusted),
+        }
     return {
         "playbook": {"trust_level": "application", "data": {}},
         "contract_data": {"trust_level": "untrusted", "data": input_payload},
@@ -268,12 +279,18 @@ def _allowed_values(input_payload: dict, output_schema: dict) -> dict:
     properties = output_schema.get("properties") or {}
     current_clause = input_payload.get("current_clause") or {}
     clause_id = str(current_clause.get("clause_id", "")).strip()
+    target_clause_ids = input_payload.get("contract_clause_ids")
+    if not isinstance(target_clause_ids, list):
+        target_clause_ids = [clause_id] if clause_id else []
+    action_names = input_payload.get("allowed_actions")
+    if not isinstance(action_names, list):
+        action_names = _enum_values(properties.get("action"))
     return {
         "tool_names": [],
-        "action_names": [],
+        "action_names": [str(item) for item in action_names if str(item)],
         "status_names": _enum_values(properties.get("review_status")),
         "risk_types": _enum_values(properties.get("risk_type")),
-        "target_clause_ids": [clause_id] if clause_id else [],
+        "target_clause_ids": [str(item) for item in target_clause_ids if str(item)],
     }
 
 

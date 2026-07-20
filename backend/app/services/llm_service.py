@@ -96,6 +96,51 @@ CONTRACT_TYPE_OUTPUT_SCHEMA = {
         },
     },
 }
+PLANNER_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "action",
+        "reason_code",
+        "target_clause_id",
+        "query_adjustments",
+        "confidence",
+    ],
+    "properties": {
+        "action": {
+            "enum": [
+                "RETRIEVE_AGAIN",
+                "ANALYZE_AGAIN",
+                "REQUEST_HUMAN_REVIEW",
+                "TERMINATE",
+            ]
+        },
+        "reason_code": {
+            "enum": [
+                "LOW_CONFIDENCE",
+                "EVIDENCE_MISSING",
+                "RETRIEVAL_INSUFFICIENT",
+                "ANALYZER_VERIFIER_CONFLICT",
+                "STRUCTURED_OUTPUT_INVALID",
+            ]
+        },
+        "target_clause_id": {"type": "string", "minLength": 1},
+        "query_adjustments": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "additional_keywords": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 5,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 40},
+                },
+                "top_k": {"type": "integer", "minimum": 1, "maximum": 5},
+            },
+        },
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+}
 
 
 def generate_structured_risk(
@@ -167,6 +212,20 @@ def generate_structured_contract_type(
         operation="classify_contract_type",
         input_payload={"document_texts": document_texts},
         output_schema=CONTRACT_TYPE_OUTPUT_SCHEMA,
+        local_output=local_output,
+        llm_calls=llm_calls,
+    )
+
+
+def generate_structured_planner(
+    planner_input: dict,
+    local_output: dict,
+    llm_calls: list[LLMCallMetadata] | None = None,
+) -> dict:
+    return _generate_structured(
+        operation="plan_review_action",
+        input_payload=planner_input,
+        output_schema=PLANNER_OUTPUT_SCHEMA,
         local_output=local_output,
         llm_calls=llm_calls,
     )

@@ -1,6 +1,6 @@
 # ContractReviewAgent
 
-当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10 和 `UI_REDESIGN_PLAN.md` 的工作台界面迭代。系统支持 AgentState、显式 Tool Registry、流式状态事件、执行日志、本地 NDA Playbook 规则检索、可配置 Embedding 的当前合同内相关条款检索、SQLite Memory 召回、风险分析上下文构建、结构化风险分析、证据验证、修改建议生成、Web 风险展示、原文高亮、风险跳转、局部审查、人工反馈动作、Memory 写入、Markdown 报告导出、流程评测、人工标注效果评测和文本型 PDF 页码/文本块定位；HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端。任务、上传文件、文档、条款、风险、日志和事件已接入 SQLite 持久化，并由 Playwright 覆盖浏览器主流程、错误流、三视口布局和基础可访问性。
+当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10、`UI_REDESIGN_PLAN.md` 的工作台界面迭代，以及 `TASKS_AGENT.md` 的任务 5。系统支持 AgentState、显式 Tool Registry、受控 Planner/Router、一次检索修复、流式状态事件、执行日志、本地 NDA Playbook 规则检索、可配置 Embedding 的当前合同内相关条款检索、SQLite Memory 召回、风险分析上下文构建、结构化风险分析、证据验证、修改建议生成、Web 风险展示、原文高亮、风险跳转、局部审查、人工反馈动作、Memory 写入、Markdown 报告导出、流程评测、人工标注效果评测和文本型 PDF 页码/文本块定位；HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端。任务、上传文件、文档、条款、风险、日志和事件已接入 SQLite 持久化，并由 Playwright 覆盖浏览器主流程、错误流、三视口布局和基础可访问性。
 
 ## 当前已实现
 
@@ -70,6 +70,7 @@
 64. Web 前端提供审查、Memory、评测三个真实数据工作区；风险筛选、条款导航、风险证据和人工操作状态在重渲染后保持一致。
 65. 桌面端使用独立滚动的三栏工作台，移动端提供风险、合同、执行记录三种模式和固定人工操作栏；本地 Lucide SVG 图标不依赖在线 CDN。
 66. Playwright 额外验证 1440×960、1280×800、390×844 三个视口无横向溢出、面板不重叠、图标资源可访问、键盘焦点和减少动态效果设置生效。
+67. `plan_review_action` 作为第 13 个显式工具，只能返回四种白名单动作；Orchestrator 校验原因码、当前状态、当前合同条款和全任务一次重试预算后，才允许执行受限检索改写与重新分析。首次 Evidence 失败最多修复一次，再次失败进入 `EVIDENCE_MISSING`；正常确定性成功路径不调用 Planner。
 
 ## 当前未实现
 
@@ -77,11 +78,11 @@
 
 迭代技术方案、实施顺序和验收口径见 `NEXT_PLAN.md`、`TASKS_2.md` 和 `UI_REDESIGN_PLAN.md`；这些文件保留计划形成过程，当前完成状态以代码、测试和本 README 为准。
 
-当前基础评测只验证流程跑通，不声明生产级准确率。人工相关条款集目前只验证确定性测试 Stub 相对词频基线的受控提升，不代表实际外部 Embedding 模型质量；因此默认正式配置仍为 `local_sparse`。真实外部 LLM 和 Embedding 是否可用及是否有实际效果提升，仍取决于调用方提供的有效服务配置、凭据和后续实测结果。
+当前基础评测只验证流程跑通，不声明生产级准确率。人工相关条款集直接运行本地混合检索，不使用语义命中 Stub 代替结果，但仍不代表实际外部 Embedding 模型质量；因此默认正式配置仍为 `local_sparse`。真实外部 LLM 和 Embedding 是否可用及是否有实际效果提升，仍取决于调用方提供的有效服务配置、凭据和后续实测结果。
 
 当前 `effect-v1` 包含 6 份合同类型样本、6 条条款、3 条风险和 11 组相关条款标注。默认本地模式的已运行结果中，扩大后的相关条款 Recall@1 为 `11/11`，达到清单阈值 `0.8`，效果摘要为 `completed`；这些合成样本结果不能外推为生产准确率或真实外部 Embedding 效果。
 
-当前 12 个工具均已在 `tool_registry` 中注册契约。`classify_contract_type`、`extract_key_fields`、`analyze_risk` 和 `generate_revision` 具备 LLM Provider 调用边界；默认 `local_structured` 模式不记录为真实外部 LLM 调用。
+当前 13 个工具均已在 `tool_registry` 中注册契约。`classify_contract_type`、`extract_key_fields`、`analyze_risk`、`plan_review_action` 和 `generate_revision` 具备 LLM Provider 调用边界；默认 `local_structured` 模式下 Planner 使用确定性策略，不记录为真实外部 LLM 调用。
 
 ## PDF 支持边界
 
@@ -145,11 +146,11 @@ http://127.0.0.1:8000/health
 15. 框选不属于该条款的文本调用局部审查接口时，确认返回友好错误。
 16. 在风险详情中执行采纳、忽略、修改等级、修改建议，确认任务状态更新为 `MEMORY_UPDATED`，风险复核状态、报告选择和 Memory ID 可见。
 17. 对风险点击局部重审，确认以该风险证据文本发起局部审查，正式风险列表不被改写。
-18. 确认底部执行记录显示 `parse_document`、`extract_clauses`、`extract_key_fields`、`retrieve_playbook_rules`、`retrieve_related_clauses`、`retrieve_memory`、`analyze_risk`、`generate_revision`、`verify_evidence`、`write_memory` 的工具名、状态、耗时、摘要和真实 token/cost 摘要；本地结构化工具应显示 `*_no_external_llm`，不能显示外部 LLM 计量占位。
+18. 确认底部执行记录显示 `parse_document`、`extract_clauses`、`extract_key_fields`、`retrieve_playbook_rules`、`retrieve_related_clauses`、`retrieve_memory`、`analyze_risk`、`generate_revision`、`verify_evidence`、`write_memory` 的工具名、状态、耗时、摘要和真实 token/cost 摘要；异常修复路径还应显示 `plan_review_action`。本地结构化工具应显示 `*_no_external_llm`，不能显示外部 LLM 计量占位。
 19. 对需要进入报告的风险提交人工反馈并勾选加入报告，点击导出报告，确认浏览器下载 Markdown 文件，且后端任务状态变为 `REPORT_READY`。
 20. 确认报告只包含已允许进入报告的风险，不包含未加入报告的忽略风险、待人工复核但未确认风险、完整执行日志或技术实现细节。
 21. 点击基础评测中的运行评测，确认返回 10 份合成 NDA 样本的摘要；摘要包含样本名称、任务跑通、文档解析、条款结构化、Playbook 命中、风险证据、Memory 写入、报告导出和失败原因。
-22. 访问 `http://127.0.0.1:8000/api/tools`，确认 12 个工具都有输入输出契约、`runtime_calls_llm`、`runtime_llm_mode`，且 `write_memory` 输入包含 `human_feedback`、`generate_report` 输入包含 `task_id`。
+22. 访问 `http://127.0.0.1:8000/api/tools`，确认 13 个工具都有输入输出契约、`runtime_calls_llm`、`runtime_llm_mode`，且 Planner 输出只包含白名单动作、固定原因码、当前条款、受限查询调整和置信度。
 23. 上传相似合同后，确认相关 Memory 能进入上下文 Trace；当 Memory 影响建议时，风险详情展示历史反馈引用。
 24. 上传不支持或不可解析文件时，确认状态进入错误提示，不显示伪造解析结果。
 25. 服务重启后使用原任务 ID 查询，确认任务、条款、风险、日志、事件和反馈仍然存在。

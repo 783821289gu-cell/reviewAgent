@@ -27,6 +27,7 @@ EXPECTED_TOOL_NAMES = {
     "retrieve_related_clauses",
     "retrieve_memory",
     "analyze_risk",
+    "plan_review_action",
     "verify_evidence",
     "generate_revision",
     "write_memory",
@@ -69,7 +70,12 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertTrue(tool_contracts["extract_key_fields"].calls_llm)
         self.assertFalse(runtime_calls_llm("extract_key_fields"))
         self.assertFalse(runtime_calls_llm("analyze_risk"))
+        self.assertFalse(runtime_calls_llm("plan_review_action"))
         self.assertEqual(runtime_llm_mode("analyze_risk"), "local_structured_no_external_llm")
+        self.assertEqual(
+            runtime_llm_mode("plan_review_action"),
+            "deterministic_policy_no_external_llm",
+        )
         contract_payload = {item["name"]: item for item in tool_contracts_payload()}
         self.assertFalse(contract_payload["analyze_risk"]["runtime_calls_llm"])
         self.assertEqual(contract_payload["analyze_risk"]["runtime_llm_mode"], "local_structured_no_external_llm")
@@ -116,6 +122,7 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertIn("analyze_risk", log_tools)
         self.assertIn("generate_revision", log_tools)
         self.assertIn("verify_evidence", log_tools)
+        self.assertNotIn("plan_review_action", log_tools)
         self.assertEqual(payload["review_contexts"][0]["matched_rule"]["rule_id"], "NDA-R001")
         self.assertTrue(payload["review_contexts"][0]["related_clauses"])
         self.assertEqual(payload["risk_findings"][0]["matched_rule_ids"], ["NDA-R001"])
@@ -161,6 +168,11 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertEqual(payload["status"], "LLM_OUTPUT_INVALID")
         self.assertEqual(payload["analysis_results"], [])
         self.assertEqual(payload["risk_findings"], [])
+        planner_log = next(
+            log for log in payload["logs"] if log["tool_name"] == "plan_review_action"
+        )
+        self.assertEqual(planner_log["status"], "success")
+        self.assertIn("action=REQUEST_HUMAN_REVIEW", planner_log["output_summary"])
         failed_log = next(
             log for log in payload["logs"] if log["tool_name"] == "analyze_risk"
         )
@@ -187,11 +199,166 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertEqual(payload["status"], "LLM_OUTPUT_INVALID")
         self.assertTrue(payload["analysis_results"])
         self.assertEqual(payload["risk_findings"], [])
+        planner_log = next(
+            log for log in payload["logs"] if log["tool_name"] == "plan_review_action"
+        )
+        self.assertEqual(planner_log["status"], "success")
         failed_log = next(
             log for log in payload["logs"] if log["tool_name"] == "generate_revision"
         )
         self.assertEqual(failed_log["status"], "failed")
         self.assertIn("non-empty string", failed_log["error_message"])
+
+    def test_first_evidence_failure_retrieves_and_reanalyzes_once(self):
+        original_verifier = tool_registry["verify_evidence"]
+        verifier_calls = 0
+
+        def fail_once(tool_input):
+            nonlocal verifier_calls
+            verifier_calls += 1
+            if verifier_calls == 1:
+                return invalid_evidence_result(tool_input["finding"])
+            return original_verifier(tool_input)
+
+        with patch.dict(tool_registry, {"verify_evidence": fail_once}):
+            state = ReviewOrchestratorAgent(ReviewEventStore()).run_sync(
+                file_name="repair-once.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        tools = [log["tool_name"] for log in payload["logs"]]
+        self.assertEqual(payload["status"], "EVIDENCE_VERIFIED")
+        self.assertEqual(tools.count("plan_review_action"), 1)
+        self.assertEqual(tools.count("retrieve_related_clauses"), 2)
+        self.assertEqual(tools.count("analyze_risk"), 2)
+        self.assertEqual(tools.count("verify_evidence"), 2)
+        self.assertEqual(payload["review_contexts"][0]["planner_retry_count"], 1)
+        self.assertEqual(
+            payload["review_contexts"][0]["planner_trace"][0]["action"],
+            "RETRIEVE_AGAIN",
+        )
+        self.assertEqual(len(payload["risk_findings"]), 1)
+
+    def test_second_evidence_failure_stops_without_a_second_retrieval(self):
+        def always_fail(tool_input):
+            return invalid_evidence_result(tool_input["finding"])
+
+        with patch.dict(tool_registry, {"verify_evidence": always_fail}):
+            state = ReviewOrchestratorAgent(ReviewEventStore()).run_sync(
+                file_name="repair-exhausted.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        tools = [log["tool_name"] for log in payload["logs"]]
+        planner_logs = [
+            log for log in payload["logs"] if log["tool_name"] == "plan_review_action"
+        ]
+        self.assertEqual(payload["status"], "EVIDENCE_MISSING")
+        self.assertEqual(tools.count("retrieve_related_clauses"), 2)
+        self.assertEqual(tools.count("analyze_risk"), 2)
+        self.assertEqual(tools.count("verify_evidence"), 2)
+        self.assertEqual(len(planner_logs), 2)
+        self.assertIn("action=RETRIEVE_AGAIN", planner_logs[0]["output_summary"])
+        self.assertIn("action=REQUEST_HUMAN_REVIEW", planner_logs[1]["output_summary"])
+        self.assertEqual(payload["risk_findings"], [])
+        self.assertEqual(len(payload["evidence_results"]), 2)
+
+    def test_invalid_planner_action_executes_no_repair_tool(self):
+        invalid_decision = {
+            "action": "CALL_ANY_TOOL",
+            "reason_code": "EVIDENCE_MISSING",
+            "target_clause_id": "CL-001",
+            "query_adjustments": {},
+            "confidence": 1.0,
+        }
+
+        with (
+            patch.dict(
+                tool_registry,
+                {"verify_evidence": lambda tool_input: invalid_evidence_result(tool_input["finding"])},
+            ),
+            patch(
+                "services.planner_service.generate_structured_planner",
+                return_value=invalid_decision,
+            ),
+        ):
+            state = ReviewOrchestratorAgent(ReviewEventStore()).run_sync(
+                file_name="invalid-planner.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        tools = [log["tool_name"] for log in payload["logs"]]
+        planner_log = next(
+            log for log in payload["logs"] if log["tool_name"] == "plan_review_action"
+        )
+        self.assertEqual(payload["status"], "EVIDENCE_MISSING")
+        self.assertEqual(tools.count("retrieve_related_clauses"), 1)
+        self.assertEqual(tools.count("analyze_risk"), 1)
+        self.assertEqual(planner_log["status"], "failed")
+        self.assertIn("planner action is not allowed", planner_log["error_message"])
+        self.assertIn("Planner 决策被拒绝", payload["message"])
+
+    def test_empty_related_recall_is_repaired_before_analysis(self):
+        original_retriever = tool_registry["retrieve_related_clauses"]
+        retriever_calls = 0
+
+        def empty_once(tool_input):
+            nonlocal retriever_calls
+            retriever_calls += 1
+            if retriever_calls == 1:
+                return []
+            return original_retriever(tool_input)
+
+        with patch.dict(tool_registry, {"retrieve_related_clauses": empty_once}):
+            state = ReviewOrchestratorAgent(ReviewEventStore()).run_sync(
+                file_name="repair-empty-recall.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        planner_log = next(
+            log for log in payload["logs"] if log["tool_name"] == "plan_review_action"
+        )
+        self.assertEqual(payload["status"], "EVIDENCE_VERIFIED")
+        self.assertEqual(retriever_calls, 2)
+        self.assertIn("reason=RETRIEVAL_INSUFFICIENT", planner_log["output_summary"])
+        self.assertEqual(payload["review_contexts"][0]["planner_retry_count"], 1)
+
+    def test_low_confidence_uses_planner_and_keeps_manual_review(self):
+        original_analyzer = tool_registry["analyze_risk"]
+
+        def low_confidence(tool_input):
+            finding = original_analyzer(tool_input)
+            finding["confidence"] = 0.5
+            return finding
+
+        with patch.dict(tool_registry, {"analyze_risk": low_confidence}):
+            state = ReviewOrchestratorAgent(ReviewEventStore()).run_sync(
+                file_name="low-confidence.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        planner_logs = [
+            log for log in payload["logs"] if log["tool_name"] == "plan_review_action"
+        ]
+        self.assertEqual(payload["status"], "HUMAN_REVIEW_PENDING")
+        self.assertEqual(len(planner_logs), 1)
+        self.assertIn("reason=LOW_CONFIDENCE", planner_logs[0]["output_summary"])
+        self.assertEqual(payload["risk_findings"][0]["review_status"], "NEED_MANUAL_REVIEW")
 
     def test_event_stream_payload_keeps_event_time_task_status(self):
         event_store = ReviewEventStore()
@@ -227,6 +394,18 @@ class ReviewOrchestratorTest(unittest.TestCase):
         self.assertEqual(logs[0].tool_name, "write_memory")
         self.assertEqual(logs[0].status, "failed")
         self.assertIn("feedback action", logs[0].error_message)
+
+
+def invalid_evidence_result(finding: dict) -> dict:
+    return {
+        "risk_id": str(finding.get("risk_id", "")),
+        "clause_id": str(finding.get("clause_id", "")),
+        "evidence_text": str(finding.get("evidence_text", "")),
+        "is_valid": False,
+        "failure_reason": "evidence_text not found in clause text",
+        "verified_clause_id": "",
+        "source_location": {},
+    }
 
 
 if __name__ == "__main__":

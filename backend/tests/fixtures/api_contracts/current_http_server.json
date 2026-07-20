@@ -53,7 +53,7 @@
       "method": "GET",
       "path": "/api/tools",
       "status": 200,
-      "tool_count": 12,
+      "tool_count": 13,
       "tools": [
         {
           "name": "parse_document",
@@ -97,7 +97,7 @@
         },
         {
           "name": "retrieve_related_clauses",
-          "input_keys": ["contract_type", "current_clause", "clauses", "risk_type", "playbook_check_point", "limit", "embedding_cache"],
+          "input_keys": ["contract_type", "current_clause", "clauses", "risk_type", "playbook_check_point", "limit", "query_adjustments", "embedding_cache"],
           "output_keys": ["related_clauses"],
           "calls_llm": false,
           "runtime_calls_llm": false,
@@ -118,6 +118,14 @@
           "calls_llm": true,
           "runtime_calls_llm": false,
           "runtime_llm_mode": "local_structured_no_external_llm"
+        },
+        {
+          "name": "plan_review_action",
+          "input_keys": ["trigger_reason", "current_status", "target_clause_id", "contract_clause_ids", "retry_count", "failure_reason"],
+          "output_keys": ["action", "reason_code", "target_clause_id", "query_adjustments", "confidence"],
+          "calls_llm": true,
+          "runtime_calls_llm": false,
+          "runtime_llm_mode": "deterministic_policy_no_external_llm"
         },
         {
           "name": "verify_evidence",

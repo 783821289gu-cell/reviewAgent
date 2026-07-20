@@ -81,6 +81,18 @@ def _elapsed_ms(start: float) -> int:
 
 
 def _summarize_input(tool_input: dict) -> str:
+    if {
+        "trigger_reason",
+        "current_status",
+        "target_clause_id",
+        "retry_count",
+    }.issubset(tool_input):
+        return (
+            f"trigger={tool_input.get('trigger_reason')}, "
+            f"status={tool_input.get('current_status')}, "
+            f"target_clause={tool_input.get('target_clause_id')}, "
+            f"retry_count={tool_input.get('retry_count')}"
+        )
     parts = []
     for key, value in tool_input.items():
         normalized_key = key.lower()
@@ -225,6 +237,13 @@ def _summarize_output(output) -> str:
             return f"items={len(output)}, top_memory={output[0].get('memory_id')}"
         return f"items={len(output)}"
     if isinstance(output, dict):
+        if "action" in output and "reason_code" in output:
+            adjustments = output.get("query_adjustments") or {}
+            return (
+                f"action={output.get('action')}, reason={output.get('reason_code')}, "
+                f"target_clause={output.get('target_clause_id')}, "
+                f"adjustments={','.join(sorted(str(item) for item in adjustments)) or 'none'}"
+            )
         return f"keys={','.join(output.keys())}"
     contract_id = getattr(output, "contract_id", "")
     if contract_id:

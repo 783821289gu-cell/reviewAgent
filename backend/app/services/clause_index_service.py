@@ -23,6 +23,11 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
     risk_type = str(tool_input.get("risk_type", "")).strip()
     playbook_check_point = str(tool_input.get("playbook_check_point", "")).strip()
     limit = int(tool_input.get("limit", DEFAULT_RELATED_CLAUSE_LIMIT))
+    query_adjustments = _validated_query_adjustments(
+        tool_input.get("query_adjustments")
+    )
+    if "top_k" in query_adjustments:
+        limit = query_adjustments["top_k"]
 
     if contract_type != "NDA":
         return []
@@ -48,10 +53,14 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
     if not candidate_clauses:
         return []
 
+    additional_keywords = query_adjustments.get("additional_keywords") or []
+    adjusted_check_point = " ".join(
+        [playbook_check_point, *additional_keywords]
+    ).strip()
     keyword_query = build_keyword_query(
         current_clause,
         risk_type,
-        playbook_check_point,
+        adjusted_check_point,
     )
     query_context = {
         "query_version": "hybrid-retrieval-v1",
@@ -59,6 +68,7 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
         "current_clause_type": current_clause.get("clause_type", ""),
         "risk_type": risk_type,
         "playbook_check_point": playbook_check_point,
+        "query_adjustments": query_adjustments,
         "key_fields": current_clause.get("key_fields") or {},
         "keyword_terms": keyword_query["query_terms"],
         "playbook_keywords": keyword_query["playbook_terms"],
@@ -72,7 +82,7 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
         ],
     }
     texts = [
-        build_retrieval_query(current_clause, risk_type, playbook_check_point),
+        build_retrieval_query(current_clause, risk_type, adjusted_check_point),
         *[build_clause_embedding_text(clause) for clause in candidate_clauses],
     ]
     embedding_batch = embed_texts(
@@ -250,3 +260,27 @@ def _key_fields_text(key_fields: dict) -> str:
         parts.extend(values)
         parts.append(str(key))
     return " ".join(parts)
+
+
+def _validated_query_adjustments(value) -> dict:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("query_adjustments must be a dict")
+    if set(value) - {"additional_keywords", "top_k"}:
+        raise ValueError("query_adjustments contains unsupported fields")
+    normalized = {}
+    if "additional_keywords" in value:
+        keywords = value["additional_keywords"]
+        if not isinstance(keywords, list) or len(keywords) > 5:
+            raise ValueError("query_adjustments additional_keywords exceeds its limit")
+        normalized_keywords = [str(item).strip() for item in keywords]
+        if any(not item or len(item) > 40 for item in normalized_keywords):
+            raise ValueError("query_adjustments contains an invalid keyword")
+        normalized["additional_keywords"] = list(dict.fromkeys(normalized_keywords))
+    if "top_k" in value:
+        top_k = value["top_k"]
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= MAX_DYNAMIC_TOP_K:
+            raise ValueError("query_adjustments top_k must be between 1 and 5")
+        normalized["top_k"] = top_k
+    return normalized
