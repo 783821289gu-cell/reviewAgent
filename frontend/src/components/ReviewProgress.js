@@ -17,6 +17,10 @@ const STATUS_LABELS = {
   EVIDENCE_MISSING: "证据缺失",
   NEED_MANUAL_REVIEW: "需要人工复核",
   UNSUPPORTED_CONTRACT_TYPE: "不支持的合同类型",
+  CANCEL_REQUESTED: "取消请求已接收",
+  CANCELLED: "任务已取消",
+  NODE_TIMEOUT: "节点执行超时",
+  TASK_TIMEOUT: "任务执行超时",
   TASK_ERROR: "任务失败",
 };
 
@@ -26,12 +30,16 @@ const EXCEPTION_STATUSES = new Set([
   "LLM_OUTPUT_INVALID",
   "EVIDENCE_MISSING",
   "UNSUPPORTED_CONTRACT_TYPE",
+  "CANCELLED",
+  "NODE_TIMEOUT",
+  "TASK_TIMEOUT",
   "TASK_ERROR",
 ]);
 
 const REVIEW_STATUSES = new Set([
   "HUMAN_REVIEW_PENDING",
   "NEED_MANUAL_REVIEW",
+  "CANCEL_REQUESTED",
 ]);
 
 export function ReviewProgress(root, props) {
@@ -53,9 +61,11 @@ export function ReviewProgress(root, props) {
     item.className = progressClassName(event.status);
 
     const status = document.createElement("strong");
-    status.textContent = event.step_name === "recovery_started"
-      ? "任务恢复"
-      : STATUS_LABELS[event.status] || event.status || "未知状态";
+    status.textContent = event.step_name === "manual_recovery_started"
+      ? "人工恢复"
+      : event.step_name === "recovery_started"
+        ? "任务恢复"
+        : STATUS_LABELS[event.status] || event.status || "未知状态";
 
     const meta = document.createElement("span");
     meta.textContent = [event.step_name, event.tool_name].filter(Boolean).join(" / ");

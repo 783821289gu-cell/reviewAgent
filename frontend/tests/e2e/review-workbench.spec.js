@@ -142,6 +142,21 @@ test("损坏 DOCX 进入解析失败而不显示成功", async ({ page }) => {
   await expect(page.locator("[data-review-status]")).toHaveText("PARSE_FAILED");
   await expect(page.locator(".progress-failed")).toContainText("解析失败");
   await expect(page.locator("[data-contract-viewer]")).toContainText("合同解析失败");
+  await expect(page.locator("[data-recover-task]")).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.accept("E2E 人工恢复损坏文档"));
+  const recoveryResponse = page.waitForResponse(
+    (response) => response.url().endsWith("/recover") && response.request().method() === "POST",
+  );
+  await page.locator("[data-recover-task]").click();
+  expect((await recoveryResponse).status()).toBe(202);
+  await expect(page.locator(".progress-list")).toContainText("人工恢复");
+  await expect(page.locator("[data-review-status]")).toHaveText("PARSE_FAILED");
+
+  await page.locator("details.execution-log summary").click();
+  await expect(page.locator("[data-execution-log]")).toContainText("最近人工恢复");
+  await expect(page.locator("[data-execution-log]")).toContainText("web_manual_retry");
+  await expect(page.locator("[data-execution-log]")).toContainText("parse 2/2");
 });
 
 

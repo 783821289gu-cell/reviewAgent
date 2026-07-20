@@ -110,6 +110,36 @@ class TaskPersistenceTest(unittest.TestCase):
 
         self.assertEqual([item.task_id for item in loaded], [state.task_id])
         self.assertEqual(restored.to_dict(), state.to_dict())
+        self.assertTrue(all(log["trace_summary"] for log in restored.logs))
+        self.assertEqual(restored.logs[0]["parent_step_id"], "")
+        self.assertTrue(all("retry_index" in log for log in restored.logs))
+
+    def test_restart_clears_stale_execution_lease_before_recovery(self):
+        state = self.event_store.create_task(
+            "pending.docx",
+            "docx",
+            ReviewPosition.PARTY_A,
+            content=build_docx_bytes(),
+        )
+        connection = connect(self.db_path)
+        try:
+            connection.execute(
+                "UPDATE review_tasks SET execution_owner = ? WHERE task_id = ?",
+                ("stale_process_owner", state.task_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        restarted_store = ReviewEventStore(self.persistence)
+        restarted_store.load_persisted()
+
+        self.assertEqual(
+            self.persistence.task_repository.get(state.task_id)["execution_owner"],
+            "",
+        )
+        self.assertTrue(restarted_store.try_acquire_execution(state.task_id, "new_owner"))
+        restarted_store.release_execution(state.task_id, "new_owner")
 
     def test_feedback_and_report_side_effects_are_idempotent_and_persisted(self):
         state = self.agent.run_sync(

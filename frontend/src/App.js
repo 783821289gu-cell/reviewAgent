@@ -12,6 +12,9 @@ const TERMINAL_STATUSES = new Set([
   "EVIDENCE_MISSING",
   "NEED_MANUAL_REVIEW",
   "UNSUPPORTED_CONTRACT_TYPE",
+  "CANCELLED",
+  "NODE_TIMEOUT",
+  "TASK_TIMEOUT",
   "MEMORY_UPDATED",
   "REPORT_READY",
   "TASK_ERROR",
@@ -36,6 +39,7 @@ export function renderApp(root) {
     feedback: emptyFeedback(),
     report: emptyReport(),
     evaluation: emptyEvaluation(),
+    taskControl: emptyTaskControl(),
   };
 
   function setState(nextState) {
@@ -94,7 +98,7 @@ export function renderApp(root) {
         feedback: emptyFeedback(),
         report: emptyReport(),
       });
-      subscribeToTaskEvents(payload.task_id);
+      subscribeToTaskEvents(payload.task_id, latestEventId(payload));
     } catch (error) {
       setState({ error: error.message || "任务创建失败", loading: false, showUpload: true });
     }
@@ -408,6 +412,72 @@ export function renderApp(root) {
     }
   }
 
+  async function cancelTask() {
+    if (!state.task?.task_id || TERMINAL_STATUSES.has(state.task.status)) {
+      return;
+    }
+    const reason = window.prompt("请输入取消原因", "用户主动取消");
+    if (reason == null) {
+      return;
+    }
+    setState({ taskControl: { action: "cancel", error: "" } });
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tasks/${state.task.task_id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || "取消任务失败");
+      }
+      setState({
+        task: payload.task,
+        loading: !TERMINAL_STATUSES.has(payload.task.status),
+        taskControl: emptyTaskControl(),
+      });
+    } catch (error) {
+      setState({
+        taskControl: { action: "", error: error.message || "取消任务失败" },
+      });
+    }
+  }
+
+  async function recoverTask() {
+    if (!state.task?.task_id) {
+      return;
+    }
+    const reason = window.prompt("请输入恢复原因", "人工确认后重试失败节点");
+    if (reason == null) {
+      return;
+    }
+    setState({ taskControl: { action: "recover", error: "" } });
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tasks/${state.task.task_id}/recover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason,
+          operator_action: "web_manual_retry",
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || "恢复任务失败");
+      }
+      setState({
+        task: payload.task,
+        loading: true,
+        taskControl: emptyTaskControl(),
+      });
+      subscribeToTaskEvents(payload.task.task_id, latestEventId(payload.task));
+    } catch (error) {
+      setState({
+        taskControl: { action: "", error: error.message || "恢复任务失败" },
+      });
+    }
+  }
+
   function selectEvaluationView(view) {
     if (!new Set(["flow", "effect"]).has(view)) {
       return;
@@ -438,9 +508,12 @@ export function renderApp(root) {
     });
   }
 
-  function subscribeToTaskEvents(taskId) {
+  function subscribeToTaskEvents(taskId, afterEventId = -1) {
     closeEventStream();
-    eventSource = new EventSource(`${API_BASE_URL}/api/tasks/${taskId}/events`);
+    const cursor = Number.isInteger(afterEventId) ? afterEventId : -1;
+    eventSource = new EventSource(
+      `${API_BASE_URL}/api/tasks/${taskId}/events?after_event_id=${cursor}`,
+    );
 
     eventSource.addEventListener("review_event", (event) => {
       const payload = JSON.parse(event.data);
@@ -448,6 +521,7 @@ export function renderApp(root) {
       setState({
         task: nextTask,
         loading: !TERMINAL_STATUSES.has(nextTask.status),
+        taskControl: emptyTaskControl(),
       });
       if (TERMINAL_STATUSES.has(nextTask.status)) {
         closeEventStream();
@@ -564,6 +638,7 @@ export function renderApp(root) {
         feedback: state.feedback,
         report: state.report,
         evaluation: state.evaluation,
+        taskControl: state.taskControl,
         onSelectRisk: handleRiskSelect,
         onLocateRisk: handleRiskLocate,
         onSelectClause: handleClauseSelect,
@@ -578,6 +653,8 @@ export function renderApp(root) {
         onRunEvaluation: runEvaluation,
         onRunEffectEvaluation: runEffectEvaluation,
         onSelectEvaluationView: selectEvaluationView,
+        onCancelTask: cancelTask,
+        onRecoverTask: recoverTask,
       });
     }
 
@@ -606,6 +683,19 @@ function emptyFeedback() {
     error: "",
     message: "",
   };
+}
+
+function emptyTaskControl() {
+  return {
+    action: "",
+    error: "",
+  };
+}
+
+function latestEventId(task) {
+  const events = task?.events || [];
+  const eventId = events.at(-1)?.event_id;
+  return Number.isInteger(eventId) ? eventId : -1;
 }
 
 function emptyLocalReview() {

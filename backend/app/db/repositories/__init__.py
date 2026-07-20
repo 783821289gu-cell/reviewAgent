@@ -99,6 +99,7 @@ class ReviewPersistence:
             connection.close()
 
     def load_states(self) -> list[tuple[AgentState, list[dict]]]:
+        self.task_repository.clear_execution_leases()
         persisted = []
         for task in self.task_repository.list_all():
             try:
@@ -128,6 +129,13 @@ class ReviewPersistence:
                 events=[_event_without_task(event) for event in events],
                 recovery_count=task["recovery_count"],
                 recovery_from_status=task["recovery_from_status"],
+                retry_counts=task["retry_counts"],
+                recovery_history=task["recovery_history"],
+                cancel_requested_at=task["cancel_requested_at"],
+                cancelled_at=task["cancelled_at"],
+                cancel_reason=task["cancel_reason"],
+                execution_active=False,
+                last_timeout=task["last_timeout"],
             )
             persisted.append((state, events))
         return persisted

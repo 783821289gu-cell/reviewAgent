@@ -9,7 +9,36 @@ export function ExecutionLog(root, props) {
   appendSummary(summary, "任务 Trace", task?.trace_id || "尚未生成");
   appendSummary(summary, "恢复次数", String(task?.recovery_count || 0));
   if (task?.recovery_from_status) {
-    appendSummary(summary, "恢复起点", task.recovery_from_status);
+    appendSummary(summary, "恢复来源", task.recovery_from_status);
+  }
+  if (task?.cancel_reason) {
+    appendSummary(summary, "取消原因", task.cancel_reason);
+  }
+  if (task?.last_timeout) {
+    appendSummary(
+      summary,
+      "最近超时",
+      [task.last_timeout.type, task.last_timeout.step_name, task.last_timeout.limit_seconds]
+        .filter((value) => value !== "" && value != null)
+        .join(" / "),
+    );
+  }
+  if (task?.retry_counts && Object.keys(task.retry_counts).length > 0) {
+    appendSummary(
+      summary,
+      "错误重试",
+      Object.entries(task.retry_counts)
+        .map(([name, count]) => `${name} ${count}/${task.retry_limits?.[name] ?? "?"}`)
+        .join("；"),
+    );
+  }
+  const latestRecovery = task?.recovery_history?.at(-1);
+  if (latestRecovery) {
+    appendSummary(
+      summary,
+      "最近人工恢复",
+      `${latestRecovery.operator_action} / ${latestRecovery.reason} / 起点 ${latestRecovery.resume_from_status}`,
+    );
   }
   root.appendChild(summary);
 
@@ -26,7 +55,7 @@ export function ExecutionLog(root, props) {
   list.className = "log-list";
   logs.forEach((log) => {
     const item = document.createElement("li");
-    item.className = log.status === "failed" ? "log-failed" : "";
+    item.className = log.status === "success" ? "" : "log-failed";
 
     const title = document.createElement("strong");
     title.textContent = `${log.step_name} / ${log.tool_name}：${statusLabel(log.status)}`;
@@ -34,10 +63,13 @@ export function ExecutionLog(root, props) {
     const detail = document.createElement("span");
     detail.textContent = [
       log.step_id ? `Step ${log.step_id}` : "Step 未记录",
+      log.parent_step_id ? `Parent ${log.parent_step_id}` : "Root Step",
+      `Retry ${log.retry_index || 0}`,
       `${log.latency_ms}ms`,
       `输入 ${log.input_summary || "无摘要"}`,
       log.error_message ? `错误 ${log.error_message}` : `输出 ${log.output_summary || "无摘要"}`,
       formatProviderSummary(log.token_cost_summary),
+      formatTraceSummary(log.trace_summary, log.idempotency_key),
     ].join("；");
 
     item.append(title, detail);
@@ -77,12 +109,46 @@ function formatProviderSummary(rawSummary) {
   }
 }
 
+function formatTraceSummary(trace, idempotencyKey) {
+  if (!trace && !idempotencyKey) {
+    return "Trace 摘要未记录";
+  }
+  const versions = trace?.versions || {};
+  const decision = trace?.decision || {};
+  const token = trace?.token_allocation || {};
+  const parts = [
+    versions.prompt ? `Prompt ${versions.prompt}` : "",
+    versions.llm_model ? `Model ${versions.llm_model}` : "",
+    versions.playbook ? `Playbook ${versions.playbook}` : "",
+    decision.action ? `Planner ${decision.action}/${decision.reason_code || ""}` : "",
+    decision.type === "critic" ? `Critic ${decision.decision}/${decision.reason_code || ""}` : "",
+    decision.type === "evidence_verifier" ? `Evidence ${decision.is_valid ? "pass" : "fail"}` : "",
+    decision.type === "retrieval" ? `Candidates ${decision.candidate_count}` : "",
+    token.final_prompt_tokens != null
+      ? `Context ${token.final_prompt_tokens}/${token.max_prompt_tokens}`
+      : "",
+    idempotencyKey ? `Idempotency ${shortId(idempotencyKey)}` : "",
+  ].filter(Boolean);
+  return parts.join("；") || "Trace 摘要已记录";
+}
+
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 22 ? `${text.slice(0, 10)}…${text.slice(-8)}` : text;
+}
+
 function statusLabel(status) {
   if (status === "success") {
     return "成功";
   }
   if (status === "failed") {
     return "失败";
+  }
+  if (status === "timeout") {
+    return "超时";
+  }
+  if (status === "cancelled") {
+    return "已取消";
   }
   return status || "未知";
 }

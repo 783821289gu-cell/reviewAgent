@@ -25,7 +25,7 @@ export function WorkbenchLayout(root, props) {
 
   root.innerHTML = `
     <section class="workbench workspace-${workspaceView}" aria-label="审查工作台">
-      ${renderTaskStrip(task, props.report)}
+      ${renderTaskStrip(task, props.report, props.taskControl)}
       ${workspaceView === "review" ? renderReviewWorkspace(props.mobileView, risks, props.riskFilter) : ""}
       ${workspaceView === "memory" ? renderMemoryWorkspace(task, risks) : ""}
       ${workspaceView === "evaluation" ? renderEvaluationWorkspace() : ""}
@@ -37,6 +37,12 @@ export function WorkbenchLayout(root, props) {
     task,
     report: props.report,
     onExportReport: props.onExportReport,
+  });
+  root.querySelector("[data-cancel-task]")?.addEventListener("click", () => {
+    props.onCancelTask?.();
+  });
+  root.querySelector("[data-recover-task]")?.addEventListener("click", () => {
+    props.onRecoverTask?.();
   });
 
   if (workspaceView === "review") {
@@ -136,7 +142,12 @@ function renderReviewComponents(root, props, context) {
   });
 }
 
-function renderTaskStrip(task, report) {
+function renderTaskStrip(task, report, taskControl) {
+  const canCancel = task
+    && task.status !== "CANCEL_REQUESTED"
+    && !TASK_TERMINAL_STATUSES.has(task.status);
+  const canRecover = task && RECOVERABLE_TASK_STATUSES.has(task.status);
+  const controlBusy = Boolean(taskControl?.action);
   return `
     <header class="task-strip">
       <div class="task-title">
@@ -151,10 +162,52 @@ function renderTaskStrip(task, report) {
         <div><dt>立场</dt><dd>${escapeHtml(task?.review_position || "未选择")}</dd></div>
         <div><dt>Playbook</dt><dd data-playbook-version>${escapeHtml(playbookVersion(task))}</dd></div>
       </dl>
-      <div class="task-report" data-report-export data-report-state="${report?.loading ? "loading" : "idle"}"></div>
+      <div class="task-actions">
+        <div class="task-control-actions">
+          ${canCancel ? `
+            <button class="button button-secondary compact-button" type="button" data-cancel-task ${controlBusy ? "disabled" : ""}>
+              ${icon("x")}<span>${task?.status === "CANCEL_REQUESTED" ? "取消中" : "取消"}</span>
+            </button>
+          ` : ""}
+          ${canRecover ? `
+            <button class="button button-secondary compact-button" type="button" data-recover-task ${controlBusy ? "disabled" : ""}>
+              ${icon("rotate-ccw")}<span>人工恢复</span>
+            </button>
+          ` : ""}
+        </div>
+        ${taskControl?.error ? `<p class="inline-error" role="alert">${escapeHtml(taskControl.error)}</p>` : ""}
+        <div class="task-report" data-report-export data-report-state="${report?.loading ? "loading" : "idle"}"></div>
+      </div>
     </header>
   `;
 }
+
+const TASK_TERMINAL_STATUSES = new Set([
+  "EVIDENCE_VERIFIED",
+  "HUMAN_REVIEW_PENDING",
+  "MEMORY_UPDATED",
+  "REPORT_READY",
+  "PARSE_FAILED",
+  "RETRIEVAL_FAILED",
+  "LLM_OUTPUT_INVALID",
+  "EVIDENCE_MISSING",
+  "NEED_MANUAL_REVIEW",
+  "UNSUPPORTED_CONTRACT_TYPE",
+  "CANCELLED",
+  "NODE_TIMEOUT",
+  "TASK_TIMEOUT",
+  "TASK_ERROR",
+]);
+
+const RECOVERABLE_TASK_STATUSES = new Set([
+  "PARSE_FAILED",
+  "RETRIEVAL_FAILED",
+  "LLM_OUTPUT_INVALID",
+  "EVIDENCE_MISSING",
+  "NODE_TIMEOUT",
+  "TASK_TIMEOUT",
+  "TASK_ERROR",
+]);
 
 function renderReviewWorkspace(mobileView, risks, activeFilter) {
   const view = validMobileView(mobileView);

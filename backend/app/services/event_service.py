@@ -1,11 +1,17 @@
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from threading import Condition
+from threading import Condition, Lock
 from uuid import uuid4
 
 from db.repositories import ReviewPersistence
-from models.review import AgentState, ReviewPosition, ReviewStatus, trace_id_for_task
+from models.review import (
+    AgentState,
+    ReviewPosition,
+    ReviewStatus,
+    TaskCancelledError,
+    trace_id_for_task,
+)
 
 
 TERMINAL_STATUSES = {
@@ -19,8 +25,32 @@ TERMINAL_STATUSES = {
     ReviewStatus.NEED_MANUAL_REVIEW,
     ReviewStatus.UNSUPPORTED_CONTRACT_TYPE,
     ReviewStatus.REPORT_READY,
+    ReviewStatus.CANCELLED,
+    ReviewStatus.NODE_TIMEOUT,
+    ReviewStatus.TASK_TIMEOUT,
     ReviewStatus.TASK_ERROR,
 }
+
+ERROR_RETRY_CATEGORIES = {
+    ReviewStatus.PARSE_FAILED: "parse",
+    ReviewStatus.RETRIEVAL_FAILED: "retrieval",
+    ReviewStatus.LLM_OUTPUT_INVALID: "llm_output",
+    ReviewStatus.EVIDENCE_MISSING: "evidence",
+    ReviewStatus.NODE_TIMEOUT: "node_timeout",
+    ReviewStatus.TASK_TIMEOUT: "task_timeout",
+    ReviewStatus.TASK_ERROR: "task",
+}
+ERROR_RETRY_LIMITS = {
+    "parse": 2,
+    "retrieval": 2,
+    "llm_output": 2,
+    "evidence": 2,
+    "node_timeout": 2,
+    "task_timeout": 2,
+    "task": 2,
+}
+_PROCESS_EXECUTION_LOCK = Lock()
+_PROCESS_EXECUTION_OWNERS: dict[tuple[str, str], str] = {}
 
 
 @dataclass(frozen=True)
@@ -54,6 +84,7 @@ class ReviewEventStore:
         self.persistence = persistence
         self._states: dict[str, AgentState] = {}
         self._events: dict[str, list[ReviewEvent]] = {}
+        self._execution_owners: dict[str, str] = {}
         self._condition = Condition()
 
     @property
@@ -114,9 +145,20 @@ class ReviewEventStore:
         report_file: dict | None = None,
         logs: list[dict] | None = None,
         recovery_from_status: str | None = None,
+        retry_counts: dict | None = None,
+        recovery_history: list[dict] | None = None,
+        cancel_requested_at: str | None = None,
+        cancelled_at: str | None = None,
+        cancel_reason: str | None = None,
+        last_timeout: dict | None = None,
     ) -> AgentState:
         with self._condition:
             state = deepcopy(self._states[task_id])
+            if state.status in {ReviewStatus.CANCEL_REQUESTED, ReviewStatus.CANCELLED} and status not in {
+                ReviewStatus.CANCEL_REQUESTED,
+                ReviewStatus.CANCELLED,
+            }:
+                raise TaskCancelledError(f"task cancellation is active: {task_id}")
             state.status = status
             state.message = message
             if document is not None:
@@ -142,6 +184,23 @@ class ReviewEventStore:
             if recovery_from_status is not None:
                 state.recovery_count += 1
                 state.recovery_from_status = recovery_from_status
+            if retry_counts is not None:
+                state.retry_counts = deepcopy(retry_counts)
+            category = ERROR_RETRY_CATEGORIES.get(status)
+            previous_status = self._states[task_id].status
+            if category and previous_status != status and retry_counts is None:
+                state.retry_counts = dict(state.retry_counts or {})
+                state.retry_counts[category] = int(state.retry_counts.get(category, 0)) + 1
+            if recovery_history is not None:
+                state.recovery_history = deepcopy(recovery_history)
+            if cancel_requested_at is not None:
+                state.cancel_requested_at = cancel_requested_at
+            if cancelled_at is not None:
+                state.cancelled_at = cancelled_at
+            if cancel_reason is not None:
+                state.cancel_reason = cancel_reason
+            if last_timeout is not None:
+                state.last_timeout = deepcopy(last_timeout)
             existing_events = self._events[task_id]
             event = self._new_event_locked(
                 state,
@@ -170,6 +229,7 @@ class ReviewEventStore:
         with self._condition:
             self._states.clear()
             self._events.clear()
+            self._execution_owners.clear()
             for state, event_payloads in self.persistence.load_states():
                 events = [
                     ReviewEvent(
@@ -213,6 +273,147 @@ class ReviewEventStore:
             step_name="recovery_started",
             recovery_from_status=recovery_from,
         )
+
+    def request_cancel(self, task_id: str, reason: str) -> AgentState:
+        state = self.get_task(task_id)
+        if state is None:
+            raise ValueError(f"task not found: {task_id}")
+        if state.status == ReviewStatus.CANCEL_REQUESTED:
+            return state
+        if state.status in TERMINAL_STATUSES:
+            raise ValueError(f"task is already terminal: {state.status.value}")
+        now = datetime.now(timezone.utc).isoformat()
+        return self.update_task(
+            task_id,
+            ReviewStatus.CANCEL_REQUESTED,
+            f"Task cancellation was requested ({reason}); no new node will start.",
+            step_name="cancel_requested",
+            cancel_requested_at=now,
+            cancel_reason=reason,
+        )
+
+    def finalize_cancel(self, task_id: str, logs: list[dict] | None = None) -> AgentState:
+        state = self.get_task(task_id)
+        if state is None:
+            raise ValueError(f"task not found: {task_id}")
+        if state.status == ReviewStatus.CANCELLED:
+            return state
+        return self.update_task(
+            task_id,
+            ReviewStatus.CANCELLED,
+            "Task was cancelled; completed results and trace were retained.",
+            step_name="task_cancelled",
+            cancelled_at=datetime.now(timezone.utc).isoformat(),
+            logs=logs,
+        )
+
+    def raise_if_cancelled(self, task_id: str) -> None:
+        state = self.get_task(task_id)
+        if state is not None and state.status in {
+            ReviewStatus.CANCEL_REQUESTED,
+            ReviewStatus.CANCELLED,
+        }:
+            raise TaskCancelledError(f"task cancellation is active: {task_id}")
+
+    def record_manual_recovery(
+        self,
+        task_id: str,
+        *,
+        resume_from: ReviewStatus,
+        operator_action: str,
+        reason: str,
+    ) -> AgentState:
+        state = self.get_task(task_id)
+        if state is None:
+            raise ValueError(f"task not found: {task_id}")
+        category = ERROR_RETRY_CATEGORIES.get(state.status)
+        if category is None:
+            raise ValueError(f"task status cannot be manually recovered: {state.status.value}")
+        retry_count = int((state.retry_counts or {}).get(category, 0))
+        retry_limit = ERROR_RETRY_LIMITS[category]
+        if retry_count >= retry_limit:
+            raise ValueError(
+                f"retry budget exhausted for {category}: {retry_count}/{retry_limit}"
+            )
+        now = datetime.now(timezone.utc).isoformat()
+        history = list(state.recovery_history or [])
+        history.append(
+            {
+                "operator_action": operator_action,
+                "reason": reason,
+                "recovery_from_status": state.status.value,
+                "resume_from_status": resume_from.value,
+                "retry_category": category,
+                "retry_count_before_recovery": retry_count,
+                "retry_limit": retry_limit,
+                "created_at": now,
+            }
+        )
+        return self.update_task(
+            task_id,
+            resume_from,
+            f"Manual recovery accepted from {state.status.value} at {resume_from.value}: "
+            f"{operator_action} / {reason}",
+            step_name="manual_recovery_started",
+            recovery_from_status=state.status.value,
+            recovery_history=history,
+        )
+
+    def try_acquire_execution(self, task_id: str, execution_owner: str) -> bool:
+        with self._condition:
+            state = self._states.get(task_id)
+            if state is None or task_id in self._execution_owners:
+                return False
+            execution_key = self._execution_key(task_id)
+            with _PROCESS_EXECUTION_LOCK:
+                if execution_key in _PROCESS_EXECUTION_OWNERS:
+                    return False
+                _PROCESS_EXECUTION_OWNERS[execution_key] = execution_owner
+            try:
+                if (
+                    self.persistence is not None
+                    and not self.persistence.task_repository.try_acquire_execution(
+                        task_id,
+                        execution_owner,
+                    )
+                ):
+                    with _PROCESS_EXECUTION_LOCK:
+                        _PROCESS_EXECUTION_OWNERS.pop(execution_key, None)
+                    return False
+            except Exception:
+                with _PROCESS_EXECUTION_LOCK:
+                    _PROCESS_EXECUTION_OWNERS.pop(execution_key, None)
+                raise
+            self._execution_owners[task_id] = execution_owner
+            state.execution_active = True
+            self._condition.notify_all()
+            return True
+
+    def release_execution(self, task_id: str, execution_owner: str) -> None:
+        with self._condition:
+            if self._execution_owners.get(task_id) != execution_owner:
+                return
+            execution_key = self._execution_key(task_id)
+            try:
+                if self.persistence is not None:
+                    self.persistence.task_repository.release_execution(task_id, execution_owner)
+            finally:
+                self._execution_owners.pop(task_id, None)
+                with _PROCESS_EXECUTION_LOCK:
+                    if _PROCESS_EXECUTION_OWNERS.get(execution_key) == execution_owner:
+                        _PROCESS_EXECUTION_OWNERS.pop(execution_key, None)
+                state = self._states.get(task_id)
+                if state is not None:
+                    state.execution_active = False
+                self._condition.notify_all()
+
+    def is_execution_active(self, task_id: str) -> bool:
+        with _PROCESS_EXECUTION_LOCK:
+            return self._execution_key(task_id) in _PROCESS_EXECUTION_OWNERS
+
+    def _execution_key(self, task_id: str) -> tuple[str, str]:
+        store_key = self.db_path or f"memory:{id(self)}"
+        return store_key, task_id
 
     def get_task(self, task_id: str) -> AgentState | None:
         with self._condition:
@@ -296,6 +497,14 @@ class ReviewEventStore:
             "events": events,
             "recovery_count": state.recovery_count,
             "recovery_from_status": state.recovery_from_status,
+            "retry_counts": dict(state.retry_counts or {}),
+            "retry_limits": dict(ERROR_RETRY_LIMITS),
+            "recovery_history": list(state.recovery_history or []),
+            "cancel_requested_at": state.cancel_requested_at,
+            "cancelled_at": state.cancelled_at,
+            "cancel_reason": state.cancel_reason,
+            "execution_active": state.execution_active and state.status not in TERMINAL_STATUSES,
+            "last_timeout": state.last_timeout,
         }
 
 

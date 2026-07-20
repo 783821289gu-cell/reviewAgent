@@ -1,25 +1,49 @@
 from dataclasses import replace
 from threading import Thread
+from time import perf_counter
+from uuid import uuid4
 
 from db.repositories import RecoveryError
 from models.contract import clause_from_dict, contract_document_from_dict
 from models.log import StepLog
 from models.planner import PlannerAction, PlannerReasonCode
 from models.risk import CriticDecision, CriticReasonCode
-from models.review import AgentState, ReviewPosition, ReviewStatus
+from models.review import (
+    AgentState,
+    NodeExecutionTimeoutError,
+    ReviewPosition,
+    ReviewStatus,
+    TaskCancelledError,
+    TaskExecutionTimeoutError,
+)
 from parsers.pdf_parser import PdfParseError
 from providers.llm_provider import LLMOutputInvalidError
 from services.context_builder import build_review_context
 from services.event_service import ReviewEventStore, review_event_store
-from services.log_service import invoke_tool
+from services.log_service import (
+    ToolExecutionControl,
+    bind_execution_control,
+    invoke_tool,
+    reset_execution_control,
+)
 from services.planner_service import PlannerOutputInvalidError
 from services.risk_critic import CriticOutputInvalidError
 from tools.registry import tool_registry
 
 
 class ReviewOrchestratorAgent:
-    def __init__(self, event_store: ReviewEventStore = review_event_store):
+    def __init__(
+        self,
+        event_store: ReviewEventStore = review_event_store,
+        *,
+        node_timeout_seconds: float = 90.0,
+        task_timeout_seconds: float = 300.0,
+    ):
+        if node_timeout_seconds <= 0 or task_timeout_seconds <= 0:
+            raise ValueError("execution timeouts must be positive")
         self.event_store = event_store
+        self.node_timeout_seconds = node_timeout_seconds
+        self.task_timeout_seconds = task_timeout_seconds
 
     def start(self, file_name: str, file_type: str, content: bytes, review_position: ReviewPosition) -> AgentState:
         state = self.event_store.create_task(file_name, file_type, review_position, content=content)
@@ -29,11 +53,16 @@ class ReviewOrchestratorAgent:
             "上传已接收，开始执行文档解析。",
             step_name="upload_received",
         )
-        Thread(
-            target=self.run,
-            args=(state.task_id, content),
-            daemon=True,
-        ).start()
+        execution_owner = self._acquire_execution(state.task_id)
+        try:
+            Thread(
+                target=self.run,
+                args=(state.task_id, content, execution_owner, True),
+                daemon=True,
+            ).start()
+        except Exception:
+            self.event_store.release_execution(state.task_id, execution_owner)
+            raise
         return state
 
     def run_sync(self, file_name: str, file_type: str, content: bytes, review_position: ReviewPosition) -> AgentState:
@@ -44,7 +73,8 @@ class ReviewOrchestratorAgent:
             "上传已接收，开始执行文档解析。",
             step_name="upload_received",
         )
-        self.run(state.task_id, content)
+        execution_owner = self._acquire_execution(state.task_id)
+        self.run(state.task_id, content, execution_owner, True)
         final_state = self.event_store.get_task(state.task_id)
         if final_state is None:
             raise ValueError("审查任务状态丢失。")
@@ -55,6 +85,13 @@ class ReviewOrchestratorAgent:
             return []
         recovered_task_ids = []
         for state in self.event_store.pending_tasks():
+            if state.status == ReviewStatus.CANCEL_REQUESTED:
+                self.event_store.finalize_cancel(state.task_id)
+                continue
+            try:
+                execution_owner = self._acquire_execution(state.task_id)
+            except RuntimeError:
+                continue
             try:
                 _validate_recovery_checkpoint(state)
                 content = self.event_store.persistence.load_upload(state.task_id)
@@ -66,20 +103,93 @@ class ReviewOrchestratorAgent:
                     str(exc),
                     step_name="recovery_blocked",
                 )
+                self.event_store.release_execution(state.task_id, execution_owner)
                 continue
+            except Exception:
+                self.event_store.release_execution(state.task_id, execution_owner)
+                raise
 
             recovered_task_ids.append(state.task_id)
             if async_mode:
-                Thread(target=self.run, args=(state.task_id, content), daemon=True).start()
+                try:
+                    Thread(
+                        target=self.run,
+                        args=(state.task_id, content, execution_owner, True),
+                        daemon=True,
+                    ).start()
+                except Exception:
+                    self.event_store.release_execution(state.task_id, execution_owner)
+                    raise
             else:
-                self.run(state.task_id, content)
+                self.run(state.task_id, content, execution_owner, True)
         return recovered_task_ids
 
-    def run(self, task_id: str, content: bytes) -> None:
+    def recover_task(
+        self,
+        task_id: str,
+        *,
+        resume_from: ReviewStatus | None,
+        operator_action: str,
+        reason: str,
+    ) -> AgentState:
+        if self.event_store.persistence is None:
+            raise ValueError("manual recovery requires persistent task storage")
+        execution_owner = self._acquire_execution(task_id)
+        try:
+            current = self.event_store.get_task(task_id)
+            if current is None:
+                raise ValueError(f"task not found: {task_id}")
+            expected_resume_from = _manual_recovery_checkpoint(current)
+            if resume_from is not None and resume_from != expected_resume_from:
+                raise ValueError(
+                    f"recovery checkpoint must be {expected_resume_from.value} "
+                    f"for {current.status.value}"
+                )
+            resume_from = expected_resume_from
+            candidate = replace(current, status=resume_from)
+            _validate_recovery_checkpoint(candidate)
+            content = self.event_store.persistence.load_upload(task_id)
+            state = self.event_store.record_manual_recovery(
+                task_id,
+                resume_from=resume_from,
+                operator_action=operator_action,
+                reason=reason,
+            )
+            Thread(
+                target=self.run,
+                args=(task_id, content, execution_owner, True),
+                daemon=True,
+            ).start()
+            return state
+        except Exception:
+            self.event_store.release_execution(task_id, execution_owner)
+            raise
+
+    def run(
+        self,
+        task_id: str,
+        content: bytes,
+        execution_owner: str = "",
+        execution_acquired: bool = False,
+    ) -> None:
+        resolved_owner = execution_owner or f"exec_{uuid4().hex}"
+        if not execution_acquired and not self.event_store.try_acquire_execution(
+            task_id,
+            resolved_owner,
+        ):
+            return
         state = self.event_store.get_task(task_id)
         if state is None:
+            self.event_store.release_execution(task_id, resolved_owner)
             return
 
+        execution_control = ToolExecutionControl(
+            cancel_check=lambda: self.event_store.raise_if_cancelled(task_id),
+            task_started_at=perf_counter(),
+            task_timeout_seconds=self.task_timeout_seconds,
+            node_timeout_seconds=self.node_timeout_seconds,
+        )
+        control_token = bind_execution_control(execution_control)
         logs = [StepLog(**item) for item in (state.logs or [])]
         try:
             if state.status == ReviewStatus.START:
@@ -808,6 +918,52 @@ class ReviewOrchestratorAgent:
                 risk_findings=risk_findings,
                 logs=[log.to_dict() for log in logs],
             )
+        except TaskCancelledError:
+            self.event_store.finalize_cancel(
+                task_id,
+                logs=[log.to_dict() for log in logs],
+            )
+        except NodeExecutionTimeoutError as exc:
+            current = self.event_store.get_task(task_id)
+            resume_from_status = (
+                current.status.value
+                if current is not None and current.status in RECOVERABLE_STATUS_ORDER
+                else ReviewStatus.UPLOAD_RECEIVED.value
+            )
+            self.event_store.update_task(
+                task_id,
+                ReviewStatus.NODE_TIMEOUT,
+                f"Node timeout at {exc.step_name}; manual recovery is required.",
+                step_name="node_timeout",
+                logs=[log.to_dict() for log in logs],
+                last_timeout={
+                    "type": "node",
+                    "step_name": exc.step_name,
+                    "elapsed_seconds": round(exc.elapsed_seconds, 4),
+                    "limit_seconds": exc.limit_seconds,
+                    "resume_from_status": resume_from_status,
+                },
+            )
+        except TaskExecutionTimeoutError as exc:
+            current = self.event_store.get_task(task_id)
+            resume_from_status = (
+                current.status.value
+                if current is not None and current.status in RECOVERABLE_STATUS_ORDER
+                else ReviewStatus.UPLOAD_RECEIVED.value
+            )
+            self.event_store.update_task(
+                task_id,
+                ReviewStatus.TASK_TIMEOUT,
+                "Task execution timeout; completed results were retained for manual recovery.",
+                step_name="task_timeout",
+                logs=[log.to_dict() for log in logs],
+                last_timeout={
+                    "type": "task",
+                    "limit_seconds": self.task_timeout_seconds,
+                    "reason": str(exc),
+                    "resume_from_status": resume_from_status,
+                },
+            )
         except RecoveryError as exc:
             self.event_store.update_task(
                 task_id,
@@ -841,6 +997,15 @@ class ReviewOrchestratorAgent:
                 step_name="parse_failed",
                 logs=[log.to_dict() for log in logs],
             )
+        finally:
+            reset_execution_control(control_token)
+            self.event_store.release_execution(task_id, resolved_owner)
+
+    def _acquire_execution(self, task_id: str) -> str:
+        execution_owner = f"exec_{uuid4().hex}"
+        if not self.event_store.try_acquire_execution(task_id, execution_owner):
+            raise RuntimeError(f"task execution is already active: {task_id}")
+        return execution_owner
 
 
 review_orchestrator_agent = ReviewOrchestratorAgent()
@@ -880,6 +1045,29 @@ def _validate_recovery_checkpoint(state: AgentState) -> None:
     for checkpoint, payload, label in required_payloads:
         if current_order >= RECOVERABLE_STATUS_ORDER[checkpoint] and payload is None:
             raise RecoveryError(f"{label}缺失，无法从 {state.status.value} 节点安全恢复。")
+
+
+def _manual_recovery_checkpoint(state: AgentState) -> ReviewStatus:
+    if state.status in {ReviewStatus.NODE_TIMEOUT, ReviewStatus.TASK_TIMEOUT}:
+        resume_from = str((state.last_timeout or {}).get("resume_from_status", ""))
+        try:
+            checkpoint = ReviewStatus(resume_from)
+        except ValueError as exc:
+            raise RecoveryError("timeout recovery checkpoint is missing or invalid") from exc
+        if checkpoint not in RECOVERABLE_STATUS_ORDER:
+            raise RecoveryError(f"timeout recovery checkpoint is unsafe: {resume_from}")
+        return checkpoint
+    checkpoints = {
+        ReviewStatus.PARSE_FAILED: ReviewStatus.UPLOAD_RECEIVED,
+        ReviewStatus.RETRIEVAL_FAILED: ReviewStatus.CLAUSES_STRUCTURED,
+        ReviewStatus.LLM_OUTPUT_INVALID: ReviewStatus.CONTEXT_BUILT,
+        ReviewStatus.EVIDENCE_MISSING: ReviewStatus.RISK_ANALYZED,
+        ReviewStatus.TASK_ERROR: ReviewStatus.UPLOAD_RECEIVED,
+    }
+    checkpoint = checkpoints.get(state.status)
+    if checkpoint is None:
+        raise RecoveryError(f"task status cannot be manually recovered: {state.status.value}")
+    return checkpoint
 
 
 def _invoke_planner(
@@ -996,6 +1184,7 @@ def _rebuild_review_context(
             "playbook_check_point": matched_rule["check_point"],
             "limit": 3,
             "query_adjustments": query_adjustments,
+            "retry_count": retry_count,
             "embedding_cache": embedding_cache,
         },
         logs,

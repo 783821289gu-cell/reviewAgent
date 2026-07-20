@@ -62,6 +62,13 @@ def initialize(connection: sqlite3.Connection) -> None:
             report_file_json TEXT,
             recovery_count INTEGER NOT NULL DEFAULT 0,
             recovery_from_status TEXT NOT NULL DEFAULT '',
+            retry_counts_json TEXT NOT NULL DEFAULT '{}',
+            recovery_history_json TEXT NOT NULL DEFAULT '[]',
+            cancel_requested_at TEXT NOT NULL DEFAULT '',
+            cancelled_at TEXT NOT NULL DEFAULT '',
+            cancel_reason TEXT NOT NULL DEFAULT '',
+            execution_owner TEXT NOT NULL DEFAULT '',
+            last_timeout_json TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -118,6 +125,10 @@ def initialize(connection: sqlite3.Connection) -> None:
             output_summary TEXT NOT NULL,
             token_cost_summary TEXT NOT NULL,
             error_message TEXT NOT NULL,
+            parent_step_id TEXT NOT NULL DEFAULT '',
+            retry_index INTEGER NOT NULL DEFAULT 0,
+            idempotency_key TEXT NOT NULL DEFAULT '',
+            trace_summary_json TEXT,
             created_at TEXT NOT NULL,
             PRIMARY KEY (task_id, log_index),
             FOREIGN KEY (task_id) REFERENCES review_tasks(task_id) ON DELETE CASCADE
@@ -188,6 +199,17 @@ def initialize(connection: sqlite3.Connection) -> None:
     _ensure_column(connection, "review_tasks", "trace_id", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "step_logs", "trace_id", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "step_logs", "step_id", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "step_logs", "parent_step_id", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "step_logs", "retry_index", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(connection, "step_logs", "idempotency_key", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "step_logs", "trace_summary_json", "TEXT")
+    _ensure_column(connection, "review_tasks", "retry_counts_json", "TEXT NOT NULL DEFAULT '{}'")
+    _ensure_column(connection, "review_tasks", "recovery_history_json", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(connection, "review_tasks", "cancel_requested_at", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "review_tasks", "cancelled_at", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "review_tasks", "cancel_reason", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "review_tasks", "execution_owner", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "review_tasks", "last_timeout_json", "TEXT")
     connection.execute(
         """
         UPDATE review_tasks
@@ -222,6 +244,12 @@ def initialize(connection: sqlite3.Connection) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_review_tasks_trace
         ON review_tasks (trace_id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_review_tasks_execution_owner
+        ON review_tasks (execution_owner, updated_at)
         """
     )
     connection.execute(

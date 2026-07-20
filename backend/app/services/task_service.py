@@ -1,5 +1,6 @@
-from models.review import AgentState, ReviewPosition, ReviewTask, new_task
+from models.review import AgentState, ReviewPosition, ReviewStatus, ReviewTask, new_task
 from services.document_service import SUPPORTED_FILE_TYPES
+from services.event_service import ReviewEventStore
 from services.review_service import ReviewOrchestratorAgent, review_orchestrator_agent
 
 
@@ -42,6 +43,59 @@ def start_review_task(
     review_agent: ReviewOrchestratorAgent = review_orchestrator_agent,
 ) -> AgentState:
     return _run_review(file_name, content, review_position_value, async_mode=True, review_agent=review_agent)
+
+
+def cancel_review_task(
+    task_id: str,
+    reason: str,
+    event_store: ReviewEventStore,
+) -> dict:
+    normalized_reason = str(reason).strip()
+    if not normalized_reason:
+        raise ValueError("cancel reason is required")
+    if len(normalized_reason) > 300:
+        raise ValueError("cancel reason must not exceed 300 characters")
+    state = event_store.request_cancel(task_id, normalized_reason)
+    if not event_store.is_execution_active(task_id):
+        state = event_store.finalize_cancel(task_id)
+    return {
+        "status": state.status.value,
+        "message": state.message,
+        "task": state.to_dict(),
+    }
+
+
+def recover_review_task(
+    task_id: str,
+    payload: dict,
+    review_agent: ReviewOrchestratorAgent,
+) -> dict:
+    reason = str(payload.get("reason", "")).strip()
+    operator_action = str(payload.get("operator_action", "manual_retry")).strip()
+    resume_from_value = str(payload.get("resume_from", "")).strip()
+    if not reason:
+        raise ValueError("recovery reason is required")
+    if len(reason) > 500:
+        raise ValueError("recovery reason must not exceed 500 characters")
+    if not operator_action or len(operator_action) > 100:
+        raise ValueError("operator_action is invalid")
+    resume_from = None
+    if resume_from_value:
+        try:
+            resume_from = ReviewStatus(resume_from_value)
+        except ValueError as exc:
+            raise ValueError(f"invalid recovery checkpoint: {resume_from_value}") from exc
+    state = review_agent.recover_task(
+        task_id,
+        resume_from=resume_from,
+        operator_action=operator_action,
+        reason=reason,
+    )
+    return {
+        "status": state.status.value,
+        "message": state.message,
+        "task": state.to_dict(),
+    }
 
 
 def _run_review(

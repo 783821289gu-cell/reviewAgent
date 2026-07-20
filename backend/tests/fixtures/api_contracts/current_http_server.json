@@ -45,6 +45,10 @@
           "EVIDENCE_MISSING",
           "NEED_MANUAL_REVIEW",
           "UNSUPPORTED_CONTRACT_TYPE",
+          "CANCEL_REQUESTED",
+          "CANCELLED",
+          "NODE_TIMEOUT",
+          "TASK_TIMEOUT",
           "TASK_ERROR"
         ]
       }

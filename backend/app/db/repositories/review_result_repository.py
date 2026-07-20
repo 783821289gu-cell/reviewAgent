@@ -62,9 +62,10 @@ class ReviewResultRepository:
                     task_id, log_index, trace_id, step_id,
                     step_name, tool_name, status, latency_ms,
                     input_summary, output_summary, token_cost_summary, error_message,
+                    parent_step_id, retry_index, idempotency_key, trace_summary_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(task_id, log_index) DO UPDATE SET
                     trace_id = excluded.trace_id,
                     step_id = excluded.step_id,
@@ -75,7 +76,11 @@ class ReviewResultRepository:
                     input_summary = excluded.input_summary,
                     output_summary = excluded.output_summary,
                     token_cost_summary = excluded.token_cost_summary,
-                    error_message = excluded.error_message
+                    error_message = excluded.error_message,
+                    parent_step_id = excluded.parent_step_id,
+                    retry_index = excluded.retry_index,
+                    idempotency_key = excluded.idempotency_key,
+                    trace_summary_json = excluded.trace_summary_json
                 """,
                 (
                     state.task_id,
@@ -90,6 +95,10 @@ class ReviewResultRepository:
                     str(log.get("output_summary", "")),
                     str(log.get("token_cost_summary", "")),
                     str(log.get("error_message", "")),
+                    str(log.get("parent_step_id", "")),
+                    int(log.get("retry_index", 0)),
+                    str(log.get("idempotency_key", "")),
+                    _json_dump(log.get("trace_summary")),
                     now,
                 ),
             )
@@ -129,6 +138,14 @@ class ReviewResultRepository:
                     "output_summary": str(row["output_summary"]),
                     "token_cost_summary": str(row["token_cost_summary"]),
                     "error_message": str(row["error_message"]),
+                    "parent_step_id": str(row["parent_step_id"]),
+                    "retry_index": int(row["retry_index"]),
+                    "idempotency_key": str(row["idempotency_key"]),
+                    "trace_summary": (
+                        json.loads(row["trace_summary_json"])
+                        if row["trace_summary_json"] is not None
+                        else None
+                    ),
                 }
                 for row in rows
             ]

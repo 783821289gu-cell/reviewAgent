@@ -14,6 +14,10 @@ class StepLog:
     error_message: str
     trace_id: str = ""
     step_id: str = ""
+    parent_step_id: str = ""
+    retry_index: int = 0
+    idempotency_key: str = ""
+    trace_summary: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

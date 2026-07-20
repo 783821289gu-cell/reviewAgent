@@ -34,6 +34,9 @@ TERMINAL_STATUSES = {
     ReviewStatus.RETRIEVAL_FAILED.value,
     ReviewStatus.LLM_OUTPUT_INVALID.value,
     ReviewStatus.EVIDENCE_MISSING.value,
+    ReviewStatus.CANCELLED.value,
+    ReviewStatus.NODE_TIMEOUT.value,
+    ReviewStatus.TASK_TIMEOUT.value,
     ReviewStatus.TASK_ERROR.value,
 }
 
@@ -91,6 +94,23 @@ class TaskRecoveryTest(unittest.TestCase):
         self.assertEqual(task["status"], "NEED_MANUAL_REVIEW")
         self.assertIn("上传文件缺失", task["message"])
         self.assertEqual(task["events"][-1]["step_name"], "recovery_blocked")
+
+    def test_restart_finalizes_pending_cancellation_without_resuming_tools(self):
+        task_id = self._persist_upload_received_task()
+        store = ReviewEventStore(self.persistence)
+        store.load_persisted()
+        store.request_cancel(task_id, "cancel before service restart")
+        app = create_app(self.settings, ReviewEventStore(self.persistence))
+
+        with TestClient(app) as client:
+            response = client.get(f"/api/tasks/{task_id}")
+            self.assertEqual(response.status_code, 200, response.text)
+            task = response.json()
+            self.assertEqual(app.state.recovered_task_ids, [])
+
+        self.assertEqual(task["status"], "CANCELLED")
+        self.assertEqual(task["logs"], [])
+        self.assertEqual(task["events"][-1]["step_name"], "task_cancelled")
 
     def test_hash_mismatch_moves_task_to_manual_review(self):
         task_id = self._persist_upload_received_task()

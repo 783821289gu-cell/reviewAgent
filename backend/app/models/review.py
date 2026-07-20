@@ -22,12 +22,35 @@ class ReviewStatus(StrEnum):
     EVIDENCE_MISSING = "EVIDENCE_MISSING"
     NEED_MANUAL_REVIEW = "NEED_MANUAL_REVIEW"
     UNSUPPORTED_CONTRACT_TYPE = "UNSUPPORTED_CONTRACT_TYPE"
+    CANCEL_REQUESTED = "CANCEL_REQUESTED"
+    CANCELLED = "CANCELLED"
+    NODE_TIMEOUT = "NODE_TIMEOUT"
+    TASK_TIMEOUT = "TASK_TIMEOUT"
     TASK_ERROR = "TASK_ERROR"
 
 
 class ReviewPosition(StrEnum):
     PARTY_A = "甲方"
     PARTY_B = "乙方"
+
+
+class TaskCancelledError(RuntimeError):
+    pass
+
+
+class NodeExecutionTimeoutError(TimeoutError):
+    def __init__(self, step_name: str, elapsed_seconds: float, limit_seconds: float):
+        super().__init__(
+            f"node {step_name} exceeded {limit_seconds:.3f}s "
+            f"(elapsed {elapsed_seconds:.3f}s)"
+        )
+        self.step_name = step_name
+        self.elapsed_seconds = elapsed_seconds
+        self.limit_seconds = limit_seconds
+
+
+class TaskExecutionTimeoutError(TimeoutError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -51,12 +74,19 @@ class ReviewTask:
     trace_id: str = ""
     recovery_count: int = 0
     recovery_from_status: str = ""
+    retry_counts: dict | None = None
+    recovery_history: list[dict] | None = None
+    cancel_requested_at: str = ""
+    cancelled_at: str = ""
+    cancel_reason: str = ""
+    execution_active: bool = False
+    last_timeout: dict | None = None
 
     def to_dict(self) -> dict:
         payload = asdict(self)
         payload["status"] = self.status.value
         payload["review_position"] = self.review_position.value
-        return payload
+        return _public_task_payload(payload)
 
 
 @dataclass
@@ -81,12 +111,19 @@ class AgentState:
     trace_id: str = ""
     recovery_count: int = 0
     recovery_from_status: str = ""
+    retry_counts: dict | None = None
+    recovery_history: list[dict] | None = None
+    cancel_requested_at: str = ""
+    cancelled_at: str = ""
+    cancel_reason: str = ""
+    execution_active: bool = False
+    last_timeout: dict | None = None
 
     def to_dict(self) -> dict:
         payload = asdict(self)
         payload["status"] = self.status.value
         payload["review_position"] = self.review_position.value
-        return payload
+        return _public_task_payload(payload)
 
     def to_review_task(self) -> ReviewTask:
         return ReviewTask(
@@ -109,6 +146,13 @@ class AgentState:
             trace_id=self.trace_id,
             recovery_count=self.recovery_count,
             recovery_from_status=self.recovery_from_status,
+            retry_counts=self.retry_counts,
+            recovery_history=self.recovery_history,
+            cancel_requested_at=self.cancel_requested_at,
+            cancelled_at=self.cancelled_at,
+            cancel_reason=self.cancel_reason,
+            execution_active=self.execution_active,
+            last_timeout=self.last_timeout,
         )
 
 
@@ -149,9 +193,25 @@ def new_task(
         report_file=report_file,
         logs=logs,
         trace_id=trace_id_for_task(resolved_task_id),
+        retry_counts={},
+        recovery_history=[],
     )
 
 
 def trace_id_for_task(task_id: str) -> str:
     suffix = task_id.removeprefix("task_")
     return f"trace_{suffix}"
+
+
+def _public_task_payload(payload: dict) -> dict:
+    for field_name in (
+        "retry_counts",
+        "recovery_history",
+        "cancel_requested_at",
+        "cancelled_at",
+        "cancel_reason",
+        "execution_active",
+        "last_timeout",
+    ):
+        payload.pop(field_name, None)
+    return payload

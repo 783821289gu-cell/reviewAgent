@@ -11,7 +11,11 @@ from api.errors import ApiError, task_error
 from config import Settings
 from services.event_service import TERMINAL_STATUSES, ReviewEventStore
 from services.review_service import ReviewOrchestratorAgent
-from services.task_service import start_review_task
+from services.task_service import (
+    cancel_review_task,
+    recover_review_task,
+    start_review_task,
+)
 
 
 router = APIRouter()
@@ -75,17 +79,53 @@ def get_task(
     return task.to_dict()
 
 
+@router.post("/api/tasks/{task_id}/cancel")
+def cancel_task(
+    task_id: str,
+    payload: dict,
+    event_store: ReviewEventStore = Depends(get_event_store),
+) -> dict:
+    if event_store.get_task(task_id) is None:
+        raise ApiError(status_code=404, payload={"error": "Task not found"})
+    try:
+        return cancel_review_task(
+            task_id,
+            str(payload.get("reason", "")),
+            event_store,
+        )
+    except ValueError as exc:
+        raise task_error(str(exc)) from exc
+
+
+@router.post("/api/tasks/{task_id}/recover", status_code=202)
+def recover_task(
+    task_id: str,
+    payload: dict,
+    event_store: ReviewEventStore = Depends(get_event_store),
+    review_agent: ReviewOrchestratorAgent = Depends(get_review_agent),
+) -> dict:
+    if event_store.get_task(task_id) is None:
+        raise ApiError(status_code=404, payload={"error": "Task not found"})
+    try:
+        return recover_review_task(task_id, payload, review_agent)
+    except RuntimeError as exc:
+        raise ApiError(status_code=409, payload={"message": str(exc)}) from exc
+    except ValueError as exc:
+        raise task_error(str(exc)) from exc
+
+
 @router.get("/api/tasks/{task_id}/events")
 async def stream_task_events(
     task_id: str,
     request: Request,
+    after_event_id: int = -1,
     event_store: ReviewEventStore = Depends(get_event_store),
 ) -> StreamingResponse:
     if event_store.get_task(task_id) is None:
         raise ApiError(status_code=404, payload={"error": "Task not found"})
 
     async def event_stream():
-        next_index = 0
+        next_index = max(0, after_event_id + 1)
         last_keep_alive = monotonic()
         while True:
             if await request.is_disconnected():
