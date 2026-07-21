@@ -83,10 +83,7 @@ class ReviewTask:
     last_timeout: dict | None = None
 
     def to_dict(self) -> dict:
-        payload = asdict(self)
-        payload["status"] = self.status.value
-        payload["review_position"] = self.review_position.value
-        return _public_task_payload(payload)
+        return _public_task_payload(_serialize_task(self))
 
 
 @dataclass
@@ -120,10 +117,10 @@ class AgentState:
     last_timeout: dict | None = None
 
     def to_dict(self) -> dict:
-        payload = asdict(self)
-        payload["status"] = self.status.value
-        payload["review_position"] = self.review_position.value
-        return _public_task_payload(payload)
+        return _public_task_payload(self.to_runtime_dict())
+
+    def to_runtime_dict(self) -> dict:
+        return _serialize_task(self)
 
     def to_review_task(self) -> ReviewTask:
         return ReviewTask(
@@ -201,6 +198,13 @@ def new_task(
 def trace_id_for_task(task_id: str) -> str:
     suffix = task_id.removeprefix("task_")
     return f"trace_{suffix}"
+
+
+def _serialize_task(task: ReviewTask | AgentState) -> dict:
+    payload = asdict(task)
+    payload["status"] = task.status.value
+    payload["review_position"] = task.review_position.value
+    return payload
 
 
 def _public_task_payload(payload: dict) -> dict:

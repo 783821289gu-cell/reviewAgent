@@ -234,6 +234,8 @@ class AgentExecutionControlTest(unittest.TestCase):
 
         self.assertEqual(state.status, ReviewStatus.TASK_ERROR)
         self.assertEqual(state.events[-1]["step_name"], "task_error")
+        self.assertEqual(state.message, "任务执行发生未分类错误，需要人工恢复。")
+        self.assertNotIn("合同解析失败", state.message)
         self.assertEqual(state.logs[-1]["tool_name"], "extract_clauses")
         self.assertEqual(state.logs[-1]["status"], "failed")
         self.assertEqual(state.retry_counts, {"task": 1})

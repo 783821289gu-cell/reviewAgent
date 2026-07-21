@@ -490,6 +490,27 @@ class ReviewOrchestratorTest(unittest.TestCase):
             [event["status"] for event in events],
             [event["task"]["status"] for event in events],
         )
+        expected_task_keys = set(state.to_runtime_dict()) | {"retry_limits"}
+        self.assertTrue(events)
+        self.assertTrue(
+            all(set(event["task"]) == expected_task_keys for event in events),
+            "SSE task snapshots must expose every AgentState runtime field",
+        )
+        playbook_event = next(
+            event for event in events if event["status"] == "PLAYBOOK_RETRIEVED"
+        )
+        self.assertEqual(playbook_event["task"]["matched_rules"], state.matched_rules)
+        public_payload = state.to_dict()
+        query_payload = event_store.get_task_payload(state.task_id)
+        self.assertIsNotNone(query_payload)
+        self.assertEqual(
+            {key: events[-1]["task"][key] for key in public_payload},
+            public_payload,
+        )
+        self.assertEqual(
+            {key: query_payload[key] for key in public_payload},
+            public_payload,
+        )
 
     def test_write_memory_validation_failure_is_logged_as_failed(self):
         logs = []

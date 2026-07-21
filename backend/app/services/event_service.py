@@ -498,36 +498,16 @@ class ReviewEventStore:
         return deepcopy(self._states[task_id])
 
     def _state_payload(self, state: AgentState, events: list[dict]) -> dict:
-        return {
-            "task_id": state.task_id,
-            "trace_id": state.trace_id,
-            "status": state.status.value,
-            "file_name": state.file_name,
-            "file_type": state.file_type,
-            "review_position": state.review_position.value,
-            "message": state.message,
-            "document": state.document,
-            "contract_classification": state.contract_classification,
-            "clauses": state.clauses,
-            "matched_rules": state.matched_rules,
-            "review_contexts": state.review_contexts,
-            "analysis_results": state.analysis_results,
-            "risk_findings": state.risk_findings,
-            "evidence_results": state.evidence_results,
-            "report_file": state.report_file,
-            "logs": list(state.logs or []),
-            "events": events,
-            "recovery_count": state.recovery_count,
-            "recovery_from_status": state.recovery_from_status,
-            "retry_counts": dict(state.retry_counts or {}),
-            "retry_limits": dict(ERROR_RETRY_LIMITS),
-            "recovery_history": list(state.recovery_history or []),
-            "cancel_requested_at": state.cancel_requested_at,
-            "cancelled_at": state.cancelled_at,
-            "cancel_reason": state.cancel_reason,
-            "execution_active": state.execution_active and state.status not in TERMINAL_STATUSES,
-            "last_timeout": state.last_timeout,
-        }
+        payload = state.to_runtime_dict()
+        payload["logs"] = list(state.logs or [])
+        payload["events"] = list(events)
+        payload["retry_counts"] = dict(state.retry_counts or {})
+        payload["recovery_history"] = list(state.recovery_history or [])
+        payload["retry_limits"] = dict(ERROR_RETRY_LIMITS)
+        payload["execution_active"] = (
+            state.execution_active and state.status not in TERMINAL_STATUSES
+        )
+        return payload
 
 
 review_event_store = ReviewEventStore()
