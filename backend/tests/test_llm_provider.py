@@ -292,6 +292,22 @@ class LLMProviderTest(unittest.TestCase):
         )
         self.assertNotIn(api_key, logs[0].token_cost_summary)
         self.assertNotIn("商业信息、技术资料", logs[0].input_summary)
+        provider_trace = logs[0].trace_summary["provider"]
+        self.assertEqual(provider_trace["mode"], "openai_compatible")
+        self.assertEqual(
+            set(provider_trace["calls"][0]),
+            {
+                "provider_request_id",
+                "model",
+                "prompt_tokens",
+                "completion_tokens",
+                "latency_ms",
+                "estimated_cost",
+                "cost_status",
+                "error_type",
+            },
+        )
+        self.assertNotIn(api_key, json.dumps(provider_trace, ensure_ascii=False))
 
     def test_revision_request_includes_schema_consistent_example(self):
         captured_requests = []

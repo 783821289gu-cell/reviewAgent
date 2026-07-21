@@ -1,5 +1,5 @@
 {
-  "annotation_version": "effect-v1",
+  "annotation_version": "effect-v2",
   "source_policy": "Only synthetic project fixtures are included; no customer contracts or transaction documents are used.",
   "items": [
     {
@@ -12,8 +12,9 @@
       "manual_review_expected": false,
       "source": {
         "source_type": "synthetic",
-        "note": "项目内人工编写的合成 NDA 样本，非真实客户合同。"
-      }
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      },
+      "planner_expectations": []
     },
     {
       "contract_id": "nda-02",
@@ -25,20 +26,320 @@
       "manual_review_expected": true,
       "source": {
         "source_type": "synthetic",
-        "note": "项目内人工编写的合成 NDA 样本，非真实客户合同。"
-      }
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      },
+      "planner_expectations": []
     },
     {
       "contract_id": "nda-03",
       "file": "nda_sample_03.txt",
-      "review_position": "乙方",
+      "review_position": "甲方",
       "expected_contract_type": "NDA",
       "expected_decision": "SUPPORTED",
       "expected_terminal_status": "HUMAN_REVIEW_PENDING",
       "manual_review_expected": true,
       "source": {
         "source_type": "synthetic",
-        "note": "项目内人工编写的合成 NDA 样本，非真实客户合同。"
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      },
+      "planner_expectations": []
+    },
+    {
+      "contract_id": "nda-04",
+      "file": "nda_sample_04.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-05",
+      "file": "nda_sample_05.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-06",
+      "file": "nda_sample_06.txt",
+      "review_position": "乙方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-07",
+      "file": "nda_sample_07.txt",
+      "review_position": "乙方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-08",
+      "file": "nda_sample_08.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-09",
+      "file": "nda_sample_09.txt",
+      "review_position": "乙方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-10",
+      "file": "nda_sample_10.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-11",
+      "file": "nda_sample_11.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [
+        {
+          "reason_code": "RETRIEVAL_INSUFFICIENT",
+          "target_clause_id": "CL-001",
+          "expected_action": "RETRIEVE_AGAIN"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-12",
+      "file": "nda_sample_12.txt",
+      "review_position": "乙方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [
+        {
+          "reason_code": "RETRIEVAL_INSUFFICIENT",
+          "target_clause_id": "CL-001",
+          "expected_action": "RETRIEVE_AGAIN"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-13",
+      "file": "nda_sample_13.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [
+        {
+          "reason_code": "RETRIEVAL_INSUFFICIENT",
+          "target_clause_id": "CL-001",
+          "expected_action": "RETRIEVE_AGAIN"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-14",
+      "file": "nda_sample_14.txt",
+      "review_position": "乙方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [
+        {
+          "reason_code": "RETRIEVAL_INSUFFICIENT",
+          "target_clause_id": "CL-001",
+          "expected_action": "RETRIEVE_AGAIN"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-15",
+      "file": "nda_sample_15.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [
+        {
+          "reason_code": "RETRIEVAL_INSUFFICIENT",
+          "target_clause_id": "CL-001",
+          "expected_action": "RETRIEVE_AGAIN"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-16",
+      "file": "nda_sample_16.txt",
+      "review_position": "乙方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [
+        {
+          "reason_code": "RETRIEVAL_INSUFFICIENT",
+          "target_clause_id": "CL-001",
+          "expected_action": "RETRIEVE_AGAIN"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-17",
+      "file": "nda_sample_17.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [
+        {
+          "reason_code": "RETRIEVAL_INSUFFICIENT",
+          "target_clause_id": "CL-001",
+          "expected_action": "RETRIEVE_AGAIN"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-18",
+      "file": "nda_sample_18.txt",
+      "review_position": "乙方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [
+        {
+          "reason_code": "RETRIEVAL_INSUFFICIENT",
+          "target_clause_id": "CL-001",
+          "expected_action": "RETRIEVE_AGAIN"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-19",
+      "file": "nda_sample_19.txt",
+      "review_position": "甲方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [
+        {
+          "reason_code": "RETRIEVAL_INSUFFICIENT",
+          "target_clause_id": "CL-001",
+          "expected_action": "RETRIEVE_AGAIN"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
+      }
+    },
+    {
+      "contract_id": "nda-20",
+      "file": "nda_sample_20.txt",
+      "review_position": "乙方",
+      "expected_contract_type": "NDA",
+      "expected_decision": "SUPPORTED",
+      "expected_terminal_status": "HUMAN_REVIEW_PENDING",
+      "manual_review_expected": true,
+      "planner_expectations": [
+        {
+          "reason_code": "RETRIEVAL_INSUFFICIENT",
+          "target_clause_id": "CL-001",
+          "expected_action": "RETRIEVE_AGAIN"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "项目内人工编写的合成 NDA 测试夹具，非真实客户合同。"
       }
     },
     {
@@ -52,7 +353,8 @@
       "source": {
         "source_type": "synthetic",
         "note": "项目内人工编写的中文采购合同类型测试夹具。"
-      }
+      },
+      "planner_expectations": []
     },
     {
       "contract_id": "service-01",
@@ -65,7 +367,8 @@
       "source": {
         "source_type": "synthetic",
         "note": "项目内人工编写的英文服务合同类型测试夹具。"
-      }
+      },
+      "planner_expectations": []
     },
     {
       "contract_id": "ambiguous-01",
@@ -78,7 +381,8 @@
       "source": {
         "source_type": "synthetic",
         "note": "项目内人工编写的低信息量合同类型测试夹具。"
-      }
+      },
+      "planner_expectations": []
     }
   ]
 }

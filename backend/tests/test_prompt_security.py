@@ -189,7 +189,8 @@ class PromptSecurityTest(unittest.TestCase):
 
 def _prompt_injection_cases() -> list[dict]:
     payload = json.loads(PROMPT_INJECTION_CASES.read_text(encoding="utf-8"))
-    if payload.get("source") != "synthetic":
+    source = payload.get("source") or {}
+    if source.get("source_type") != "synthetic":
         raise AssertionError("prompt injection fixtures must be marked synthetic")
     return payload["cases"]
 

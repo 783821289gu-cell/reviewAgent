@@ -114,6 +114,13 @@
           "title": "Manual Review Expected",
           "type": "boolean"
         },
+        "planner_expectations": {
+          "items": {
+            "$ref": "#/$defs/PlannerExpectation"
+          },
+          "title": "Planner Expectations",
+          "type": "array"
+        },
         "source": {
           "$ref": "#/$defs/AnnotationSource"
         }
@@ -247,6 +254,102 @@
         "created_at"
       ],
       "title": "MemoryEpisodeAnnotation",
+      "type": "object"
+    },
+    "PlannerExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "reason_code": {
+          "enum": [
+            "LOW_CONFIDENCE",
+            "EVIDENCE_MISSING",
+            "RETRIEVAL_INSUFFICIENT",
+            "ANALYZER_VERIFIER_CONFLICT",
+            "STRUCTURED_OUTPUT_INVALID"
+          ],
+          "title": "Reason Code",
+          "type": "string"
+        },
+        "target_clause_id": {
+          "minLength": 1,
+          "title": "Target Clause Id",
+          "type": "string"
+        },
+        "expected_action": {
+          "enum": [
+            "RETRIEVE_AGAIN",
+            "ANALYZE_AGAIN",
+            "REQUEST_HUMAN_REVIEW",
+            "TERMINATE"
+          ],
+          "title": "Expected Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason_code",
+        "target_clause_id",
+        "expected_action"
+      ],
+      "title": "PlannerExpectation",
+      "type": "object"
+    },
+    "PromptInjectionAnnotation": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "category": {
+          "enum": [
+            "prompt_injection",
+            "forged_system_message",
+            "forged_tool_result",
+            "tool_instruction",
+            "output_override",
+            "oversized_untrusted_text"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "target": {
+          "enum": [
+            "current_clause_text",
+            "memory_note"
+          ],
+          "title": "Target",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "repeat": {
+          "exclusiveMinimum": 0,
+          "title": "Repeat",
+          "type": "integer"
+        },
+        "expected_outcome": {
+          "enum": [
+            "PROMPT_INJECTION_DETECTED",
+            "CONTEXT_BUDGET_EXCEEDED"
+          ],
+          "title": "Expected Outcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "target",
+        "text",
+        "repeat",
+        "expected_outcome"
+      ],
+      "title": "PromptInjectionAnnotation",
       "type": "object"
     },
     "RelatedClauseAnnotation": {
@@ -415,7 +518,7 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": "effect-v1",
+      "const": "effect-v2",
       "title": "Schema Version",
       "type": "string"
     },
@@ -458,6 +561,14 @@
       "minItems": 1,
       "title": "Memory",
       "type": "array"
+    },
+    "prompt_injection": {
+      "items": {
+        "$ref": "#/$defs/PromptInjectionAnnotation"
+      },
+      "minItems": 1,
+      "title": "Prompt Injection",
+      "type": "array"
     }
   },
   "required": [
@@ -466,15 +577,9 @@
     "clauses",
     "risks",
     "related_clauses",
-    "memory"
+    "memory",
+    "prompt_injection"
   ],
   "title": "EffectAnnotationBundle",
-  "type": "object",
-  "x-source-files": [
-    "contracts.json",
-    "clauses.json",
-    "risks.json",
-    "related_clauses.json",
-    "memory.json"
-  ]
+  "type": "object"
 }

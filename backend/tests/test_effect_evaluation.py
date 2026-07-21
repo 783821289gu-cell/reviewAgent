@@ -22,6 +22,8 @@ from services.evaluation_service import (
     _evidence_metric,
     _load_annotations,
     _load_effect_config,
+    _retrieval_repair_checks,
+    _runtime_summary,
     run_effect_evaluation,
 )
 from services.memory_service import evaluate_memory_comparison
@@ -73,9 +75,24 @@ class EffectEvaluationTest(unittest.TestCase):
             "flow_evaluation": api_contract["success"]["evaluation"]["required_keys"],
             "effect_evaluation": api_contract["success"]["effect_evaluation"]["required_keys"],
         }
+        historical_success_fields = baseline["api_contract"]["success_fields"]
+        self.assertEqual(set(historical_success_fields), set(expected_success_fields))
+        for name, fields in historical_success_fields.items():
+            if name == "effect_evaluation":
+                continue
+            self.assertEqual(fields, expected_success_fields[name], name)
         self.assertEqual(
-            baseline["api_contract"]["success_fields"],
-            expected_success_fields,
+            set(expected_success_fields["effect_evaluation"])
+            - set(historical_success_fields["effect_evaluation"]),
+            {"runtime"},
+        )
+        self.assertEqual(
+            set(historical_success_fields["effect_evaluation"]),
+            set(expected_success_fields["effect_evaluation"]) - {"runtime"},
+        )
+        self.assertEqual(
+            len(expected_success_fields["effect_evaluation"]),
+            len(historical_success_fields["effect_evaluation"]) + 1,
         )
         self.assertEqual(
             baseline["api_contract"]["http_errors"],
@@ -115,13 +132,17 @@ class EffectEvaluationTest(unittest.TestCase):
 
         for key, value in generated_schema.items():
             self.assertEqual(schema.get(key), value)
-        self.assertEqual(len(bundle.contracts), 6)
-        self.assertEqual(len(bundle.clauses), 6)
-        self.assertEqual(len(bundle.risks), 3)
-        self.assertEqual(len(bundle.related_clauses), 11)
-        self.assertEqual(len(bundle.memory), 4)
-        self.assertEqual(config["related_clause_dataset"]["revision"], "hybrid-retrieval-v1")
-        self.assertEqual(config["related_clause_dataset"]["case_count"], 11)
+        risk_clause_keys = {(item.contract_id, item.clause_id) for item in bundle.risks}
+        clause_keys = {(item.contract_id, item.clause_id) for item in bundle.clauses}
+        self.assertEqual(len(bundle.contracts), 23)
+        self.assertEqual(len(bundle.clauses), 174)
+        self.assertEqual(len(risk_clause_keys), 65)
+        self.assertEqual(len(clause_keys - risk_clause_keys), 109)
+        self.assertEqual(len(bundle.related_clauses), 20)
+        self.assertEqual(len(bundle.memory), 20)
+        self.assertEqual(len(bundle.prompt_injection), 10)
+        self.assertEqual(config["related_clause_dataset"]["revision"], "hybrid-retrieval-v2")
+        self.assertEqual(config["related_clause_dataset"]["case_count"], 20)
         self.assertEqual(config["related_clause_dataset"]["risk_type_count"], 8)
         self.assertEqual(len({item.risk_type for item in bundle.related_clauses}), 8)
         self.assertTrue(
@@ -131,11 +152,241 @@ class EffectEvaluationTest(unittest.TestCase):
         self.assertTrue(all("客户合同" in item.source.note or "测试夹具" in item.source.note for item in bundle.contracts))
 
         comparison = evaluate_memory_comparison(bundle.memory)
-        self.assertEqual(comparison["without_memory_consistent_count"], 3)
-        self.assertEqual(comparison["with_memory_consistent_count"], 3)
+        self.assertEqual(comparison["sample_count"], 20)
+        self.assertEqual(comparison["without_memory_consistent_count"], 11)
+        self.assertEqual(comparison["with_memory_consistent_count"], 11)
         self.assertEqual(comparison["consistency_delta"], 0)
         self.assertFalse(comparison["improved"])
         self.assertEqual(comparison["conclusion"], "not_improved")
+
+    def test_dataset_minimums_are_enforced(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            samples_dir = Path(temp_dir) / "samples"
+            shutil.copytree(PROJECT_ROOT / "samples", samples_dir)
+            contracts_path = samples_dir / "annotations" / "contracts.json"
+            clauses_path = samples_dir / "annotations" / "clauses.json"
+            risks_path = samples_dir / "annotations" / "risks.json"
+            contracts = json.loads(contracts_path.read_text(encoding="utf-8"))
+            clauses = json.loads(clauses_path.read_text(encoding="utf-8"))
+            risks = json.loads(risks_path.read_text(encoding="utf-8"))
+            removed_ids = {item["contract_id"] for item in contracts["items"][-4:]}
+            contracts["items"] = contracts["items"][:-4]
+            clauses["items"] = [
+                item for item in clauses["items"] if item["contract_id"] not in removed_ids
+            ]
+            risks["items"] = [
+                item for item in risks["items"] if item["contract_id"] not in removed_ids
+            ]
+            contracts_path.write_text(json.dumps(contracts, ensure_ascii=False), encoding="utf-8")
+            clauses_path.write_text(json.dumps(clauses, ensure_ascii=False), encoding="utf-8")
+            risks_path.write_text(json.dumps(risks, ensure_ascii=False), encoding="utf-8")
+
+            summary = run_effect_evaluation(
+                {"samples_dir": str(samples_dir), "output_dir": temp_dir}
+            )
+
+        self.assertEqual(summary["status"], "annotation_failed")
+        self.assertIn("contract annotations require at least 20", summary["evaluation_failures"][0]["reason"])
+
+    def test_manifest_dataset_minimums_cannot_drift_from_task_thresholds(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            samples_dir = Path(temp_dir) / "samples"
+            shutil.copytree(PROJECT_ROOT / "samples", samples_dir)
+            manifest_path = samples_dir / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["effect_evaluation"]["dataset_minimums"]["contracts"] = 1
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            summary = run_effect_evaluation(
+                {"samples_dir": str(samples_dir), "output_dir": temp_dir}
+            )
+
+        self.assertEqual(summary["status"], "annotation_failed")
+        self.assertIn(
+            "dataset minimums do not match",
+            summary["evaluation_failures"][0]["reason"],
+        )
+
+    def test_runtime_summary_hashes_request_ids_and_records_usage(self):
+        runs = [
+            {
+                "task": {
+                    "logs": [
+                        {
+                            "trace_summary": {
+                                "versions": {"prompt": "prompt-v-test"},
+                                "provider": {
+                                    "mode": "openai_compatible",
+                                    "calls": [
+                                        {
+                                            "provider_request_id": "req-sensitive-1",
+                                            "prompt_tokens": 100,
+                                            "completion_tokens": 20,
+                                            "latency_ms": 10,
+                                            "estimated_cost": "0.1",
+                                            "cost_status": "calculated",
+                                            "error_type": "",
+                                        },
+                                        {
+                                            "provider_request_id": "req-sensitive-2",
+                                            "prompt_tokens": 50,
+                                            "completion_tokens": 0,
+                                            "latency_ms": 20,
+                                            "estimated_cost": None,
+                                            "cost_status": "未配置",
+                                            "error_type": "schema_error",
+                                        },
+                                    ],
+                                },
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+
+        runtime = _runtime_summary(runs, [], "stability-1").model_dump(mode="json")
+        serialized = json.dumps(runtime, ensure_ascii=False)
+        measurements = {
+            item["measurement"]: item["value"] for item in runtime["measurements"]
+        }
+
+        self.assertEqual(runtime["provider_call_count"], 2)
+        self.assertEqual(runtime["provider_success_count"], 1)
+        self.assertEqual(len(runtime["request_id_hashes"]), 2)
+        self.assertNotIn("req-sensitive", serialized)
+        self.assertEqual(measurements["total_tokens"], 170)
+        self.assertIsNone(measurements["estimated_cost"])
+        self.assertEqual(
+            measurements["cost_status"],
+            "partial_unavailable:calculated,未配置",
+        )
+        self.assertEqual(measurements["provider_latency_p95"], 20)
+        self.assertEqual(measurements["prompt_versions"], "prompt-v-test")
+
+        calls = runs[0]["task"]["logs"][0]["trace_summary"]["provider"]["calls"]
+        calls[1]["estimated_cost"] = "0.2"
+        calls[1]["cost_status"] = "calculated"
+        complete_runtime = _runtime_summary(runs, [], "stability-1").model_dump(
+            mode="json"
+        )
+        complete_measurements = {
+            item["measurement"]: item["value"]
+            for item in complete_runtime["measurements"]
+        }
+        self.assertEqual(complete_measurements["estimated_cost"], 0.3)
+        self.assertEqual(complete_measurements["cost_status"], "calculated")
+
+    def test_retrieval_repair_requires_candidates_and_evidence_recovery(self):
+        def log(tool_name, decision, status="success"):
+            return {
+                "tool_name": tool_name,
+                "status": status,
+                "trace_summary": {"decision": decision},
+            }
+
+        runs = [
+            {
+                "contract_id": "retrieval-only",
+                "task": {
+                    "logs": [
+                        log(
+                            "plan_review_action",
+                            {
+                                "type": "planner",
+                                "action": "RETRIEVE_AGAIN",
+                                "reason_code": "RETRIEVAL_INSUFFICIENT",
+                            },
+                        ),
+                        log(
+                            "retrieve_related_clauses",
+                            {"type": "retrieval", "candidate_count": 1},
+                        ),
+                    ]
+                },
+            },
+            {
+                "contract_id": "evidence-recovered",
+                "task": {
+                    "logs": [
+                        log(
+                            "plan_review_action",
+                            {
+                                "type": "planner",
+                                "action": "RETRIEVE_AGAIN",
+                                "reason_code": "EVIDENCE_MISSING",
+                            },
+                        ),
+                        log(
+                            "retrieve_related_clauses",
+                            {"type": "retrieval", "candidate_count": 1},
+                        ),
+                        log(
+                            "verify_evidence",
+                            {"type": "evidence_verifier", "is_valid": True},
+                        ),
+                    ]
+                },
+            },
+            {
+                "contract_id": "empty-repair",
+                "task": {
+                    "logs": [
+                        log(
+                            "plan_review_action",
+                            {
+                                "type": "planner",
+                                "action": "RETRIEVE_AGAIN",
+                                "reason_code": "RETRIEVAL_INSUFFICIENT",
+                            },
+                        ),
+                        log(
+                            "retrieve_related_clauses",
+                            {"type": "retrieval", "candidate_count": 0},
+                        ),
+                    ]
+                },
+            },
+            {
+                "contract_id": "evidence-still-invalid",
+                "task": {
+                    "logs": [
+                        log(
+                            "plan_review_action",
+                            {
+                                "type": "planner",
+                                "action": "RETRIEVE_AGAIN",
+                                "reason_code": "EVIDENCE_MISSING",
+                            },
+                        ),
+                        log(
+                            "retrieve_related_clauses",
+                            {"type": "retrieval", "candidate_count": 1},
+                        ),
+                        log(
+                            "verify_evidence",
+                            {"type": "evidence_verifier", "is_valid": False},
+                        ),
+                    ]
+                },
+            },
+        ]
+
+        checks = _retrieval_repair_checks(runs)
+
+        self.assertEqual([passed for passed, _failure in checks], [True, True, False, False])
+        self.assertEqual(
+            [failure.sample_id for _passed, failure in checks],
+            [
+                "retrieval-only:1",
+                "evidence-recovered:1",
+                "empty-repair:1",
+                "evidence-still-invalid:1",
+            ],
+        )
 
     def test_schema_drift_is_recorded_as_invalid_annotation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -220,25 +471,33 @@ class EffectEvaluationTest(unittest.TestCase):
             "report_filter_accuracy",
             "tool_call_success_rate",
             "end_to_end_success_rate",
+            "planner_action_accuracy",
+            "invalid_tool_action_rate",
+            "llm_json_valid_rate",
+            "llm_schema_repair_rate",
+            "retrieval_repair_success_rate",
+            "retry_recovery_rate",
+            "unsupported_finding_rate",
+            "memory_preference_consistency",
+            "prompt_injection_block_rate",
         }
         self.assertEqual(set(metrics), expected_metrics)
         self.assertEqual(summary["evaluation_type"], "effect")
-        self.assertEqual(summary["sample_count"], 6)
+        self.assertEqual(summary["sample_count"], 23)
         self.assertEqual(summary["claim"], EFFECT_NO_PRODUCTION_CLAIM)
-        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(summary["status"], "completed_with_failures")
         self.assertEqual(memory_comparison["consistency_delta"], 0)
         self.assertFalse(memory_comparison["improved"])
         self.assertEqual(memory_comparison["conclusion"], "not_improved")
-        self.assertEqual(metrics["related_clause_recall_at_k"]["sample_count"], 11)
-        self.assertEqual(metrics["related_clause_recall_at_k"]["passed_count"], 11)
+        self.assertEqual(metrics["related_clause_recall_at_k"]["sample_count"], 20)
+        self.assertEqual(metrics["related_clause_recall_at_k"]["passed_count"], 20)
         self.assertEqual(metrics["related_clause_recall_at_k"]["failed_count"], 0)
         self.assertEqual(metrics["related_clause_recall_at_k"]["score"], 1.0)
         self.assertTrue(metrics["related_clause_recall_at_k"]["threshold_met"])
         self.assertEqual(metrics["related_clause_recall_at_k"]["failure_samples"], [])
         for metric_name in [
             "playbook_recall_at_k",
-            "evidence_span_hit_rate",
-            "end_to_end_success_rate",
+            "prompt_injection_block_rate",
         ]:
             self.assertTrue(metrics[metric_name]["threshold_met"], metric_name)
             self.assertGreaterEqual(
@@ -252,16 +511,24 @@ class EffectEvaluationTest(unittest.TestCase):
                 for metric in summary["metrics"]
             )
         )
-        self.assertEqual(summary["versions"]["annotation_version"], "effect-v1")
+        self.assertEqual(summary["versions"]["annotation_version"], "effect-v2")
         self.assertEqual(summary["versions"]["playbook_version"], "nda-v1")
         self.assertTrue(summary["versions"]["code_version"])
         self.assertIn("llm_mode", summary["versions"])
         self.assertIn("embedding_mode", summary["versions"])
         self.assertIn("thresholds", summary["versions"]["parameters"])
+        self.assertEqual(summary["runtime"]["provider_call_count"], 0)
+        self.assertEqual(summary["runtime"]["request_id_hashes"], [])
+        measurements = {
+            item["measurement"]: item for item in summary["runtime"]["measurements"]
+        }
+        self.assertEqual(measurements["total_tokens"]["value"], 0)
+        self.assertIsNone(measurements["estimated_cost"]["value"])
+        self.assertIn("provider_latency_p95", measurements)
         self.assertEqual(summary_path.stem, summary["evaluation_id"])
         self.assertEqual(markdown_path.stem, summary["evaluation_id"])
         self.assertEqual(persisted, summary)
-        self.assertIn("- 标注版本：effect-v1", markdown)
+        self.assertIn("- 标注版本：effect-v2", markdown)
         self.assertIn("- Playbook Recall@K：3", markdown)
         self.assertIn("- 相关条款 Recall@K：1", markdown)
         self.assertIn('"risk_f1": 0.8', markdown)
@@ -364,7 +631,7 @@ class EffectEvaluationTest(unittest.TestCase):
 
         for metric_name in ("clause_boundary_accuracy", "clause_type_accuracy"):
             metric = metrics[metric_name]
-            self.assertEqual(metric.sample_count, 7)
+            self.assertEqual(metric.sample_count, len(bundle.clauses) + 1)
             self.assertEqual(metric.failed_count, 1)
             self.assertEqual(metric.failure_samples[0].sample_id, "nda-01:unexpected:CL-999")
 
@@ -399,7 +666,7 @@ class EffectEvaluationTest(unittest.TestCase):
             config["parameters"]["thresholds"],
         )
 
-        self.assertEqual(metric.sample_count, 3)
+        self.assertEqual(metric.sample_count, len(bundle.risks))
         self.assertEqual(metric.failed_count, 1)
         self.assertEqual(metric.failure_samples[0].sample_id, "nda-01-risk-01")
 
@@ -429,7 +696,7 @@ class EffectEvaluationTest(unittest.TestCase):
                     }
                 )
 
-        self.assertEqual(len(summary["evaluation_failures"]), 6)
+        self.assertEqual(len(summary["evaluation_failures"]), 23)
         self.assertTrue(
             all(item["failure_type"] == "model_call_failed" for item in summary["evaluation_failures"])
         )
@@ -460,7 +727,7 @@ class EffectEvaluationTest(unittest.TestCase):
                     }
                 )
 
-        self.assertEqual(len(summary["evaluation_failures"]), 6)
+        self.assertEqual(len(summary["evaluation_failures"]), 23)
         self.assertTrue(
             all(item["failure_type"] == "retrieval_failed" for item in summary["evaluation_failures"])
         )

@@ -257,6 +257,15 @@ class FastApiContractTest(unittest.TestCase):
             all(set(effect_contract["metric_required_keys"]) == set(item) for item in effect["metrics"])
         )
 
+        subset_response = self.client.post(
+            effect_contract["path"],
+            json={"contract_ids": ["nda-01"], "run_label": "api-subset"},
+        )
+        self.assertEqual(subset_response.status_code, 200, subset_response.text)
+        subset = subset_response.json()
+        self.assertEqual(subset["sample_count"], 1)
+        self.assertEqual(subset["runtime"]["run_label"], "api-subset")
+
     def test_missing_routes_and_tasks_keep_error_contracts(self):
         missing_task = self.contract["errors"]["missing_task"]
         response = self.client.get(missing_task["path"])

@@ -415,12 +415,12 @@
       "request_example": {
         "body": null
       },
-      "required_keys": ["evaluation_id", "evaluation_type", "created_at", "status", "claim", "sample_count", "metrics", "versions", "evaluation_failures", "summary_path", "markdown_path"],
+      "required_keys": ["evaluation_id", "evaluation_type", "created_at", "status", "claim", "sample_count", "metrics", "versions", "runtime", "evaluation_failures", "summary_path", "markdown_path"],
       "metric_required_keys": ["metric", "label", "sample_count", "passed_count", "failed_count", "score", "threshold", "threshold_met", "failure_samples"],
       "response_body_summary": {
         "evaluation_type": "effect",
-        "sample_count": 6,
-        "metric_count": 14,
+        "sample_count": 23,
+        "metric_count": 23,
         "claim": "效果评测仅报告当前人工标注集上的实际指标和失败样本，不代表生产级准确率。"
       }
     }

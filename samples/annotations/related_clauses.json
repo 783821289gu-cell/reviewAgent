@@ -1,12 +1,12 @@
 {
-  "annotation_version": "effect-v1",
+  "annotation_version": "effect-v2",
   "benchmark_type": "manually_annotated_related_clause_recall",
   "scope": "deterministic offline provider regression only; not a real external embedding model benchmark",
   "source": {
     "source_type": "synthetic",
     "note": "项目内人工编写的相关条款同义表达测试夹具，不含客户合同文本。"
   },
-  "dataset_revision": "hybrid-retrieval-v1",
+  "dataset_revision": "hybrid-retrieval-v2",
   "risk_type_coverage": 8,
   "k": 1,
   "cases": [
@@ -16,16 +16,37 @@
         "clause_id": "CL-001",
         "clause_type": "使用限制",
         "text": "接收方仅可为项目评估查阅资料。",
-        "key_fields": {"use_purpose": ["项目评估"]}
+        "key_fields": {
+          "use_purpose": [
+            "项目评估"
+          ]
+        }
       },
       "risk_type": "使用目的或使用限制不清",
       "playbook_check_point": "检查使用范围是否仅限项目评估。",
       "candidates": [
-        {"clause_id": "CL-011", "clause_type": "报告", "text": "项目评估报告应在项目评估完成后五日提交。", "key_fields": {}},
-        {"clause_id": "CL-012", "clause_type": "保密义务", "text": "获悉资料不得挪作他用。", "key_fields": {}},
-        {"clause_id": "CL-013", "clause_type": "通知", "text": "项目联系人变更时应及时通知。", "key_fields": {}}
+        {
+          "clause_id": "CL-011",
+          "clause_type": "报告",
+          "text": "项目评估报告应在项目评估完成后五日提交。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-012",
+          "clause_type": "保密义务",
+          "text": "获悉资料不得挪作他用。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-013",
+          "clause_type": "通知",
+          "text": "项目联系人变更时应及时通知。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-012"]
+      "relevant_clause_ids": [
+        "CL-012"
+      ]
     },
     {
       "case_id": "return-destroy-synonym",
@@ -38,11 +59,28 @@
       "risk_type": "返还或销毁义务不明确",
       "playbook_check_point": "检查协议结束后是否要求返还或销毁资料。",
       "candidates": [
-        {"clause_id": "CL-021", "clause_type": "争议解决", "text": "协议结束后的争议由仲裁机构处理。", "key_fields": {}},
-        {"clause_id": "CL-022", "clause_type": "数据处置", "text": "合作终止后应删除全部副本。", "key_fields": {}},
-        {"clause_id": "CL-023", "clause_type": "期限", "text": "合作期限可以书面方式延长。", "key_fields": {}}
+        {
+          "clause_id": "CL-021",
+          "clause_type": "争议解决",
+          "text": "协议结束后的争议由仲裁机构处理。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-022",
+          "clause_type": "数据处置",
+          "text": "合作终止后应删除全部副本。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-023",
+          "clause_type": "期限",
+          "text": "合作期限可以书面方式延长。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-022"]
+      "relevant_clause_ids": [
+        "CL-022"
+      ]
     },
     {
       "case_id": "compelled-disclosure-notice-synonym",
@@ -55,11 +93,28 @@
       "risk_type": "允许披露对象过宽",
       "playbook_check_point": "检查收到监管命令时是否需要提前告知披露方。",
       "candidates": [
-        {"clause_id": "CL-031", "clause_type": "费用", "text": "执行监管命令产生的费用由接收方承担。", "key_fields": {}},
-        {"clause_id": "CL-032", "clause_type": "法定披露", "text": "接到行政机关指令时须事先通知信息所有人。", "key_fields": {}},
-        {"clause_id": "CL-033", "clause_type": "通知", "text": "联系地址变化后应告知另一方。", "key_fields": {}}
+        {
+          "clause_id": "CL-031",
+          "clause_type": "费用",
+          "text": "执行监管命令产生的费用由接收方承担。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-032",
+          "clause_type": "法定披露",
+          "text": "接到行政机关指令时须事先通知信息所有人。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-033",
+          "clause_type": "通知",
+          "text": "联系地址变化后应告知另一方。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-032"]
+      "relevant_clause_ids": [
+        "CL-032"
+      ]
     },
     {
       "case_id": "broad-definition-identifiability",
@@ -72,11 +127,28 @@
       "risk_type": "保密信息范围过宽",
       "playbook_check_point": "检查保密信息是否具有保密标识或可依其性质合理识别。",
       "candidates": [
-        {"clause_id": "CL-111", "clause_type": "通知", "text": "任何形式的通知均应发送至约定地址。", "key_fields": {}},
-        {"clause_id": "CL-112", "clause_type": "定义", "text": "保密信息限于标记为保密或依其性质可合理认定为保密的商业信息和技术资料。", "key_fields": {}},
-        {"clause_id": "CL-113", "clause_type": "知识产权", "text": "披露资料不构成任何形式的权利许可。", "key_fields": {}}
+        {
+          "clause_id": "CL-111",
+          "clause_type": "通知",
+          "text": "任何形式的通知均应发送至约定地址。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-112",
+          "clause_type": "定义",
+          "text": "保密信息限于标记为保密或依其性质可合理认定为保密的商业信息和技术资料。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-113",
+          "clause_type": "知识产权",
+          "text": "披露资料不构成任何形式的权利许可。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-112"]
+      "relevant_clause_ids": [
+        "CL-112"
+      ]
     },
     {
       "case_id": "missing-exceptions-independent-development",
@@ -89,11 +161,28 @@
       "risk_type": "缺少保密信息例外",
       "playbook_check_point": "检查公开信息、接收方已知、合法第三方来源和独立开发是否列为例外。",
       "candidates": [
-        {"clause_id": "CL-211", "clause_type": "定义", "text": "保密信息包括经营计划和客户名单。", "key_fields": {}},
-        {"clause_id": "CL-212", "clause_type": "例外", "text": "已公开、接收方事先已知或独立开发的信息不受保密义务限制。", "key_fields": {}},
-        {"clause_id": "CL-213", "clause_type": "第三方权利", "text": "第三方提出权利主张时应及时通知。", "key_fields": {}}
+        {
+          "clause_id": "CL-211",
+          "clause_type": "定义",
+          "text": "保密信息包括经营计划和客户名单。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-212",
+          "clause_type": "例外",
+          "text": "已公开、接收方事先已知或独立开发的信息不受保密义务限制。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-213",
+          "clause_type": "第三方权利",
+          "text": "第三方提出权利主张时应及时通知。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-212"]
+      "relevant_clause_ids": [
+        "CL-212"
+      ]
     },
     {
       "case_id": "perpetual-term-finite-survival",
@@ -101,16 +190,41 @@
         "clause_id": "CL-301",
         "clause_type": "期限",
         "text": "接收方的保密义务永久持续。",
-        "key_fields": {"confidentiality_period": ["永久"]}
+        "key_fields": {
+          "confidentiality_period": [
+            "永久"
+          ]
+        }
       },
       "risk_type": "保密期限不合理",
       "playbook_check_point": "检查保密义务在协议终止后是否具有明确且合理的持续期间。",
       "candidates": [
-        {"clause_id": "CL-311", "clause_type": "合同期限", "text": "本协议有效期为三年，经双方书面同意可以续期。", "key_fields": {}},
-        {"clause_id": "CL-312", "clause_type": "期限", "text": "保密义务在合作终止后三年届满。", "key_fields": {"confidentiality_period": ["三年"]}},
-        {"clause_id": "CL-313", "clause_type": "通知", "text": "协议终止时应向对方发出书面通知。", "key_fields": {}}
+        {
+          "clause_id": "CL-311",
+          "clause_type": "合同期限",
+          "text": "本协议有效期为三年，经双方书面同意可以续期。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-312",
+          "clause_type": "期限",
+          "text": "保密义务在合作终止后三年届满。",
+          "key_fields": {
+            "confidentiality_period": [
+              "三年"
+            ]
+          }
+        },
+        {
+          "clause_id": "CL-313",
+          "clause_type": "通知",
+          "text": "协议终止时应向对方发出书面通知。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-312"]
+      "relevant_clause_ids": [
+        "CL-312"
+      ]
     },
     {
       "case_id": "unlimited-liability-cap",
@@ -118,16 +232,43 @@
         "clause_id": "CL-401",
         "clause_type": "违约责任",
         "text": "接收方应赔偿披露方遭受的一切损失，责任不设上限。",
-        "key_fields": {"liability_scope": ["一切损失", "不设上限"]}
+        "key_fields": {
+          "liability_scope": [
+            "一切损失",
+            "不设上限"
+          ]
+        }
       },
       "risk_type": "责任无限或责任边界不清",
       "playbook_check_point": "检查累计赔偿责任是否设有上限并排除间接损失。",
       "candidates": [
-        {"clause_id": "CL-411", "clause_type": "费用", "text": "各方自行承担履行协议发生的全部费用。", "key_fields": {}},
-        {"clause_id": "CL-412", "clause_type": "责任限制", "text": "除故意或重大过失外，累计责任以已支付费用为上限，并排除间接损失。", "key_fields": {"liability_scope": ["累计责任上限", "间接损失"]}},
-        {"clause_id": "CL-413", "clause_type": "保险", "text": "接收方应维持商业责任保险。", "key_fields": {}}
+        {
+          "clause_id": "CL-411",
+          "clause_type": "费用",
+          "text": "各方自行承担履行协议发生的全部费用。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-412",
+          "clause_type": "责任限制",
+          "text": "除故意或重大过失外，累计责任以已支付费用为上限，并排除间接损失。",
+          "key_fields": {
+            "liability_scope": [
+              "累计责任上限",
+              "间接损失"
+            ]
+          }
+        },
+        {
+          "clause_id": "CL-413",
+          "clause_type": "保险",
+          "text": "接收方应维持商业责任保险。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-412"]
+      "relevant_clause_ids": [
+        "CL-412"
+      ]
     },
     {
       "case_id": "excessive-daily-penalty-cap",
@@ -135,16 +276,42 @@
         "clause_id": "CL-501",
         "clause_type": "违约责任",
         "text": "每迟延一日按合同总额百分之十支付违约金。",
-        "key_fields": {"breach_liability": ["每日百分之十"]}
+        "key_fields": {
+          "breach_liability": [
+            "每日百分之十"
+          ]
+        }
       },
       "risk_type": "违约责任或违约金明显不合理",
       "playbook_check_point": "检查违约金比例、计算基础、累计上限与实际损失是否合理。",
       "candidates": [
-        {"clause_id": "CL-511", "clause_type": "付款", "text": "合同总额应在验收后十日内支付。", "key_fields": {}},
-        {"clause_id": "CL-512", "clause_type": "责任限制", "text": "违约金以实际损失为基础，累计不超过合同总额百分之十。", "key_fields": {"breach_liability": ["实际损失", "累计上限"]}},
-        {"clause_id": "CL-513", "clause_type": "期限", "text": "迟延超过十日的，守约方可以终止协议。", "key_fields": {}}
+        {
+          "clause_id": "CL-511",
+          "clause_type": "付款",
+          "text": "合同总额应在验收后十日内支付。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-512",
+          "clause_type": "责任限制",
+          "text": "违约金以实际损失为基础，累计不超过合同总额百分之十。",
+          "key_fields": {
+            "breach_liability": [
+              "实际损失",
+              "累计上限"
+            ]
+          }
+        },
+        {
+          "clause_id": "CL-513",
+          "clause_type": "期限",
+          "text": "迟延超过十日的，守约方可以终止协议。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-512"]
+      "relevant_clause_ids": [
+        "CL-512"
+      ]
     },
     {
       "case_id": "purpose-key-field-restriction",
@@ -152,16 +319,41 @@
         "clause_id": "CL-601",
         "clause_type": "使用限制",
         "text": "接收方可以使用资料开展相关业务。",
-        "key_fields": {"use_purpose": ["相关业务"]}
+        "key_fields": {
+          "use_purpose": [
+            "相关业务"
+          ]
+        }
       },
       "risk_type": "使用目的或使用限制不清",
       "playbook_check_point": "检查约定用途是否具体并禁止超范围使用。",
       "candidates": [
-        {"clause_id": "CL-611", "clause_type": "业务合作", "text": "双方可以另行讨论其他相关业务。", "key_fields": {}},
-        {"clause_id": "CL-612", "clause_type": "使用限制", "text": "资料仅限用于本次合作评估，不得用于竞争性业务。", "key_fields": {"use_purpose": ["本次合作评估"]}},
-        {"clause_id": "CL-613", "clause_type": "审计", "text": "披露方可以检查资料的保管情况。", "key_fields": {}}
+        {
+          "clause_id": "CL-611",
+          "clause_type": "业务合作",
+          "text": "双方可以另行讨论其他相关业务。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-612",
+          "clause_type": "使用限制",
+          "text": "资料仅限用于本次合作评估，不得用于竞争性业务。",
+          "key_fields": {
+            "use_purpose": [
+              "本次合作评估"
+            ]
+          }
+        },
+        {
+          "clause_id": "CL-613",
+          "clause_type": "审计",
+          "text": "披露方可以检查资料的保管情况。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-612"]
+      "relevant_clause_ids": [
+        "CL-612"
+      ]
     },
     {
       "case_id": "broad-representatives-need-to-know",
@@ -169,16 +361,44 @@
         "clause_id": "CL-701",
         "clause_type": "允许披露",
         "text": "接收方可以向员工、顾问及关联方披露保密信息。",
-        "key_fields": {"permitted_disclosure_targets": ["员工", "顾问", "关联方"]}
+        "key_fields": {
+          "permitted_disclosure_targets": [
+            "员工",
+            "顾问",
+            "关联方"
+          ]
+        }
       },
       "risk_type": "允许披露对象过宽",
       "playbook_check_point": "检查披露对象是否限于必要知悉并承担同等保密义务的代表。",
       "candidates": [
-        {"clause_id": "CL-711", "clause_type": "关联方", "text": "关联方是直接或间接控制一方的主体。", "key_fields": {}},
-        {"clause_id": "CL-712", "clause_type": "允许披露", "text": "仅可向确有必要知悉且承担同等保密义务的员工和顾问披露。", "key_fields": {"permitted_disclosure_targets": ["必要知悉员工", "顾问"]}},
-        {"clause_id": "CL-713", "clause_type": "人员管理", "text": "员工与顾问应遵守接收方的内部制度。", "key_fields": {}}
+        {
+          "clause_id": "CL-711",
+          "clause_type": "关联方",
+          "text": "关联方是直接或间接控制一方的主体。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-712",
+          "clause_type": "允许披露",
+          "text": "仅可向确有必要知悉且承担同等保密义务的员工和顾问披露。",
+          "key_fields": {
+            "permitted_disclosure_targets": [
+              "必要知悉员工",
+              "顾问"
+            ]
+          }
+        },
+        {
+          "clause_id": "CL-713",
+          "clause_type": "人员管理",
+          "text": "员工与顾问应遵守接收方的内部制度。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-712"]
+      "relevant_clause_ids": [
+        "CL-712"
+      ]
     },
     {
       "case_id": "return-destroy-electronic-backups",
@@ -191,11 +411,335 @@
       "risk_type": "返还或销毁义务不明确",
       "playbook_check_point": "检查电子副本和备份是否需要一并删除或销毁。",
       "candidates": [
-        {"clause_id": "CL-811", "clause_type": "档案管理", "text": "纸质资料应存放在上锁的档案柜。", "key_fields": {}},
-        {"clause_id": "CL-812", "clause_type": "数据处置", "text": "电子副本和备份应一并永久删除，并书面确认数据处置完成。", "key_fields": {}},
-        {"clause_id": "CL-813", "clause_type": "通知", "text": "合作终止后应通知项目联系人。", "key_fields": {}}
+        {
+          "clause_id": "CL-811",
+          "clause_type": "档案管理",
+          "text": "纸质资料应存放在上锁的档案柜。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-812",
+          "clause_type": "数据处置",
+          "text": "电子副本和备份应一并永久删除，并书面确认数据处置完成。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-813",
+          "clause_type": "通知",
+          "text": "合作终止后应通知项目联系人。",
+          "key_fields": {}
+        }
       ],
-      "relevant_clause_ids": ["CL-812"]
+      "relevant_clause_ids": [
+        "CL-812"
+      ]
+    },
+    {
+      "case_id": "definition-marking-expanded",
+      "current_clause": {
+        "clause_id": "CL-910",
+        "clause_type": "定义",
+        "text": "保密信息涵盖项目交换的全部资料。",
+        "key_fields": {}
+      },
+      "risk_type": "保密信息范围过宽",
+      "playbook_check_point": "检查信息是否通过标识或性质可识别。",
+      "candidates": [
+        {
+          "clause_id": "CL-911",
+          "clause_type": "通知",
+          "text": "联系人变化应书面通知另一方。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-912",
+          "clause_type": "定义",
+          "text": "仅带有保密标识或依性质明显保密的资料属于保密信息。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-913",
+          "clause_type": "争议解决",
+          "text": "争议提交仲裁机构处理。",
+          "key_fields": {}
+        }
+      ],
+      "relevant_clause_ids": [
+        "CL-912"
+      ]
+    },
+    {
+      "case_id": "exception-third-party-expanded",
+      "current_clause": {
+        "clause_id": "CL-920",
+        "clause_type": "例外",
+        "text": "协议没有列出保密义务除外情形。",
+        "key_fields": {}
+      },
+      "risk_type": "缺少保密信息例外",
+      "playbook_check_point": "检查合法第三方来源是否排除。",
+      "candidates": [
+        {
+          "clause_id": "CL-921",
+          "clause_type": "通知",
+          "text": "联系人变化应书面通知另一方。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-922",
+          "clause_type": "例外",
+          "text": "从不负保密义务的第三方合法取得的信息不受限制。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-923",
+          "clause_type": "争议解决",
+          "text": "争议提交仲裁机构处理。",
+          "key_fields": {}
+        }
+      ],
+      "relevant_clause_ids": [
+        "CL-922"
+      ]
+    },
+    {
+      "case_id": "term-trade-secret-expanded",
+      "current_clause": {
+        "clause_id": "CL-930",
+        "clause_type": "期限",
+        "text": "所有资料均需永久保密。",
+        "key_fields": {}
+      },
+      "risk_type": "保密期限不合理",
+      "playbook_check_point": "检查普通信息与商业秘密期限是否区分。",
+      "candidates": [
+        {
+          "clause_id": "CL-931",
+          "clause_type": "通知",
+          "text": "联系人变化应书面通知另一方。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-932",
+          "clause_type": "期限",
+          "text": "普通资料保护三年，商业秘密在保持秘密性期间持续保护。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-933",
+          "clause_type": "争议解决",
+          "text": "争议提交仲裁机构处理。",
+          "key_fields": {}
+        }
+      ],
+      "relevant_clause_ids": [
+        "CL-932"
+      ]
+    },
+    {
+      "case_id": "purpose-evaluation-expanded",
+      "current_clause": {
+        "clause_id": "CL-940",
+        "clause_type": "使用限制",
+        "text": "资料可以用于接收方内部安排。",
+        "key_fields": {}
+      },
+      "risk_type": "使用目的或使用限制不清",
+      "playbook_check_point": "检查是否限定为交易评估。",
+      "candidates": [
+        {
+          "clause_id": "CL-941",
+          "clause_type": "通知",
+          "text": "联系人变化应书面通知另一方。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-942",
+          "clause_type": "使用限制",
+          "text": "资料仅可用于拟议交易的内部评估。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-943",
+          "clause_type": "争议解决",
+          "text": "争议提交仲裁机构处理。",
+          "key_fields": {}
+        }
+      ],
+      "relevant_clause_ids": [
+        "CL-942"
+      ]
+    },
+    {
+      "case_id": "disclosure-need-to-know-expanded",
+      "current_clause": {
+        "clause_id": "CL-950",
+        "clause_type": "允许披露",
+        "text": "资料可交给全部关联企业。",
+        "key_fields": {}
+      },
+      "risk_type": "允许披露对象过宽",
+      "playbook_check_point": "检查是否限定确有知悉必要的人员。",
+      "candidates": [
+        {
+          "clause_id": "CL-951",
+          "clause_type": "通知",
+          "text": "联系人变化应书面通知另一方。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-952",
+          "clause_type": "允许披露",
+          "text": "仅可向为项目履职且确有知悉必要的人员提供资料。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-953",
+          "clause_type": "争议解决",
+          "text": "争议提交仲裁机构处理。",
+          "key_fields": {}
+        }
+      ],
+      "relevant_clause_ids": [
+        "CL-952"
+      ]
+    },
+    {
+      "case_id": "destroy-backup-expanded",
+      "current_clause": {
+        "clause_id": "CL-960",
+        "clause_type": "返还销毁",
+        "text": "合作结束后的资料处理方式未明确。",
+        "key_fields": {}
+      },
+      "risk_type": "返还或销毁义务不明确",
+      "playbook_check_point": "检查备份和删除义务。",
+      "candidates": [
+        {
+          "clause_id": "CL-961",
+          "clause_type": "通知",
+          "text": "联系人变化应书面通知另一方。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-962",
+          "clause_type": "数据处置",
+          "text": "终止后删除电子副本，法定留存备份继续受约束。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-963",
+          "clause_type": "争议解决",
+          "text": "争议提交仲裁机构处理。",
+          "key_fields": {}
+        }
+      ],
+      "relevant_clause_ids": [
+        "CL-962"
+      ]
+    },
+    {
+      "case_id": "liability-cap-expanded",
+      "current_clause": {
+        "clause_id": "CL-970",
+        "clause_type": "违约责任",
+        "text": "接收方承担全部且不限额的损失。",
+        "key_fields": {}
+      },
+      "risk_type": "责任无限或责任边界不清",
+      "playbook_check_point": "检查是否设置责任上限。",
+      "candidates": [
+        {
+          "clause_id": "CL-971",
+          "clause_type": "通知",
+          "text": "联系人变化应书面通知另一方。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-972",
+          "clause_type": "责任限制",
+          "text": "除故意泄密外，赔偿总额以可预见直接损失为限。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-973",
+          "clause_type": "争议解决",
+          "text": "争议提交仲裁机构处理。",
+          "key_fields": {}
+        }
+      ],
+      "relevant_clause_ids": [
+        "CL-972"
+      ]
+    },
+    {
+      "case_id": "penalty-proportional-expanded",
+      "current_clause": {
+        "clause_id": "CL-980",
+        "clause_type": "违约责任",
+        "text": "任何违约均支付固定高额违约金。",
+        "key_fields": {}
+      },
+      "risk_type": "违约责任或违约金明显不合理",
+      "playbook_check_point": "检查违约金是否与实际影响匹配。",
+      "candidates": [
+        {
+          "clause_id": "CL-981",
+          "clause_type": "通知",
+          "text": "联系人变化应书面通知另一方。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-982",
+          "clause_type": "赔偿标准",
+          "text": "违约金按照可证明损失和泄密影响合理确定。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-983",
+          "clause_type": "争议解决",
+          "text": "争议提交仲裁机构处理。",
+          "key_fields": {}
+        }
+      ],
+      "relevant_clause_ids": [
+        "CL-982"
+      ]
+    },
+    {
+      "case_id": "compelled-notice-expanded",
+      "current_clause": {
+        "clause_id": "CL-990",
+        "clause_type": "允许披露",
+        "text": "收到监管要求即可直接提供资料。",
+        "key_fields": {}
+      },
+      "risk_type": "允许披露对象过宽",
+      "playbook_check_point": "检查强制披露前通知机制。",
+      "candidates": [
+        {
+          "clause_id": "CL-991",
+          "clause_type": "通知",
+          "text": "联系人变化应书面通知另一方。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-992",
+          "clause_type": "法定披露",
+          "text": "依法披露前应在法律允许范围内提前通知披露方。",
+          "key_fields": {}
+        },
+        {
+          "clause_id": "CL-993",
+          "clause_type": "争议解决",
+          "text": "争议提交仲裁机构处理。",
+          "key_fields": {}
+        }
+      ],
+      "relevant_clause_ids": [
+        "CL-992"
+      ]
     }
-  ]
+  ],
+  "case_count": 20
 }

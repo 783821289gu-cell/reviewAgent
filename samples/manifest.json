@@ -1,5 +1,6 @@
 {
-  "sample_set": "synthetic_nda_v1",
+  "sample_set": "synthetic_nda_v2",
+  "basic_evaluation_sample_count": 10,
   "source_note": "All samples are synthetic project fixtures and are not real customer contracts.",
   "samples": [
     {
@@ -71,10 +72,80 @@
       "review_position": "甲方",
       "source": "项目内合成样本，非真实客户合同。",
       "focus": "完整演示样本"
+    },
+    {
+      "sample_name": "NDA Sample 11 - Expanded Synthetic Set",
+      "file": "nda_sample_11.txt",
+      "review_position": "甲方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "五类核心 NDA 风险组合"
+    },
+    {
+      "sample_name": "NDA Sample 12 - Expanded Synthetic Set",
+      "file": "nda_sample_12.txt",
+      "review_position": "乙方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "五类核心 NDA 风险组合"
+    },
+    {
+      "sample_name": "NDA Sample 13 - Expanded Synthetic Set",
+      "file": "nda_sample_13.txt",
+      "review_position": "甲方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "五类核心 NDA 风险组合"
+    },
+    {
+      "sample_name": "NDA Sample 14 - Expanded Synthetic Set",
+      "file": "nda_sample_14.txt",
+      "review_position": "乙方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "五类核心 NDA 风险组合"
+    },
+    {
+      "sample_name": "NDA Sample 15 - Expanded Synthetic Set",
+      "file": "nda_sample_15.txt",
+      "review_position": "甲方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "五类核心 NDA 风险组合"
+    },
+    {
+      "sample_name": "NDA Sample 16 - Expanded Synthetic Set",
+      "file": "nda_sample_16.txt",
+      "review_position": "乙方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "五类核心 NDA 风险组合"
+    },
+    {
+      "sample_name": "NDA Sample 17 - Expanded Synthetic Set",
+      "file": "nda_sample_17.txt",
+      "review_position": "甲方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "五类核心 NDA 风险组合"
+    },
+    {
+      "sample_name": "NDA Sample 18 - Expanded Synthetic Set",
+      "file": "nda_sample_18.txt",
+      "review_position": "乙方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "五类核心 NDA 风险组合"
+    },
+    {
+      "sample_name": "NDA Sample 19 - Expanded Synthetic Set",
+      "file": "nda_sample_19.txt",
+      "review_position": "甲方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "五类核心 NDA 风险组合"
+    },
+    {
+      "sample_name": "NDA Sample 20 - Expanded Synthetic Set",
+      "file": "nda_sample_20.txt",
+      "review_position": "乙方",
+      "source": "项目内合成样本，非真实客户合同。",
+      "focus": "五类核心 NDA 风险组合"
     }
   ],
   "effect_evaluation": {
-    "annotation_version": "effect-v1",
+    "annotation_version": "effect-v2",
     "schema": "annotations/schema.json",
     "contracts": "annotations/contracts.json",
     "clauses": "annotations/clauses.json",
@@ -82,8 +153,8 @@
     "related_clauses": "annotations/related_clauses.json",
     "memory": "annotations/memory.json",
     "related_clause_dataset": {
-      "revision": "hybrid-retrieval-v1",
-      "case_count": 11,
+      "revision": "hybrid-retrieval-v2",
+      "case_count": 20,
       "risk_type_count": 8
     },
     "parameters": {
@@ -103,8 +174,26 @@
         "manual_review_trigger_rate": 1.0,
         "report_filter_accuracy": 1.0,
         "tool_call_success_rate": 0.95,
-        "end_to_end_success_rate": 0.9
+        "end_to_end_success_rate": 0.9,
+        "planner_action_accuracy": 0.9,
+        "invalid_tool_action_rate": 0.0,
+        "llm_json_valid_rate": 0.98,
+        "llm_schema_repair_rate": 1.0,
+        "retrieval_repair_success_rate": 0.8,
+        "retry_recovery_rate": 0.8,
+        "unsupported_finding_rate": 0.0,
+        "memory_preference_consistency": 0.8,
+        "prompt_injection_block_rate": 1.0
       }
+    },
+    "prompt_injection": "prompt_injection/cases.json",
+    "dataset_minimums": {
+      "contracts": 20,
+      "risk_clauses": 50,
+      "normal_clauses": 100,
+      "related_clause_cases": 20,
+      "memory_cases": 20,
+      "prompt_injection_cases": 10
     }
   }
 }

@@ -1,12 +1,14 @@
 {
-  "annotation_version": "effect-v1",
+  "annotation_version": "effect-v2",
   "items": [
     {
       "annotation_id": "nda-01-risk-01",
       "contract_id": "nda-01",
       "clause_id": "CL-001",
       "risk_type": "保密信息范围过宽",
-      "acceptable_severities": ["中"],
+      "acceptable_severities": [
+        "中"
+      ],
       "evidence_spans": [
         "保密信息是指披露方向接收方提供的任何商业信息、技术资料、合作资料以及与双方业务有关的一切信息。"
       ],
@@ -19,7 +21,9 @@
       "contract_id": "nda-02",
       "clause_id": "CL-001",
       "risk_type": "缺少保密信息例外",
-      "acceptable_severities": ["高"],
+      "acceptable_severities": [
+        "高"
+      ],
       "evidence_spans": [
         "本合同未对不受本协议约束的信息类型另行约定，接收方应对披露方提供的资料承担限制。"
       ],
@@ -32,13 +36,945 @@
       "contract_id": "nda-03",
       "clause_id": "CL-001",
       "risk_type": "保密期限不合理",
-      "acceptable_severities": ["高"],
+      "acceptable_severities": [
+        "高"
+      ],
       "evidence_spans": [
         "接收方对全部保密信息承担永久保密义务，该义务不因合作终止而解除。"
       ],
       "manual_review_expected": true,
       "feedback_action": "accept",
       "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-04-risk-01",
+      "contract_id": "nda-04",
+      "clause_id": "CL-001",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以在其内部业务中使用披露方提供的保密信息，并可结合自身经营安排进行处理。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-05-risk-01",
+      "contract_id": "nda-05",
+      "clause_id": "CL-002",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以向所有关联方、顾问、代表和外部合作机构披露保密信息。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-05-risk-02",
+      "contract_id": "nda-05",
+      "clause_id": "CL-003",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方应按照双方合作安排使用相关资料。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-06-risk-01",
+      "contract_id": "nda-06",
+      "clause_id": "CL-002",
+      "risk_type": "责任无限或责任边界不清",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "违约方应赔偿守约方全部损失、间接损失，且保密违约责任不限。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-07-risk-01",
+      "contract_id": "nda-07",
+      "clause_id": "CL-001",
+      "risk_type": "违约责任或违约金明显不合理",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方违反本合同的，应向披露方支付违约金人民币500万元，披露方仍可要求赔偿其他损失。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-08-risk-01",
+      "contract_id": "nda-08",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "保密信息包括所有业务信息、所有技术资料以及披露方认为应保密的任何资料。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-08-risk-02",
+      "contract_id": "nda-08",
+      "clause_id": "CL-002",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可向任何关联方和代表披露保密信息。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-09-risk-01",
+      "contract_id": "nda-09",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "Confidential Information means all business information, technical materials, cooperation records and any other information received by the Receiving Party from the Disclosing Party during the project."
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-10-risk-01",
+      "contract_id": "nda-10",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何商业信息、技术资料和合作资料。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-10-risk-02",
+      "contract_id": "nda-10",
+      "clause_id": "CL-002",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以为内部商业安排使用保密信息。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-10-risk-03",
+      "contract_id": "nda-10",
+      "clause_id": "CL-003",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以向所有关联方、顾问和代表披露保密信息。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-10-risk-04",
+      "contract_id": "nda-10",
+      "clause_id": "CL-004",
+      "risk_type": "责任无限或责任边界不清",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "违约方应赔偿守约方全部损失和间接损失。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-11-risk-01",
+      "contract_id": "nda-11",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何商业信息、全部技术资料及与第11号项目有关的一切信息。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-11-risk-02",
+      "contract_id": "nda-11",
+      "clause_id": "CL-002",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-11-risk-03",
+      "contract_id": "nda-11",
+      "clause_id": "CL-003",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，不因第11号项目终止而解除。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-11-risk-04",
+      "contract_id": "nda-11",
+      "clause_id": "CL-004",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-11-risk-05",
+      "contract_id": "nda-11",
+      "clause_id": "CL-005",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-12-risk-01",
+      "contract_id": "nda-12",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何经营数据、全部技术文件及与第12号项目有关的一切材料。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-12-risk-02",
+      "contract_id": "nda-12",
+      "clause_id": "CL-002",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-12-risk-03",
+      "contract_id": "nda-12",
+      "clause_id": "CL-003",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，不因第12号项目终止而解除。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-12-risk-04",
+      "contract_id": "nda-12",
+      "clause_id": "CL-004",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-12-risk-05",
+      "contract_id": "nda-12",
+      "clause_id": "CL-005",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-13-risk-01",
+      "contract_id": "nda-13",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何客户信息、全部研发资料及与第13号项目有关的一切记录。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-13-risk-02",
+      "contract_id": "nda-13",
+      "clause_id": "CL-002",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-13-risk-03",
+      "contract_id": "nda-13",
+      "clause_id": "CL-003",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，不因第13号项目终止而解除。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-13-risk-04",
+      "contract_id": "nda-13",
+      "clause_id": "CL-004",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-13-risk-05",
+      "contract_id": "nda-13",
+      "clause_id": "CL-005",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-14-risk-01",
+      "contract_id": "nda-14",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何财务信息、全部产品资料及与第14号项目有关的一切信息。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-14-risk-02",
+      "contract_id": "nda-14",
+      "clause_id": "CL-002",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-14-risk-03",
+      "contract_id": "nda-14",
+      "clause_id": "CL-003",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，不因第14号项目终止而解除。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-14-risk-04",
+      "contract_id": "nda-14",
+      "clause_id": "CL-004",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-14-risk-05",
+      "contract_id": "nda-14",
+      "clause_id": "CL-005",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-15-risk-01",
+      "contract_id": "nda-15",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何市场信息、全部设计资料及与第15号项目有关的一切内容。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-15-risk-02",
+      "contract_id": "nda-15",
+      "clause_id": "CL-002",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-15-risk-03",
+      "contract_id": "nda-15",
+      "clause_id": "CL-003",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，不因第15号项目终止而解除。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-15-risk-04",
+      "contract_id": "nda-15",
+      "clause_id": "CL-004",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-15-risk-05",
+      "contract_id": "nda-15",
+      "clause_id": "CL-005",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-16-risk-01",
+      "contract_id": "nda-16",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何供应信息、全部工艺资料及与第16号项目有关的一切数据。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-16-risk-02",
+      "contract_id": "nda-16",
+      "clause_id": "CL-002",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-16-risk-03",
+      "contract_id": "nda-16",
+      "clause_id": "CL-003",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，不因第16号项目终止而解除。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-16-risk-04",
+      "contract_id": "nda-16",
+      "clause_id": "CL-004",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-16-risk-05",
+      "contract_id": "nda-16",
+      "clause_id": "CL-005",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-17-risk-01",
+      "contract_id": "nda-17",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何价格信息、全部算法资料及与第17号项目有关的一切文档。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-17-risk-02",
+      "contract_id": "nda-17",
+      "clause_id": "CL-002",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-17-risk-03",
+      "contract_id": "nda-17",
+      "clause_id": "CL-003",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，不因第17号项目终止而解除。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-17-risk-04",
+      "contract_id": "nda-17",
+      "clause_id": "CL-004",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-17-risk-05",
+      "contract_id": "nda-17",
+      "clause_id": "CL-005",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-18-risk-01",
+      "contract_id": "nda-18",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何渠道信息、全部测试资料及与第18号项目有关的一切成果。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-18-risk-02",
+      "contract_id": "nda-18",
+      "clause_id": "CL-002",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-18-risk-03",
+      "contract_id": "nda-18",
+      "clause_id": "CL-003",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，不因第18号项目终止而解除。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-18-risk-04",
+      "contract_id": "nda-18",
+      "clause_id": "CL-004",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-18-risk-05",
+      "contract_id": "nda-18",
+      "clause_id": "CL-005",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-19-risk-01",
+      "contract_id": "nda-19",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何战略信息、全部源代码资料及与第19号项目有关的一切记录。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-19-risk-02",
+      "contract_id": "nda-19",
+      "clause_id": "CL-002",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-19-risk-03",
+      "contract_id": "nda-19",
+      "clause_id": "CL-003",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，不因第19号项目终止而解除。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-19-risk-04",
+      "contract_id": "nda-19",
+      "clause_id": "CL-004",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-19-risk-05",
+      "contract_id": "nda-19",
+      "clause_id": "CL-005",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-20-risk-01",
+      "contract_id": "nda-20",
+      "clause_id": "CL-001",
+      "risk_type": "保密信息范围过宽",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "保密信息包括披露方提供的任何合作信息、全部模型资料及与第20号项目有关的一切文件。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-20-risk-02",
+      "contract_id": "nda-20",
+      "clause_id": "CL-002",
+      "risk_type": "缺少保密信息例外",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "ignore",
+      "include_in_report": false
+    },
+    {
+      "annotation_id": "nda-20-risk-03",
+      "contract_id": "nda-20",
+      "clause_id": "CL-003",
+      "risk_type": "保密期限不合理",
+      "acceptable_severities": [
+        "高"
+      ],
+      "evidence_spans": [
+        "接收方对全部保密信息承担永久保密义务，不因第20号项目终止而解除。"
+      ],
+      "manual_review_expected": true,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-20-risk-04",
+      "contract_id": "nda-20",
+      "clause_id": "CL-004",
+      "risk_type": "使用目的或使用限制不清",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "accept",
+      "include_in_report": true
+    },
+    {
+      "annotation_id": "nda-20-risk-05",
+      "contract_id": "nda-20",
+      "clause_id": "CL-005",
+      "risk_type": "允许披露对象过宽",
+      "acceptable_severities": [
+        "中"
+      ],
+      "evidence_spans": [
+        "接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。"
+      ],
+      "manual_review_expected": false,
+      "feedback_action": "ignore",
+      "include_in_report": false
     }
   ]
 }

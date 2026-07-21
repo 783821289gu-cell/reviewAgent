@@ -1,5 +1,5 @@
 {
-  "annotation_version": "effect-v1",
+  "annotation_version": "effect-v2",
   "items": [
     {
       "annotation_id": "nda-01-clause-01",
@@ -7,7 +7,9 @@
       "clause_id": "CL-001",
       "exact_text": "1. 定义\n保密信息是指披露方向接收方提供的任何商业信息、技术资料、合作资料以及与双方业务有关的一切信息。",
       "clause_type": "定义",
-      "expected_rule_ids": ["NDA-R001"]
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
     },
     {
       "annotation_id": "nda-01-clause-02",
@@ -23,7 +25,9 @@
       "clause_id": "CL-001",
       "exact_text": "1. 例外\n本合同未对不受本协议约束的信息类型另行约定，接收方应对披露方提供的资料承担限制。",
       "clause_type": "例外",
-      "expected_rule_ids": ["NDA-R002"]
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
     },
     {
       "annotation_id": "nda-02-clause-02",
@@ -39,7 +43,9 @@
       "clause_id": "CL-001",
       "exact_text": "1. 期限\n接收方对全部保密信息承担永久保密义务，该义务不因合作终止而解除。",
       "clause_type": "期限",
-      "expected_rule_ids": ["NDA-R003"]
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
     },
     {
       "annotation_id": "nda-03-clause-02",
@@ -47,7 +53,1504 @@
       "clause_id": "CL-002",
       "exact_text": "2. 定义\n保密信息包括披露方在合作过程中提供的项目资料。",
       "clause_type": "定义",
-      "expected_rule_ids": ["NDA-R001"]
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-04-clause-01",
+      "contract_id": "nda-04",
+      "clause_id": "CL-001",
+      "exact_text": "1. 使用限制\n接收方可以在其内部业务中使用披露方提供的保密信息，并可结合自身经营安排进行处理。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-04-clause-02",
+      "contract_id": "nda-04",
+      "clause_id": "CL-002",
+      "exact_text": "2. 保密义务\n接收方应采取合理措施保护保密信息。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-05-clause-01",
+      "contract_id": "nda-05",
+      "clause_id": "CL-001",
+      "exact_text": "保密协议",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-05-clause-02",
+      "contract_id": "nda-05",
+      "clause_id": "CL-002",
+      "exact_text": "1. 允许披露\n接收方可以向所有关联方、顾问、代表和外部合作机构披露保密信息。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-05-clause-03",
+      "contract_id": "nda-05",
+      "clause_id": "CL-003",
+      "exact_text": "2. 使用限制\n接收方应按照双方合作安排使用相关资料。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-06-clause-01",
+      "contract_id": "nda-06",
+      "clause_id": "CL-001",
+      "exact_text": "保密协议",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-06-clause-02",
+      "contract_id": "nda-06",
+      "clause_id": "CL-002",
+      "exact_text": "1. 违约责任\n违约方应赔偿守约方全部损失、间接损失，且保密违约责任不限。",
+      "clause_type": "违约责任",
+      "expected_rule_ids": [
+        "NDA-R007",
+        "NDA-R008"
+      ]
+    },
+    {
+      "annotation_id": "nda-06-clause-03",
+      "contract_id": "nda-06",
+      "clause_id": "CL-003",
+      "exact_text": "2. 期限\n保密义务持续三年。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-07-clause-01",
+      "contract_id": "nda-07",
+      "clause_id": "CL-001",
+      "exact_text": "1. 违约责任\n接收方违反本合同的，应向披露方支付违约金人民币500万元，披露方仍可要求赔偿其他损失。",
+      "clause_type": "违约责任",
+      "expected_rule_ids": [
+        "NDA-R007",
+        "NDA-R008"
+      ]
+    },
+    {
+      "annotation_id": "nda-07-clause-02",
+      "contract_id": "nda-07",
+      "clause_id": "CL-002",
+      "exact_text": "2. 保密义务\n接收方不得披露保密信息。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-08-clause-01",
+      "contract_id": "nda-08",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义\n保密信息包括所有业务信息、所有技术资料以及披露方认为应保密的任何资料。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-08-clause-02",
+      "contract_id": "nda-08",
+      "clause_id": "CL-002",
+      "exact_text": "2. 允许披露\n接收方可向任何关联方和代表披露保密信息。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-09-clause-01",
+      "contract_id": "nda-09",
+      "clause_id": "CL-001",
+      "exact_text": "1. Definitions\nConfidential Information means all business information, technical materials, cooperation records and any other information received by the Receiving Party from the Disclosing Party during the project.",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-09-clause-02",
+      "contract_id": "nda-09",
+      "clause_id": "CL-002",
+      "exact_text": "2. Term\nThe confidentiality obligation will survive for 3 years after termination.",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-10-clause-01",
+      "contract_id": "nda-10",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义\n保密信息包括披露方提供的任何商业信息、技术资料和合作资料。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-10-clause-02",
+      "contract_id": "nda-10",
+      "clause_id": "CL-002",
+      "exact_text": "2. 使用限制\n接收方可以为内部商业安排使用保密信息。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-10-clause-03",
+      "contract_id": "nda-10",
+      "clause_id": "CL-003",
+      "exact_text": "3. 允许披露\n接收方可以向所有关联方、顾问和代表披露保密信息。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-10-clause-04",
+      "contract_id": "nda-10",
+      "clause_id": "CL-004",
+      "exact_text": "4. 违约责任\n违约方应赔偿守约方全部损失和间接损失。",
+      "clause_type": "违约责任",
+      "expected_rule_ids": [
+        "NDA-R007",
+        "NDA-R008"
+      ]
+    },
+    {
+      "annotation_id": "nda-11-clause-01",
+      "contract_id": "nda-11",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义（第11号保密协议）\n保密信息包括披露方提供的任何商业信息、全部技术资料及与第11号项目有关的一切信息。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-11-clause-02",
+      "contract_id": "nda-11",
+      "clause_id": "CL-002",
+      "exact_text": "2. 例外\n本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。",
+      "clause_type": "例外",
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
+    },
+    {
+      "annotation_id": "nda-11-clause-03",
+      "contract_id": "nda-11",
+      "clause_id": "CL-003",
+      "exact_text": "3. 期限\n接收方对全部保密信息承担永久保密义务，不因第11号项目终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-11-clause-04",
+      "contract_id": "nda-11",
+      "clause_id": "CL-004",
+      "exact_text": "4. 使用限制\n接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-11-clause-05",
+      "contract_id": "nda-11",
+      "clause_id": "CL-005",
+      "exact_text": "5. 允许披露\n接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-11-clause-06",
+      "contract_id": "nda-11",
+      "clause_id": "CL-006",
+      "exact_text": "6. 保密义务\n接收方应采取与保护自身同类资料相同且不低于合理程度的保护措施。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-11-clause-07",
+      "contract_id": "nda-11",
+      "clause_id": "CL-007",
+      "exact_text": "7. 争议解决\n双方因本协议发生争议时，应先协商，协商不成提交约定仲裁机构处理。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-11-clause-08",
+      "contract_id": "nda-11",
+      "clause_id": "CL-008",
+      "exact_text": "8. 通知\n与本协议有关的通知应以书面方式发送至双方指定地址。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-11-clause-09",
+      "contract_id": "nda-11",
+      "clause_id": "CL-009",
+      "exact_text": "9. 知识产权\n披露资料的知识产权仍归原权利人所有。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-11-clause-10",
+      "contract_id": "nda-11",
+      "clause_id": "CL-010",
+      "exact_text": "10. 权利保留\n资料提供不构成专利、商标或著作权许可。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-11-clause-11",
+      "contract_id": "nda-11",
+      "clause_id": "CL-011",
+      "exact_text": "11. 适用法律\n本协议适用中华人民共和国法律。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-11-clause-12",
+      "contract_id": "nda-11",
+      "clause_id": "CL-012",
+      "exact_text": "12. 转让\n未经另一方书面同意，任何一方不得转让本协议项下权利义务。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-11-clause-13",
+      "contract_id": "nda-11",
+      "clause_id": "CL-013",
+      "exact_text": "13. 完整协议\n本协议构成双方关于第11号项目保密事项的完整约定。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-11-clause-14",
+      "contract_id": "nda-11",
+      "clause_id": "CL-014",
+      "exact_text": "14. 可分割性\n任何条款无效不影响其他条款的效力。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-11-clause-15",
+      "contract_id": "nda-11",
+      "clause_id": "CL-015",
+      "exact_text": "15. 生效\n本协议自双方授权代表签署之日起生效。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-12-clause-01",
+      "contract_id": "nda-12",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义（第12号保密协议）\n保密信息包括披露方提供的任何经营数据、全部技术文件及与第12号项目有关的一切材料。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-12-clause-02",
+      "contract_id": "nda-12",
+      "clause_id": "CL-002",
+      "exact_text": "2. 例外\n本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。",
+      "clause_type": "例外",
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
+    },
+    {
+      "annotation_id": "nda-12-clause-03",
+      "contract_id": "nda-12",
+      "clause_id": "CL-003",
+      "exact_text": "3. 期限\n接收方对全部保密信息承担永久保密义务，不因第12号项目终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-12-clause-04",
+      "contract_id": "nda-12",
+      "clause_id": "CL-004",
+      "exact_text": "4. 使用限制\n接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-12-clause-05",
+      "contract_id": "nda-12",
+      "clause_id": "CL-005",
+      "exact_text": "5. 允许披露\n接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-12-clause-06",
+      "contract_id": "nda-12",
+      "clause_id": "CL-006",
+      "exact_text": "6. 保密义务\n接收方应采取与保护自身同类资料相同且不低于合理程度的保护措施。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-12-clause-07",
+      "contract_id": "nda-12",
+      "clause_id": "CL-007",
+      "exact_text": "7. 争议解决\n双方因本协议发生争议时，应先协商，协商不成提交约定仲裁机构处理。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-12-clause-08",
+      "contract_id": "nda-12",
+      "clause_id": "CL-008",
+      "exact_text": "8. 通知\n与本协议有关的通知应以书面方式发送至双方指定地址。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-12-clause-09",
+      "contract_id": "nda-12",
+      "clause_id": "CL-009",
+      "exact_text": "9. 知识产权\n披露资料的知识产权仍归原权利人所有。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-12-clause-10",
+      "contract_id": "nda-12",
+      "clause_id": "CL-010",
+      "exact_text": "10. 权利保留\n资料提供不构成专利、商标或著作权许可。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-12-clause-11",
+      "contract_id": "nda-12",
+      "clause_id": "CL-011",
+      "exact_text": "11. 适用法律\n本协议适用中华人民共和国法律。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-12-clause-12",
+      "contract_id": "nda-12",
+      "clause_id": "CL-012",
+      "exact_text": "12. 转让\n未经另一方书面同意，任何一方不得转让本协议项下权利义务。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-12-clause-13",
+      "contract_id": "nda-12",
+      "clause_id": "CL-013",
+      "exact_text": "13. 完整协议\n本协议构成双方关于第12号项目保密事项的完整约定。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-12-clause-14",
+      "contract_id": "nda-12",
+      "clause_id": "CL-014",
+      "exact_text": "14. 可分割性\n任何条款无效不影响其他条款的效力。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-12-clause-15",
+      "contract_id": "nda-12",
+      "clause_id": "CL-015",
+      "exact_text": "15. 生效\n本协议自双方授权代表签署之日起生效。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-13-clause-01",
+      "contract_id": "nda-13",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义（第13号保密协议）\n保密信息包括披露方提供的任何客户信息、全部研发资料及与第13号项目有关的一切记录。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-13-clause-02",
+      "contract_id": "nda-13",
+      "clause_id": "CL-002",
+      "exact_text": "2. 例外\n本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。",
+      "clause_type": "例外",
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
+    },
+    {
+      "annotation_id": "nda-13-clause-03",
+      "contract_id": "nda-13",
+      "clause_id": "CL-003",
+      "exact_text": "3. 期限\n接收方对全部保密信息承担永久保密义务，不因第13号项目终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-13-clause-04",
+      "contract_id": "nda-13",
+      "clause_id": "CL-004",
+      "exact_text": "4. 使用限制\n接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-13-clause-05",
+      "contract_id": "nda-13",
+      "clause_id": "CL-005",
+      "exact_text": "5. 允许披露\n接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-13-clause-06",
+      "contract_id": "nda-13",
+      "clause_id": "CL-006",
+      "exact_text": "6. 保密义务\n接收方应采取与保护自身同类资料相同且不低于合理程度的保护措施。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-13-clause-07",
+      "contract_id": "nda-13",
+      "clause_id": "CL-007",
+      "exact_text": "7. 争议解决\n双方因本协议发生争议时，应先协商，协商不成提交约定仲裁机构处理。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-13-clause-08",
+      "contract_id": "nda-13",
+      "clause_id": "CL-008",
+      "exact_text": "8. 通知\n与本协议有关的通知应以书面方式发送至双方指定地址。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-13-clause-09",
+      "contract_id": "nda-13",
+      "clause_id": "CL-009",
+      "exact_text": "9. 知识产权\n披露资料的知识产权仍归原权利人所有。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-13-clause-10",
+      "contract_id": "nda-13",
+      "clause_id": "CL-010",
+      "exact_text": "10. 权利保留\n资料提供不构成专利、商标或著作权许可。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-13-clause-11",
+      "contract_id": "nda-13",
+      "clause_id": "CL-011",
+      "exact_text": "11. 适用法律\n本协议适用中华人民共和国法律。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-13-clause-12",
+      "contract_id": "nda-13",
+      "clause_id": "CL-012",
+      "exact_text": "12. 转让\n未经另一方书面同意，任何一方不得转让本协议项下权利义务。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-13-clause-13",
+      "contract_id": "nda-13",
+      "clause_id": "CL-013",
+      "exact_text": "13. 完整协议\n本协议构成双方关于第13号项目保密事项的完整约定。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-13-clause-14",
+      "contract_id": "nda-13",
+      "clause_id": "CL-014",
+      "exact_text": "14. 可分割性\n任何条款无效不影响其他条款的效力。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-13-clause-15",
+      "contract_id": "nda-13",
+      "clause_id": "CL-015",
+      "exact_text": "15. 生效\n本协议自双方授权代表签署之日起生效。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-14-clause-01",
+      "contract_id": "nda-14",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义（第14号保密协议）\n保密信息包括披露方提供的任何财务信息、全部产品资料及与第14号项目有关的一切信息。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-14-clause-02",
+      "contract_id": "nda-14",
+      "clause_id": "CL-002",
+      "exact_text": "2. 例外\n本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。",
+      "clause_type": "例外",
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
+    },
+    {
+      "annotation_id": "nda-14-clause-03",
+      "contract_id": "nda-14",
+      "clause_id": "CL-003",
+      "exact_text": "3. 期限\n接收方对全部保密信息承担永久保密义务，不因第14号项目终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-14-clause-04",
+      "contract_id": "nda-14",
+      "clause_id": "CL-004",
+      "exact_text": "4. 使用限制\n接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-14-clause-05",
+      "contract_id": "nda-14",
+      "clause_id": "CL-005",
+      "exact_text": "5. 允许披露\n接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-14-clause-06",
+      "contract_id": "nda-14",
+      "clause_id": "CL-006",
+      "exact_text": "6. 保密义务\n接收方应采取与保护自身同类资料相同且不低于合理程度的保护措施。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-14-clause-07",
+      "contract_id": "nda-14",
+      "clause_id": "CL-007",
+      "exact_text": "7. 争议解决\n双方因本协议发生争议时，应先协商，协商不成提交约定仲裁机构处理。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-14-clause-08",
+      "contract_id": "nda-14",
+      "clause_id": "CL-008",
+      "exact_text": "8. 通知\n与本协议有关的通知应以书面方式发送至双方指定地址。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-14-clause-09",
+      "contract_id": "nda-14",
+      "clause_id": "CL-009",
+      "exact_text": "9. 知识产权\n披露资料的知识产权仍归原权利人所有。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-14-clause-10",
+      "contract_id": "nda-14",
+      "clause_id": "CL-010",
+      "exact_text": "10. 权利保留\n资料提供不构成专利、商标或著作权许可。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-14-clause-11",
+      "contract_id": "nda-14",
+      "clause_id": "CL-011",
+      "exact_text": "11. 适用法律\n本协议适用中华人民共和国法律。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-14-clause-12",
+      "contract_id": "nda-14",
+      "clause_id": "CL-012",
+      "exact_text": "12. 转让\n未经另一方书面同意，任何一方不得转让本协议项下权利义务。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-14-clause-13",
+      "contract_id": "nda-14",
+      "clause_id": "CL-013",
+      "exact_text": "13. 完整协议\n本协议构成双方关于第14号项目保密事项的完整约定。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-14-clause-14",
+      "contract_id": "nda-14",
+      "clause_id": "CL-014",
+      "exact_text": "14. 可分割性\n任何条款无效不影响其他条款的效力。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-14-clause-15",
+      "contract_id": "nda-14",
+      "clause_id": "CL-015",
+      "exact_text": "15. 生效\n本协议自双方授权代表签署之日起生效。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-15-clause-01",
+      "contract_id": "nda-15",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义（第15号保密协议）\n保密信息包括披露方提供的任何市场信息、全部设计资料及与第15号项目有关的一切内容。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-15-clause-02",
+      "contract_id": "nda-15",
+      "clause_id": "CL-002",
+      "exact_text": "2. 例外\n本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。",
+      "clause_type": "例外",
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
+    },
+    {
+      "annotation_id": "nda-15-clause-03",
+      "contract_id": "nda-15",
+      "clause_id": "CL-003",
+      "exact_text": "3. 期限\n接收方对全部保密信息承担永久保密义务，不因第15号项目终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-15-clause-04",
+      "contract_id": "nda-15",
+      "clause_id": "CL-004",
+      "exact_text": "4. 使用限制\n接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-15-clause-05",
+      "contract_id": "nda-15",
+      "clause_id": "CL-005",
+      "exact_text": "5. 允许披露\n接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-15-clause-06",
+      "contract_id": "nda-15",
+      "clause_id": "CL-006",
+      "exact_text": "6. 保密义务\n接收方应采取与保护自身同类资料相同且不低于合理程度的保护措施。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-15-clause-07",
+      "contract_id": "nda-15",
+      "clause_id": "CL-007",
+      "exact_text": "7. 争议解决\n双方因本协议发生争议时，应先协商，协商不成提交约定仲裁机构处理。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-15-clause-08",
+      "contract_id": "nda-15",
+      "clause_id": "CL-008",
+      "exact_text": "8. 通知\n与本协议有关的通知应以书面方式发送至双方指定地址。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-15-clause-09",
+      "contract_id": "nda-15",
+      "clause_id": "CL-009",
+      "exact_text": "9. 知识产权\n披露资料的知识产权仍归原权利人所有。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-15-clause-10",
+      "contract_id": "nda-15",
+      "clause_id": "CL-010",
+      "exact_text": "10. 权利保留\n资料提供不构成专利、商标或著作权许可。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-15-clause-11",
+      "contract_id": "nda-15",
+      "clause_id": "CL-011",
+      "exact_text": "11. 适用法律\n本协议适用中华人民共和国法律。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-15-clause-12",
+      "contract_id": "nda-15",
+      "clause_id": "CL-012",
+      "exact_text": "12. 转让\n未经另一方书面同意，任何一方不得转让本协议项下权利义务。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-15-clause-13",
+      "contract_id": "nda-15",
+      "clause_id": "CL-013",
+      "exact_text": "13. 完整协议\n本协议构成双方关于第15号项目保密事项的完整约定。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-15-clause-14",
+      "contract_id": "nda-15",
+      "clause_id": "CL-014",
+      "exact_text": "14. 可分割性\n任何条款无效不影响其他条款的效力。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-15-clause-15",
+      "contract_id": "nda-15",
+      "clause_id": "CL-015",
+      "exact_text": "15. 生效\n本协议自双方授权代表签署之日起生效。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-16-clause-01",
+      "contract_id": "nda-16",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义（第16号保密协议）\n保密信息包括披露方提供的任何供应信息、全部工艺资料及与第16号项目有关的一切数据。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-16-clause-02",
+      "contract_id": "nda-16",
+      "clause_id": "CL-002",
+      "exact_text": "2. 例外\n本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。",
+      "clause_type": "例外",
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
+    },
+    {
+      "annotation_id": "nda-16-clause-03",
+      "contract_id": "nda-16",
+      "clause_id": "CL-003",
+      "exact_text": "3. 期限\n接收方对全部保密信息承担永久保密义务，不因第16号项目终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-16-clause-04",
+      "contract_id": "nda-16",
+      "clause_id": "CL-004",
+      "exact_text": "4. 使用限制\n接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-16-clause-05",
+      "contract_id": "nda-16",
+      "clause_id": "CL-005",
+      "exact_text": "5. 允许披露\n接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-16-clause-06",
+      "contract_id": "nda-16",
+      "clause_id": "CL-006",
+      "exact_text": "6. 保密义务\n接收方应采取与保护自身同类资料相同且不低于合理程度的保护措施。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-16-clause-07",
+      "contract_id": "nda-16",
+      "clause_id": "CL-007",
+      "exact_text": "7. 争议解决\n双方因本协议发生争议时，应先协商，协商不成提交约定仲裁机构处理。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-16-clause-08",
+      "contract_id": "nda-16",
+      "clause_id": "CL-008",
+      "exact_text": "8. 通知\n与本协议有关的通知应以书面方式发送至双方指定地址。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-16-clause-09",
+      "contract_id": "nda-16",
+      "clause_id": "CL-009",
+      "exact_text": "9. 知识产权\n披露资料的知识产权仍归原权利人所有。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-16-clause-10",
+      "contract_id": "nda-16",
+      "clause_id": "CL-010",
+      "exact_text": "10. 权利保留\n资料提供不构成专利、商标或著作权许可。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-16-clause-11",
+      "contract_id": "nda-16",
+      "clause_id": "CL-011",
+      "exact_text": "11. 适用法律\n本协议适用中华人民共和国法律。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-16-clause-12",
+      "contract_id": "nda-16",
+      "clause_id": "CL-012",
+      "exact_text": "12. 转让\n未经另一方书面同意，任何一方不得转让本协议项下权利义务。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-16-clause-13",
+      "contract_id": "nda-16",
+      "clause_id": "CL-013",
+      "exact_text": "13. 完整协议\n本协议构成双方关于第16号项目保密事项的完整约定。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-16-clause-14",
+      "contract_id": "nda-16",
+      "clause_id": "CL-014",
+      "exact_text": "14. 可分割性\n任何条款无效不影响其他条款的效力。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-16-clause-15",
+      "contract_id": "nda-16",
+      "clause_id": "CL-015",
+      "exact_text": "15. 生效\n本协议自双方授权代表签署之日起生效。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-17-clause-01",
+      "contract_id": "nda-17",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义（第17号保密协议）\n保密信息包括披露方提供的任何价格信息、全部算法资料及与第17号项目有关的一切文档。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-17-clause-02",
+      "contract_id": "nda-17",
+      "clause_id": "CL-002",
+      "exact_text": "2. 例外\n本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。",
+      "clause_type": "例外",
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
+    },
+    {
+      "annotation_id": "nda-17-clause-03",
+      "contract_id": "nda-17",
+      "clause_id": "CL-003",
+      "exact_text": "3. 期限\n接收方对全部保密信息承担永久保密义务，不因第17号项目终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-17-clause-04",
+      "contract_id": "nda-17",
+      "clause_id": "CL-004",
+      "exact_text": "4. 使用限制\n接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-17-clause-05",
+      "contract_id": "nda-17",
+      "clause_id": "CL-005",
+      "exact_text": "5. 允许披露\n接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-17-clause-06",
+      "contract_id": "nda-17",
+      "clause_id": "CL-006",
+      "exact_text": "6. 保密义务\n接收方应采取与保护自身同类资料相同且不低于合理程度的保护措施。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-17-clause-07",
+      "contract_id": "nda-17",
+      "clause_id": "CL-007",
+      "exact_text": "7. 争议解决\n双方因本协议发生争议时，应先协商，协商不成提交约定仲裁机构处理。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-17-clause-08",
+      "contract_id": "nda-17",
+      "clause_id": "CL-008",
+      "exact_text": "8. 通知\n与本协议有关的通知应以书面方式发送至双方指定地址。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-17-clause-09",
+      "contract_id": "nda-17",
+      "clause_id": "CL-009",
+      "exact_text": "9. 知识产权\n披露资料的知识产权仍归原权利人所有。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-17-clause-10",
+      "contract_id": "nda-17",
+      "clause_id": "CL-010",
+      "exact_text": "10. 权利保留\n资料提供不构成专利、商标或著作权许可。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-17-clause-11",
+      "contract_id": "nda-17",
+      "clause_id": "CL-011",
+      "exact_text": "11. 适用法律\n本协议适用中华人民共和国法律。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-17-clause-12",
+      "contract_id": "nda-17",
+      "clause_id": "CL-012",
+      "exact_text": "12. 转让\n未经另一方书面同意，任何一方不得转让本协议项下权利义务。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-17-clause-13",
+      "contract_id": "nda-17",
+      "clause_id": "CL-013",
+      "exact_text": "13. 完整协议\n本协议构成双方关于第17号项目保密事项的完整约定。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-17-clause-14",
+      "contract_id": "nda-17",
+      "clause_id": "CL-014",
+      "exact_text": "14. 可分割性\n任何条款无效不影响其他条款的效力。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-17-clause-15",
+      "contract_id": "nda-17",
+      "clause_id": "CL-015",
+      "exact_text": "15. 生效\n本协议自双方授权代表签署之日起生效。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-18-clause-01",
+      "contract_id": "nda-18",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义（第18号保密协议）\n保密信息包括披露方提供的任何渠道信息、全部测试资料及与第18号项目有关的一切成果。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-18-clause-02",
+      "contract_id": "nda-18",
+      "clause_id": "CL-002",
+      "exact_text": "2. 例外\n本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。",
+      "clause_type": "例外",
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
+    },
+    {
+      "annotation_id": "nda-18-clause-03",
+      "contract_id": "nda-18",
+      "clause_id": "CL-003",
+      "exact_text": "3. 期限\n接收方对全部保密信息承担永久保密义务，不因第18号项目终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-18-clause-04",
+      "contract_id": "nda-18",
+      "clause_id": "CL-004",
+      "exact_text": "4. 使用限制\n接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-18-clause-05",
+      "contract_id": "nda-18",
+      "clause_id": "CL-005",
+      "exact_text": "5. 允许披露\n接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-18-clause-06",
+      "contract_id": "nda-18",
+      "clause_id": "CL-006",
+      "exact_text": "6. 保密义务\n接收方应采取与保护自身同类资料相同且不低于合理程度的保护措施。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-18-clause-07",
+      "contract_id": "nda-18",
+      "clause_id": "CL-007",
+      "exact_text": "7. 争议解决\n双方因本协议发生争议时，应先协商，协商不成提交约定仲裁机构处理。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-18-clause-08",
+      "contract_id": "nda-18",
+      "clause_id": "CL-008",
+      "exact_text": "8. 通知\n与本协议有关的通知应以书面方式发送至双方指定地址。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-18-clause-09",
+      "contract_id": "nda-18",
+      "clause_id": "CL-009",
+      "exact_text": "9. 知识产权\n披露资料的知识产权仍归原权利人所有。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-18-clause-10",
+      "contract_id": "nda-18",
+      "clause_id": "CL-010",
+      "exact_text": "10. 权利保留\n资料提供不构成专利、商标或著作权许可。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-18-clause-11",
+      "contract_id": "nda-18",
+      "clause_id": "CL-011",
+      "exact_text": "11. 适用法律\n本协议适用中华人民共和国法律。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-18-clause-12",
+      "contract_id": "nda-18",
+      "clause_id": "CL-012",
+      "exact_text": "12. 转让\n未经另一方书面同意，任何一方不得转让本协议项下权利义务。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-18-clause-13",
+      "contract_id": "nda-18",
+      "clause_id": "CL-013",
+      "exact_text": "13. 完整协议\n本协议构成双方关于第18号项目保密事项的完整约定。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-18-clause-14",
+      "contract_id": "nda-18",
+      "clause_id": "CL-014",
+      "exact_text": "14. 可分割性\n任何条款无效不影响其他条款的效力。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-18-clause-15",
+      "contract_id": "nda-18",
+      "clause_id": "CL-015",
+      "exact_text": "15. 生效\n本协议自双方授权代表签署之日起生效。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-19-clause-01",
+      "contract_id": "nda-19",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义（第19号保密协议）\n保密信息包括披露方提供的任何战略信息、全部源代码资料及与第19号项目有关的一切记录。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-19-clause-02",
+      "contract_id": "nda-19",
+      "clause_id": "CL-002",
+      "exact_text": "2. 例外\n本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。",
+      "clause_type": "例外",
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
+    },
+    {
+      "annotation_id": "nda-19-clause-03",
+      "contract_id": "nda-19",
+      "clause_id": "CL-003",
+      "exact_text": "3. 期限\n接收方对全部保密信息承担永久保密义务，不因第19号项目终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-19-clause-04",
+      "contract_id": "nda-19",
+      "clause_id": "CL-004",
+      "exact_text": "4. 使用限制\n接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-19-clause-05",
+      "contract_id": "nda-19",
+      "clause_id": "CL-005",
+      "exact_text": "5. 允许披露\n接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-19-clause-06",
+      "contract_id": "nda-19",
+      "clause_id": "CL-006",
+      "exact_text": "6. 保密义务\n接收方应采取与保护自身同类资料相同且不低于合理程度的保护措施。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-19-clause-07",
+      "contract_id": "nda-19",
+      "clause_id": "CL-007",
+      "exact_text": "7. 争议解决\n双方因本协议发生争议时，应先协商，协商不成提交约定仲裁机构处理。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-19-clause-08",
+      "contract_id": "nda-19",
+      "clause_id": "CL-008",
+      "exact_text": "8. 通知\n与本协议有关的通知应以书面方式发送至双方指定地址。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-19-clause-09",
+      "contract_id": "nda-19",
+      "clause_id": "CL-009",
+      "exact_text": "9. 知识产权\n披露资料的知识产权仍归原权利人所有。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-19-clause-10",
+      "contract_id": "nda-19",
+      "clause_id": "CL-010",
+      "exact_text": "10. 权利保留\n资料提供不构成专利、商标或著作权许可。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-19-clause-11",
+      "contract_id": "nda-19",
+      "clause_id": "CL-011",
+      "exact_text": "11. 适用法律\n本协议适用中华人民共和国法律。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-19-clause-12",
+      "contract_id": "nda-19",
+      "clause_id": "CL-012",
+      "exact_text": "12. 转让\n未经另一方书面同意，任何一方不得转让本协议项下权利义务。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-19-clause-13",
+      "contract_id": "nda-19",
+      "clause_id": "CL-013",
+      "exact_text": "13. 完整协议\n本协议构成双方关于第19号项目保密事项的完整约定。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-19-clause-14",
+      "contract_id": "nda-19",
+      "clause_id": "CL-014",
+      "exact_text": "14. 可分割性\n任何条款无效不影响其他条款的效力。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-19-clause-15",
+      "contract_id": "nda-19",
+      "clause_id": "CL-015",
+      "exact_text": "15. 生效\n本协议自双方授权代表签署之日起生效。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-20-clause-01",
+      "contract_id": "nda-20",
+      "clause_id": "CL-001",
+      "exact_text": "1. 定义（第20号保密协议）\n保密信息包括披露方提供的任何合作信息、全部模型资料及与第20号项目有关的一切文件。",
+      "clause_type": "定义",
+      "expected_rule_ids": [
+        "NDA-R001"
+      ]
+    },
+    {
+      "annotation_id": "nda-20-clause-02",
+      "contract_id": "nda-20",
+      "clause_id": "CL-002",
+      "exact_text": "2. 例外\n本协议未设置公开信息、事先知悉、第三方合法取得或独立开发等保密信息例外。",
+      "clause_type": "例外",
+      "expected_rule_ids": [
+        "NDA-R002"
+      ]
+    },
+    {
+      "annotation_id": "nda-20-clause-03",
+      "contract_id": "nda-20",
+      "clause_id": "CL-003",
+      "exact_text": "3. 期限\n接收方对全部保密信息承担永久保密义务，不因第20号项目终止而解除。",
+      "clause_type": "期限",
+      "expected_rule_ids": [
+        "NDA-R003"
+      ]
+    },
+    {
+      "annotation_id": "nda-20-clause-04",
+      "contract_id": "nda-20",
+      "clause_id": "CL-004",
+      "exact_text": "4. 使用限制\n接收方可以基于自身内部业务目的使用保密信息，具体使用范围不受限制。",
+      "clause_type": "使用限制",
+      "expected_rule_ids": [
+        "NDA-R004"
+      ]
+    },
+    {
+      "annotation_id": "nda-20-clause-05",
+      "contract_id": "nda-20",
+      "clause_id": "CL-005",
+      "exact_text": "5. 允许披露\n接收方可以向全部员工、关联方、顾问和代表披露保密信息，无需核实知悉必要性。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
+    },
+    {
+      "annotation_id": "nda-20-clause-06",
+      "contract_id": "nda-20",
+      "clause_id": "CL-006",
+      "exact_text": "6. 保密义务\n接收方应采取与保护自身同类资料相同且不低于合理程度的保护措施。",
+      "clause_type": "保密义务",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-20-clause-07",
+      "contract_id": "nda-20",
+      "clause_id": "CL-007",
+      "exact_text": "7. 争议解决\n双方因本协议发生争议时，应先协商，协商不成提交约定仲裁机构处理。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-20-clause-08",
+      "contract_id": "nda-20",
+      "clause_id": "CL-008",
+      "exact_text": "8. 通知\n与本协议有关的通知应以书面方式发送至双方指定地址。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-20-clause-09",
+      "contract_id": "nda-20",
+      "clause_id": "CL-009",
+      "exact_text": "9. 知识产权\n披露资料的知识产权仍归原权利人所有。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-20-clause-10",
+      "contract_id": "nda-20",
+      "clause_id": "CL-010",
+      "exact_text": "10. 权利保留\n资料提供不构成专利、商标或著作权许可。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-20-clause-11",
+      "contract_id": "nda-20",
+      "clause_id": "CL-011",
+      "exact_text": "11. 适用法律\n本协议适用中华人民共和国法律。",
+      "clause_type": "争议解决",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-20-clause-12",
+      "contract_id": "nda-20",
+      "clause_id": "CL-012",
+      "exact_text": "12. 转让\n未经另一方书面同意，任何一方不得转让本协议项下权利义务。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-20-clause-13",
+      "contract_id": "nda-20",
+      "clause_id": "CL-013",
+      "exact_text": "13. 完整协议\n本协议构成双方关于第20号项目保密事项的完整约定。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-20-clause-14",
+      "contract_id": "nda-20",
+      "clause_id": "CL-014",
+      "exact_text": "14. 可分割性\n任何条款无效不影响其他条款的效力。",
+      "clause_type": "其他",
+      "expected_rule_ids": []
+    },
+    {
+      "annotation_id": "nda-20-clause-15",
+      "contract_id": "nda-20",
+      "clause_id": "CL-015",
+      "exact_text": "15. 生效\n本协议自双方授权代表签署之日起生效。",
+      "clause_type": "允许披露",
+      "expected_rule_ids": [
+        "NDA-R005"
+      ]
     }
   ]
 }

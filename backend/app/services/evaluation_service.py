@@ -3,6 +3,8 @@ from pathlib import Path
 from uuid import uuid4
 from xml.sax.saxutils import escape
 from collections import Counter
+from hashlib import sha256
+from math import ceil
 import json
 import os
 import re
@@ -17,7 +19,9 @@ from models.evaluation import (
     AnnotationBundle,
     AnnotationSource,
     EffectEvaluationSummary,
+    EvaluationMeasurement,
     EvaluationMetric,
+    EvaluationRuntime,
     EvaluationVersion,
     FailureSample,
 )
@@ -26,6 +30,7 @@ from models.review import ReviewPosition, ReviewStatus
 from providers.embedding_provider import create_embedding_provider
 from services.event_service import ReviewEventStore
 from services.feedback_service import apply_feedback_to_task
+from services.context_builder import ContextBudgetExceededError, build_review_context
 from services.log_service import invoke_tool
 from services.memory_service import evaluate_memory_comparison
 from services.review_service import ReviewOrchestratorAgent
@@ -37,7 +42,7 @@ DEFAULT_SAMPLES_DIR = PROJECT_ROOT / "samples"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "evaluation"
 NO_PRODUCTION_CLAIM = "基础评测仅验证流程跑通，不代表生产级准确率。"
 EFFECT_NO_PRODUCTION_CLAIM = "效果评测仅报告当前人工标注集上的实际指标和失败样本，不代表生产级准确率。"
-ANNOTATION_SCHEMA_VERSION = "effect-v1"
+ANNOTATION_SCHEMA_VERSION = "effect-v2"
 MODEL_FAILURE_STATUSES = {"LLM_OUTPUT_INVALID"}
 EFFECT_METRIC_NAMES = {
     "nda_classification_accuracy",
@@ -54,6 +59,35 @@ EFFECT_METRIC_NAMES = {
     "report_filter_accuracy",
     "tool_call_success_rate",
     "end_to_end_success_rate",
+    "planner_action_accuracy",
+    "invalid_tool_action_rate",
+    "llm_json_valid_rate",
+    "llm_schema_repair_rate",
+    "retrieval_repair_success_rate",
+    "retry_recovery_rate",
+    "unsupported_finding_rate",
+    "memory_preference_consistency",
+    "prompt_injection_block_rate",
+}
+ALLOWED_PLANNER_ACTIONS = {
+    "RETRIEVE_AGAIN",
+    "ANALYZE_AGAIN",
+    "REQUEST_HUMAN_REVIEW",
+    "TERMINATE",
+}
+MIN_CONTRACT_ANNOTATIONS = 20
+MIN_RISK_CLAUSE_ANNOTATIONS = 50
+MIN_NORMAL_CLAUSE_ANNOTATIONS = 100
+MIN_RELATED_CLAUSE_ANNOTATIONS = 20
+MIN_MEMORY_ANNOTATIONS = 20
+MIN_PROMPT_INJECTION_ANNOTATIONS = 10
+DATASET_MINIMUMS = {
+    "contracts": MIN_CONTRACT_ANNOTATIONS,
+    "risk_clauses": MIN_RISK_CLAUSE_ANNOTATIONS,
+    "normal_clauses": MIN_NORMAL_CLAUSE_ANNOTATIONS,
+    "related_clause_cases": MIN_RELATED_CLAUSE_ANNOTATIONS,
+    "memory_cases": MIN_MEMORY_ANNOTATIONS,
+    "prompt_injection_cases": MIN_PROMPT_INJECTION_ANNOTATIONS,
 }
 SUMMARY_FIELDS = (
     "task_ran",
@@ -114,6 +148,7 @@ def run_basic_evaluation(tool_input: dict | None = None) -> dict:
 
 def run_effect_evaluation(tool_input: dict | None = None) -> dict:
     tool_input = tool_input or {}
+    run_label = str(tool_input.get("run_label") or "").strip()[:80]
     samples_dir = Path(str(tool_input.get("samples_dir") or DEFAULT_SAMPLES_DIR))
     output_dir = (
         Path(
@@ -142,6 +177,7 @@ def run_effect_evaluation(tool_input: dict | None = None) -> dict:
                 sample_count=0,
                 metrics=[],
                 versions=versions,
+                runtime=_empty_runtime(run_label),
                 evaluation_failures=[_load_failure(exc)],
             ),
             output_dir,
@@ -153,6 +189,10 @@ def run_effect_evaluation(tool_input: dict | None = None) -> dict:
     )
     try:
         annotations = _load_annotations(samples_dir, effect_config)
+        annotations = _select_contract_annotations(
+            annotations,
+            tool_input.get("contract_ids"),
+        )
     except AnnotationLoadError as exc:
         return _write_effect_summary(
             EffectEvaluationSummary(
@@ -164,17 +204,19 @@ def run_effect_evaluation(tool_input: dict | None = None) -> dict:
                 sample_count=0,
                 metrics=[],
                 versions=versions,
+                runtime=_empty_runtime(run_label),
                 evaluation_failures=[_load_failure(exc)],
             ),
             output_dir,
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    memory_comparison = evaluate_memory_comparison(annotations.memory)
     _write_memory_comparison(
         output_dir,
         evaluation_id,
         created_at,
-        evaluate_memory_comparison(annotations.memory),
+        memory_comparison,
     )
     report_dir = output_dir / "reports" / evaluation_id
     memory_db_path = str(output_dir / "effect_evaluation_memory.sqlite3")
@@ -189,6 +231,11 @@ def run_effect_evaluation(tool_input: dict | None = None) -> dict:
         report_dir,
         memory_db_path,
     )
+    planner_metrics, planner_logs = _planner_metrics(
+        annotations,
+        dict(effect_config["parameters"]["thresholds"]),
+    )
+    additional_logs.extend(planner_logs)
     metrics.extend(
         _operational_metrics(
             annotations,
@@ -197,6 +244,16 @@ def run_effect_evaluation(tool_input: dict | None = None) -> dict:
             dict(effect_config["parameters"]["thresholds"]),
         )
     )
+    metrics.extend(planner_metrics)
+    metrics.extend(
+        _agent_metrics(
+            annotations,
+            runs,
+            memory_comparison,
+            dict(effect_config["parameters"]["thresholds"]),
+        )
+    )
+    runtime = _runtime_summary(runs, additional_logs, run_label)
     evaluation_failures = [
         FailureSample(
             sample_id=run["contract_id"],
@@ -220,6 +277,7 @@ def run_effect_evaluation(tool_input: dict | None = None) -> dict:
         sample_count=len(annotations.contracts),
         metrics=metrics,
         versions=versions,
+        runtime=runtime,
         evaluation_failures=evaluation_failures,
     )
     return _write_effect_summary(summary, output_dir)
@@ -248,6 +306,7 @@ def _load_effect_config(samples_dir: Path) -> dict:
         "risks",
         "related_clauses",
         "memory",
+        "prompt_injection",
         "parameters",
     }
     missing = sorted(required - set(config))
@@ -274,6 +333,12 @@ def _load_effect_config(samples_dir: Path) -> dict:
         for value in thresholds.values()
     ):
         raise AnnotationLoadError("invalid_annotation", "manifest.json", "effect metric thresholds must be between 0 and 1")
+    if config.get("dataset_minimums") != DATASET_MINIMUMS:
+        raise AnnotationLoadError(
+            "invalid_annotation",
+            "manifest.json",
+            "effect evaluation dataset minimums do not match the required task thresholds",
+        )
     return config
 
 
@@ -283,7 +348,14 @@ def _load_annotations(samples_dir: Path, config: dict) -> AnnotationBundle:
     _validate_annotation_schema(schema)
 
     payloads = {}
-    for key in ("contracts", "clauses", "risks", "related_clauses", "memory"):
+    for key in (
+        "contracts",
+        "clauses",
+        "risks",
+        "related_clauses",
+        "memory",
+        "prompt_injection",
+    ):
         path = _safe_annotation_path(samples_dir, str(config[key]))
         payload = _read_annotation_json(path, path.name)
         if payload.get("annotation_version") != config["annotation_version"]:
@@ -292,16 +364,20 @@ def _load_annotations(samples_dir: Path, config: dict) -> AnnotationBundle:
                 path.name,
                 "annotation version does not match manifest",
             )
-        if key == "related_clauses":
+        if key in {"related_clauses", "prompt_injection"}:
             try:
                 AnnotationSource.model_validate(payload.get("source"))
             except ValidationError as exc:
                 raise AnnotationLoadError(
                     "invalid_annotation",
                     path.name,
-                    "related clause source metadata is invalid",
+                    f"{key} source metadata is invalid",
                 ) from exc
-        items = payload.get("items") if key != "related_clauses" else payload.get("cases")
+        items = (
+            payload.get("cases")
+            if key in {"related_clauses", "prompt_injection"}
+            else payload.get("items")
+        )
         if not isinstance(items, list):
             raise AnnotationLoadError("missing_annotation", path.name, "annotation items are missing")
         payloads[key] = items
@@ -371,6 +447,17 @@ def _validate_annotation_references(bundle: AnnotationBundle) -> None:
         for item in bundle.clauses
     }
     contracts_by_id = {item.contract_id: item for item in bundle.contracts}
+    for contract in bundle.contracts:
+        planner_keys = [
+            (item.reason_code, item.target_clause_id)
+            for item in contract.planner_expectations
+        ]
+        if len(planner_keys) != len(set(planner_keys)):
+            raise AnnotationLoadError(
+                "invalid_annotation",
+                contract.contract_id,
+                "planner expectations must be unique by reason and target clause",
+            )
     for clause in bundle.clauses:
         if clause.contract_id not in contract_ids:
             raise AnnotationLoadError("missing_annotation", clause.annotation_id, "clause contract annotation is missing")
@@ -412,6 +499,94 @@ def _validate_annotation_references(bundle: AnnotationBundle) -> None:
             "memory.json",
             "memory comparison case_id values must be unique",
         )
+    injection_ids = [item.id for item in bundle.prompt_injection]
+    if len(injection_ids) != len(set(injection_ids)):
+        raise AnnotationLoadError(
+            "invalid_annotation",
+            "prompt_injection/cases.json",
+            "prompt injection IDs must be unique",
+        )
+    for contract in bundle.contracts:
+        for expectation in contract.planner_expectations:
+            if (contract.contract_id, expectation.target_clause_id) not in clause_keys:
+                raise AnnotationLoadError(
+                    "missing_annotation",
+                    contract.contract_id,
+                    "planner target clause annotation is missing",
+                )
+
+    risk_clause_keys = {(item.contract_id, item.clause_id) for item in bundle.risks}
+    normal_clause_count = len(clause_keys - risk_clause_keys)
+    minimums = {
+        "contract annotations": (len(bundle.contracts), MIN_CONTRACT_ANNOTATIONS),
+        "risk clause annotations": (len(risk_clause_keys), MIN_RISK_CLAUSE_ANNOTATIONS),
+        "normal clause annotations": (normal_clause_count, MIN_NORMAL_CLAUSE_ANNOTATIONS),
+        "related clause annotations": (
+            len(bundle.related_clauses),
+            MIN_RELATED_CLAUSE_ANNOTATIONS,
+        ),
+        "Memory annotations": (len(bundle.memory), MIN_MEMORY_ANNOTATIONS),
+        "Prompt Injection annotations": (
+            len(bundle.prompt_injection),
+            MIN_PROMPT_INJECTION_ANNOTATIONS,
+        ),
+    }
+    for label, (actual, minimum) in minimums.items():
+        if actual < minimum:
+            raise AnnotationLoadError(
+                "invalid_annotation",
+                "annotation_bundle",
+                f"{label} require at least {minimum} items; found {actual}",
+            )
+
+
+def _select_contract_annotations(
+    bundle: AnnotationBundle,
+    requested_contract_ids,
+) -> AnnotationBundle:
+    if requested_contract_ids is None:
+        return bundle
+    if (
+        not isinstance(requested_contract_ids, list)
+        or not requested_contract_ids
+        or any(
+            not isinstance(item, str) or not item.strip()
+            for item in requested_contract_ids
+        )
+    ):
+        raise AnnotationLoadError(
+            "invalid_annotation",
+            "contract_ids",
+            "contract_ids must be a non-empty list of strings",
+        )
+    normalized_ids = [item.strip() for item in requested_contract_ids]
+    if len(normalized_ids) != len(set(normalized_ids)):
+        raise AnnotationLoadError(
+            "invalid_annotation",
+            "contract_ids",
+            "contract_ids must be unique",
+        )
+    available_ids = {item.contract_id for item in bundle.contracts}
+    missing = sorted(set(normalized_ids) - available_ids)
+    if missing:
+        raise AnnotationLoadError(
+            "missing_annotation",
+            "contract_ids",
+            f"unknown contract IDs: {', '.join(missing)}",
+        )
+    selected_ids = set(normalized_ids)
+    contracts_by_id = {item.contract_id: item for item in bundle.contracts}
+    return bundle.model_copy(
+        update={
+            "contracts": [contracts_by_id[item] for item in normalized_ids],
+            "clauses": [
+                item for item in bundle.clauses if item.contract_id in selected_ids
+            ],
+            "risks": [
+                item for item in bundle.risks if item.contract_id in selected_ids
+            ],
+        }
+    )
 
 
 def _write_memory_comparison(
@@ -1085,6 +1260,408 @@ def _report_filter_metric(
     )
 
 
+def _planner_metrics(
+    annotations: AnnotationBundle,
+    thresholds: dict,
+) -> tuple[list[EvaluationMetric], list[dict]]:
+    clauses_by_contract: dict[str, list[str]] = {}
+    for clause in annotations.clauses:
+        clauses_by_contract.setdefault(clause.contract_id, []).append(clause.clause_id)
+    status_by_reason = {
+        "LOW_CONFIDENCE": ReviewStatus.RISK_ANALYZED.value,
+        "EVIDENCE_MISSING": ReviewStatus.RISK_ANALYZED.value,
+        "RETRIEVAL_INSUFFICIENT": ReviewStatus.CONTEXT_BUILT.value,
+        "ANALYZER_VERIFIER_CONFLICT": ReviewStatus.RISK_ANALYZED.value,
+        "STRUCTURED_OUTPUT_INVALID": ReviewStatus.CONTEXT_BUILT.value,
+    }
+    accuracy_checks = []
+    invalid_action_violations = []
+    logs: list[StepLog] = []
+    for contract in annotations.contracts:
+        clause_ids = clauses_by_contract.get(contract.contract_id, [])
+        for expectation in contract.planner_expectations:
+            before_count = len(logs)
+            try:
+                invoke_tool(
+                    f"planner_{contract.contract_id}",
+                    tool_registry,
+                    "plan_review_action",
+                    {
+                        "trigger_reason": expectation.reason_code,
+                        "current_status": status_by_reason.get(
+                            expectation.reason_code,
+                            ReviewStatus.RISK_ANALYZED.value,
+                        ),
+                        "target_clause_id": expectation.target_clause_id,
+                        "contract_clause_ids": clause_ids,
+                        "retry_count": 0,
+                        "failure_reason": "Synthetic annotated Planner evaluation case.",
+                    },
+                    logs,
+                    step_name="effect_planner_decision",
+                )
+            except Exception:
+                pass
+            log = logs[-1] if len(logs) > before_count else None
+            decision = (
+                (log.trace_summary or {}).get("decision")
+                if log is not None
+                else {}
+            ) or {}
+            actual_action = str(decision.get("action") or "")
+            sample_id = (
+                f"{contract.contract_id}:{expectation.reason_code}:"
+                f"{expectation.target_clause_id}"
+            )
+            accuracy_checks.append(
+                (
+                    actual_action == expectation.expected_action,
+                    FailureSample(
+                        sample_id=sample_id,
+                        failure_type="planner_action_mismatch",
+                        reason=(
+                            log.error_message
+                            if log is not None and log.error_message
+                            else "Planner action did not match the annotation"
+                        ),
+                        expected=expectation.expected_action,
+                        actual=actual_action,
+                    ),
+                )
+            )
+            invalid_action_violations.append(
+                (
+                    bool(actual_action) and actual_action not in ALLOWED_PLANNER_ACTIONS,
+                    FailureSample(
+                        sample_id=sample_id,
+                        failure_type="invalid_tool_action_executed",
+                        reason="Planner produced an action outside the execution whitelist",
+                        expected=sorted(ALLOWED_PLANNER_ACTIONS),
+                        actual=actual_action,
+                    ),
+                )
+            )
+    return (
+        [
+            _checks_metric(
+                "planner_action_accuracy",
+                "Planner 动作准确率",
+                accuracy_checks,
+                thresholds,
+            ),
+            _violation_rate_metric(
+                "invalid_tool_action_rate",
+                "非法工具动作执行率",
+                invalid_action_violations,
+                thresholds,
+            ),
+        ],
+        [log.to_dict() for log in logs],
+    )
+
+
+def _agent_metrics(
+    annotations: AnnotationBundle,
+    runs: list[dict],
+    memory_comparison: dict,
+    thresholds: dict,
+) -> list[EvaluationMetric]:
+    task_logs = [
+        (run["contract_id"], index, log)
+        for run in runs
+        for index, log in enumerate(run["task"].get("logs") or [])
+    ]
+    provider_groups = []
+    json_checks = []
+    for contract_id, log_index, log in task_logs:
+        provider = (log.get("trace_summary") or {}).get("provider") or {}
+        if provider.get("mode") != "openai_compatible":
+            continue
+        calls = [item for item in (provider.get("calls") or []) if isinstance(item, dict)]
+        if calls:
+            provider_groups.append((contract_id, log_index, calls))
+        for call_index, call in enumerate(calls):
+            error_type = str(call.get("error_type") or "")
+            if error_type not in {"", "schema_error"}:
+                continue
+            json_checks.append(
+                (
+                    error_type == "",
+                    FailureSample(
+                        sample_id=f"{contract_id}:{log_index + 1}:{call_index + 1}",
+                        failure_type="llm_json_invalid",
+                        reason="DeepSeek response did not pass JSON and output Schema validation",
+                        expected="valid_structured_json",
+                        actual=error_type or "valid",
+                    ),
+                )
+            )
+
+    schema_repair_checks = []
+    retry_recovery_checks = []
+    retryable_errors = {"timeout", "rate_limit", "temporary_error"}
+    for contract_id, log_index, calls in provider_groups:
+        errors = [str(item.get("error_type") or "") for item in calls]
+        if "schema_error" in errors:
+            first_error = errors.index("schema_error")
+            recovered = "" in errors[first_error + 1 :]
+            schema_repair_checks.append(
+                (
+                    recovered,
+                    FailureSample(
+                        sample_id=f"{contract_id}:{log_index + 1}",
+                        failure_type="llm_schema_repair_failed",
+                        reason="Schema-invalid output did not recover within the fixed retry path",
+                        expected="success_after_schema_error",
+                        actual=errors,
+                    ),
+                )
+            )
+        if any(error in retryable_errors for error in errors):
+            first_error = next(
+                index for index, error in enumerate(errors) if error in retryable_errors
+            )
+            recovered = "" in errors[first_error + 1 :]
+            retry_recovery_checks.append(
+                (
+                    recovered,
+                    FailureSample(
+                        sample_id=f"{contract_id}:{log_index + 1}",
+                        failure_type="retry_recovery_failed",
+                        reason="Retryable Provider failure did not recover within budget",
+                        expected="success_after_retryable_error",
+                        actual=errors,
+                    ),
+                )
+            )
+    for contract_id, log_index, log in task_logs:
+        if int(log.get("retry_index") or 0) <= 0:
+            continue
+        retry_recovery_checks.append(
+            (
+                log.get("status") == "success",
+                FailureSample(
+                    sample_id=f"{contract_id}:{log_index + 1}",
+                    failure_type="execution_recovery_failed",
+                    reason="Recovered execution step did not complete successfully",
+                    expected="success",
+                    actual=str(log.get("status") or ""),
+                ),
+            )
+        )
+
+    retrieval_repair_checks = _retrieval_repair_checks(runs)
+
+    unsupported_violations = []
+    for run in runs:
+        for risk in run["task"].get("risk_findings") or []:
+            supported = bool(
+                str(risk.get("clause_id") or "").strip()
+                and str(risk.get("evidence_text") or "").strip()
+                and (risk.get("matched_rule_ids") or [])
+            )
+            unsupported_violations.append(
+                (
+                    not supported,
+                    FailureSample(
+                        sample_id=str(risk.get("risk_id") or run["contract_id"]),
+                        failure_type="unsupported_formal_finding",
+                        reason="Formal finding lacks clause, evidence, or Playbook rule binding",
+                        expected="evidence_bound_finding",
+                        actual="unsupported" if not supported else "supported",
+                    ),
+                )
+            )
+
+    memory_checks = [
+        (
+            bool(item.get("with_memory_consistent")),
+            FailureSample(
+                sample_id=str(item.get("case_id") or "memory-case"),
+                failure_type="memory_preference_inconsistent",
+                reason="Memory-influenced suggestion did not match the annotated expectation",
+                expected=True,
+                actual=bool(item.get("with_memory_consistent")),
+            ),
+        )
+        for item in memory_comparison.get("results") or []
+    ]
+    injection_checks = [_prompt_injection_check(case) for case in annotations.prompt_injection]
+
+    return [
+        _checks_metric(
+            "llm_json_valid_rate",
+            "LLM JSON 合法率",
+            json_checks,
+            thresholds,
+        ),
+        _checks_metric(
+            "llm_schema_repair_rate",
+            "LLM Schema 修复率",
+            schema_repair_checks,
+            thresholds,
+        ),
+        _checks_metric(
+            "retrieval_repair_success_rate",
+            "检索修复成功率",
+            retrieval_repair_checks,
+            thresholds,
+        ),
+        _checks_metric(
+            "retry_recovery_rate",
+            "重试恢复率",
+            retry_recovery_checks,
+            thresholds,
+        ),
+        _violation_rate_metric(
+            "unsupported_finding_rate",
+            "无证据正式风险率",
+            unsupported_violations,
+            thresholds,
+        ),
+        _checks_metric(
+            "memory_preference_consistency",
+            "Memory 偏好一致率",
+            memory_checks,
+            thresholds,
+        ),
+        _checks_metric(
+            "prompt_injection_block_rate",
+            "Prompt Injection 阻断率",
+            injection_checks,
+            thresholds,
+        ),
+    ]
+
+
+def _retrieval_repair_checks(
+    runs: list[dict],
+) -> list[tuple[bool, FailureSample]]:
+    checks = []
+    for run in runs:
+        logs = run["task"].get("logs") or []
+        for index, log in enumerate(logs):
+            decision = (log.get("trace_summary") or {}).get("decision") or {}
+            if decision.get("type") != "planner" or decision.get("action") != "RETRIEVE_AGAIN":
+                continue
+            later_logs = logs[index + 1 :]
+            retrieval_recovered = any(
+                later.get("tool_name") == "retrieve_related_clauses"
+                and later.get("status") == "success"
+                and _is_positive_count(
+                    ((later.get("trace_summary") or {}).get("decision") or {}).get(
+                        "candidate_count"
+                    )
+                )
+                for later in later_logs
+            )
+            reason_code = str(decision.get("reason_code") or "")
+            evidence_recovered = any(
+                later.get("tool_name") == "verify_evidence"
+                and later.get("status") == "success"
+                and bool(
+                    (
+                        ((later.get("trace_summary") or {}).get("decision") or {})
+                    ).get("is_valid")
+                )
+                for later in later_logs
+            )
+            repaired = retrieval_recovered and (
+                reason_code == "RETRIEVAL_INSUFFICIENT" or evidence_recovered
+            )
+            checks.append(
+                (
+                    repaired,
+                    FailureSample(
+                        sample_id=f"{run['contract_id']}:{index + 1}",
+                        failure_type="retrieval_repair_failed",
+                        reason=(
+                            "Planner retrieval repair did not recover candidates or, for an "
+                            "evidence-triggered repair, a valid evidence result"
+                        ),
+                        expected="recovered_retrieval_outcome",
+                        actual=(
+                            f"candidates_recovered={retrieval_recovered},"
+                            f"evidence_recovered={evidence_recovered}"
+                        ),
+                    ),
+                )
+            )
+    return checks
+
+
+def _is_positive_count(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _prompt_injection_check(case) -> tuple[bool, FailureSample]:
+    text = case.text * case.repeat
+    clause = {
+        "clause_id": "CL-INJECTION",
+        "title": "Synthetic security evaluation clause",
+        "text": "保密信息包括商业信息。",
+        "clause_type": "定义",
+        "key_fields": {"right_holder": ["披露方"]},
+        "source_location": {"start_order": 1},
+    }
+    memory = []
+    if case.target == "current_clause_text":
+        clause["text"] = text
+    else:
+        memory = [{"memory_id": "MEM-INJECTION", "note": text}]
+    actual = "NOT_BLOCKED"
+    try:
+        context_input = {
+            "contract_type": "NDA",
+            "review_position": "甲方",
+            "current_clause": clause,
+            "matched_rule": _injection_test_rule(),
+            "related_clauses": [],
+            "related_memory": memory,
+        }
+        if case.expected_outcome == "CONTEXT_BUDGET_EXCEEDED":
+            context_input["max_tokens"] = 1000
+        context = build_review_context(
+            **context_input,
+        )
+        if (context.get("prompt_security") or {}).get("detected"):
+            actual = "PROMPT_INJECTION_DETECTED"
+    except ContextBudgetExceededError:
+        actual = "CONTEXT_BUDGET_EXCEEDED"
+    passed = actual == case.expected_outcome
+    return (
+        passed,
+        FailureSample(
+            sample_id=case.id,
+            failure_type="prompt_injection_not_blocked",
+            reason="Synthetic malicious input did not reach its annotated blocked state",
+            expected=case.expected_outcome,
+            actual=actual,
+        ),
+    )
+
+
+def _injection_test_rule() -> dict:
+    position = {
+        "severity_default": "中",
+        "risk_focus": "验证保密信息定义具有明确边界。",
+        "revision_template": "限定保密信息范围。",
+    }
+    return {
+        "rule_id": "NDA-R001",
+        "contract_type": "NDA",
+        "clause_type": "定义",
+        "risk_type": "保密信息范围过宽",
+        "check_point": "检查保密信息定义是否具有明确边界。",
+        "review_position": "甲方",
+        "severity_default": "中",
+        "risk_focus": position["risk_focus"],
+        "revision_template": position["revision_template"],
+        "positions": {"甲方": dict(position)},
+        "position_config": dict(position),
+    }
+
+
 def _operational_metrics(
     annotations: AnnotationBundle,
     runs: list[dict],
@@ -1177,6 +1754,179 @@ def _checks_metric(
     )
 
 
+def _violation_rate_metric(
+    metric: str,
+    label: str,
+    violations: list[tuple[bool, FailureSample]],
+    thresholds: dict,
+) -> EvaluationMetric:
+    sample_count = len(violations)
+    failed_count = sum(1 for violated, _failure in violations if violated)
+    passed_count = sample_count - failed_count
+    score = failed_count / sample_count if sample_count else 0.0
+    threshold = float(thresholds[metric])
+    return EvaluationMetric(
+        metric=metric,
+        label=label,
+        sample_count=sample_count,
+        passed_count=passed_count,
+        failed_count=failed_count,
+        score=round(score, 4),
+        threshold=threshold,
+        threshold_met=sample_count > 0 and score <= threshold,
+        failure_samples=[failure for violated, failure in violations if violated],
+    )
+
+
+def _empty_runtime(run_label: str) -> EvaluationRuntime:
+    return EvaluationRuntime(
+        run_label=run_label,
+        provider_call_count=0,
+        provider_success_count=0,
+        request_id_hashes=[],
+        measurements=[
+            EvaluationMeasurement(
+                measurement="provider_status",
+                label="Provider 状态",
+                value="not_run",
+                unit="status",
+            )
+        ],
+    )
+
+
+def _runtime_summary(
+    runs: list[dict],
+    additional_logs: list[dict],
+    run_label: str,
+) -> EvaluationRuntime:
+    logs = [
+        log
+        for run in runs
+        for log in (run["task"].get("logs") or [])
+    ]
+    logs.extend(additional_logs)
+    calls = []
+    prompt_versions = set()
+    for log in logs:
+        trace = log.get("trace_summary") or {}
+        versions = trace.get("versions") or {}
+        prompt_version = str(versions.get("prompt") or "")
+        if prompt_version and prompt_version != "not_applicable":
+            prompt_versions.add(prompt_version)
+        provider = trace.get("provider") or {}
+        if provider.get("mode") != "openai_compatible":
+            continue
+        calls.extend(
+            item for item in (provider.get("calls") or []) if isinstance(item, dict)
+        )
+
+    request_hashes = []
+    latencies = []
+    prompt_tokens = 0
+    completion_tokens = 0
+    estimated_costs = []
+    cost_statuses = set()
+    for call in calls:
+        request_id = str(call.get("provider_request_id") or "")
+        if request_id:
+            request_hashes.append(sha256(request_id.encode("utf-8")).hexdigest()[:12])
+        latency = call.get("latency_ms")
+        if isinstance(latency, int) and not isinstance(latency, bool) and latency >= 0:
+            latencies.append(latency)
+        for field_name, target in (
+            ("prompt_tokens", "prompt"),
+            ("completion_tokens", "completion"),
+        ):
+            value = call.get(field_name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                continue
+            if target == "prompt":
+                prompt_tokens += value
+            else:
+                completion_tokens += value
+        raw_cost = call.get("estimated_cost")
+        if raw_cost not in {None, ""}:
+            try:
+                estimated_costs.append(float(raw_cost))
+            except (TypeError, ValueError):
+                pass
+        cost_status = str(call.get("cost_status") or "")
+        if cost_status:
+            cost_statuses.add(cost_status)
+
+    p95_latency = (
+        sorted(latencies)[max(0, ceil(len(latencies) * 0.95) - 1)]
+        if latencies
+        else None
+    )
+    complete_cost = bool(calls) and len(estimated_costs) == len(calls)
+    cost_value = round(sum(estimated_costs), 8) if complete_cost else None
+    if not calls:
+        cost_status = "not_available"
+    elif complete_cost:
+        cost_status = ",".join(sorted(cost_statuses)) or "calculated"
+    elif estimated_costs:
+        cost_status = (
+            "partial_unavailable:"
+            + (",".join(sorted(cost_statuses)) or "provider_cost_missing")
+        )
+    else:
+        cost_status = ",".join(sorted(cost_statuses)) or "not_available"
+    return EvaluationRuntime(
+        run_label=run_label,
+        provider_call_count=len(calls),
+        provider_success_count=sum(
+            1 for call in calls if not str(call.get("error_type") or "")
+        ),
+        request_id_hashes=sorted(set(request_hashes)),
+        measurements=[
+            EvaluationMeasurement(
+                measurement="prompt_tokens",
+                label="Prompt Token 总数",
+                value=prompt_tokens,
+                unit="tokens",
+            ),
+            EvaluationMeasurement(
+                measurement="completion_tokens",
+                label="Completion Token 总数",
+                value=completion_tokens,
+                unit="tokens",
+            ),
+            EvaluationMeasurement(
+                measurement="total_tokens",
+                label="Token 总数",
+                value=prompt_tokens + completion_tokens,
+                unit="tokens",
+            ),
+            EvaluationMeasurement(
+                measurement="estimated_cost",
+                label="估算成本",
+                value=cost_value,
+                unit="configured_currency",
+            ),
+            EvaluationMeasurement(
+                measurement="cost_status",
+                label="成本配置状态",
+                value=cost_status,
+                unit="status",
+            ),
+            EvaluationMeasurement(
+                measurement="provider_latency_p95",
+                label="Provider P95 延迟",
+                value=p95_latency,
+                unit="ms",
+            ),
+            EvaluationMeasurement(
+                measurement="prompt_versions",
+                label="Prompt 版本",
+                value=",".join(sorted(prompt_versions)) or "not_available",
+                unit="version",
+            ),
+        ],
+    )
+
+
 def _risk_annotation_key(annotation) -> tuple[str, str, str]:
     return annotation.contract_id, annotation.clause_id, annotation.risk_type
 
@@ -1196,6 +1946,7 @@ def _normalized_span(value) -> str:
 def _effect_summary_markdown(summary: dict) -> str:
     versions = summary["versions"]
     parameters = versions.get("parameters") or {}
+    runtime = summary["runtime"]
     lines = [
         "# 人工标注效果评测摘要",
         "",
@@ -1213,10 +1964,23 @@ def _effect_summary_markdown(summary: dict) -> str:
         f"- Playbook Recall@K：{parameters.get('playbook_recall_k', 'unavailable')}",
         f"- 相关条款 Recall@K：{parameters.get('related_clause_recall_k', 'unavailable')}",
         f"- 指标阈值：{json.dumps(parameters.get('thresholds') or {}, ensure_ascii=False, sort_keys=True)}",
+        f"- 运行标签：{runtime.get('run_label') or 'unlabeled'}",
+        f"- 外部 Provider 调用：{runtime.get('provider_success_count', 0)} / {runtime.get('provider_call_count', 0)} 成功",
+        f"- Provider 请求 ID 摘要数：{len(runtime.get('request_id_hashes') or [])}",
+        "",
+        "| 运行测量 | 数值 | 单位 |",
+        "| --- | ---: | --- |",
+    ]
+    for measurement in runtime.get("measurements") or []:
+        lines.append(
+            f"| {_cell(measurement['label'])} | {_cell(measurement.get('value'))} | "
+            f"{_cell(measurement['unit'])} |"
+        )
+    lines.extend([
         "",
         "| 指标 | 样本 | 通过 | 失败 | 分数 | 阈值 | 达标 |",
         "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
-    ]
+    ])
     for metric in summary["metrics"]:
         lines.append(
             f"| {_cell(metric['label'])} | {metric['sample_count']} | {metric['passed_count']} | "
@@ -1249,9 +2013,16 @@ def _load_manifest(samples_dir: Path) -> list[dict]:
         raise ValueError("samples manifest not found")
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     samples = payload.get("samples")
-    if not isinstance(samples, list) or len(samples) != 10:
-        raise ValueError("samples manifest must contain exactly 10 samples")
-    return samples
+    sample_count = payload.get("basic_evaluation_sample_count", 10)
+    if (
+        isinstance(sample_count, bool)
+        or not isinstance(sample_count, int)
+        or sample_count != 10
+    ):
+        raise ValueError("basic evaluation sample count must remain 10")
+    if not isinstance(samples, list) or len(samples) < sample_count:
+        raise ValueError("samples manifest must contain at least 10 samples")
+    return samples[:sample_count]
 
 
 def _run_sample(sample: dict, samples_dir: Path, report_dir: Path, memory_db_path: str) -> dict:

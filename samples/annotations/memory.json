@@ -1,5 +1,5 @@
 {
-  "annotation_version": "effect-v1",
+  "annotation_version": "effect-v2",
   "items": [
     {
       "case_id": "memory-aligned-improves-001",
@@ -102,6 +102,390 @@
       "source": {
         "source_type": "synthetic",
         "note": "Synthetic expired feedback fixture for Memory lifecycle testing."
+      }
+    },
+    {
+      "case_id": "memory-expanded-005",
+      "contract_type": "NDA",
+      "clause_type": "definition",
+      "risk_type": "broad_definition",
+      "review_position": "party_a",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use the standard Playbook wording.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-005",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use conflicting preference wording 5.",
+          "created_at": "2026-06-06T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-006",
+      "contract_type": "NDA",
+      "clause_type": "exception",
+      "risk_type": "missing_exceptions",
+      "review_position": "party_b",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use annotated preference wording 6.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-006",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use annotated preference wording 6.",
+          "created_at": "2026-06-07T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-007",
+      "contract_type": "NDA",
+      "clause_type": "confidentiality_term",
+      "risk_type": "unreasonable_term",
+      "review_position": "party_a",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use the standard Playbook wording.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-007",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use conflicting preference wording 7.",
+          "created_at": "2026-06-08T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-008",
+      "contract_type": "NDA",
+      "clause_type": "use_restriction",
+      "risk_type": "unclear_use_restriction",
+      "review_position": "party_b",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use annotated preference wording 8.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-008",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use annotated preference wording 8.",
+          "created_at": "2026-06-09T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-009",
+      "contract_type": "NDA",
+      "clause_type": "permitted_disclosure",
+      "risk_type": "broad_permitted_disclosure",
+      "review_position": "party_a",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use the standard Playbook wording.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-009",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use conflicting preference wording 9.",
+          "created_at": "2026-06-10T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-010",
+      "contract_type": "NDA",
+      "clause_type": "definition",
+      "risk_type": "broad_definition",
+      "review_position": "party_b",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use annotated preference wording 10.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-010",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use annotated preference wording 10.",
+          "created_at": "2026-06-11T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-011",
+      "contract_type": "NDA",
+      "clause_type": "exception",
+      "risk_type": "missing_exceptions",
+      "review_position": "party_a",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use the standard Playbook wording.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-011",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use conflicting preference wording 11.",
+          "created_at": "2026-06-12T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-012",
+      "contract_type": "NDA",
+      "clause_type": "confidentiality_term",
+      "risk_type": "unreasonable_term",
+      "review_position": "party_b",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use annotated preference wording 12.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-012",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use annotated preference wording 12.",
+          "created_at": "2026-06-13T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-013",
+      "contract_type": "NDA",
+      "clause_type": "use_restriction",
+      "risk_type": "unclear_use_restriction",
+      "review_position": "party_a",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use the standard Playbook wording.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-013",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use conflicting preference wording 13.",
+          "created_at": "2026-06-14T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-014",
+      "contract_type": "NDA",
+      "clause_type": "permitted_disclosure",
+      "risk_type": "broad_permitted_disclosure",
+      "review_position": "party_b",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use annotated preference wording 14.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-014",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use annotated preference wording 14.",
+          "created_at": "2026-06-15T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-015",
+      "contract_type": "NDA",
+      "clause_type": "definition",
+      "risk_type": "broad_definition",
+      "review_position": "party_a",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use the standard Playbook wording.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-015",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use conflicting preference wording 15.",
+          "created_at": "2026-06-16T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-016",
+      "contract_type": "NDA",
+      "clause_type": "exception",
+      "risk_type": "missing_exceptions",
+      "review_position": "party_b",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use annotated preference wording 16.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-016",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use annotated preference wording 16.",
+          "created_at": "2026-06-17T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-017",
+      "contract_type": "NDA",
+      "clause_type": "confidentiality_term",
+      "risk_type": "unreasonable_term",
+      "review_position": "party_a",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use the standard Playbook wording.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-017",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use conflicting preference wording 17.",
+          "created_at": "2026-06-18T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-018",
+      "contract_type": "NDA",
+      "clause_type": "use_restriction",
+      "risk_type": "unclear_use_restriction",
+      "review_position": "party_b",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use annotated preference wording 18.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-018",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use annotated preference wording 18.",
+          "created_at": "2026-06-19T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-019",
+      "contract_type": "NDA",
+      "clause_type": "permitted_disclosure",
+      "risk_type": "broad_permitted_disclosure",
+      "review_position": "party_a",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use the standard Playbook wording.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-019",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use conflicting preference wording 19.",
+          "created_at": "2026-06-20T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
+      }
+    },
+    {
+      "case_id": "memory-expanded-020",
+      "contract_type": "NDA",
+      "clause_type": "definition",
+      "risk_type": "broad_definition",
+      "review_position": "party_b",
+      "baseline_suggestion": "Use the standard Playbook wording.",
+      "expected_suggestion": "Use annotated preference wording 20.",
+      "evaluation_time": "2026-07-01T00:00:00+00:00",
+      "stale_after_days": 365,
+      "episodes": [
+        {
+          "memory_id": "MEM-ANN-020",
+          "user_action": "update_suggestion",
+          "final_severity": "medium",
+          "final_suggestion": "Use annotated preference wording 20.",
+          "created_at": "2026-06-01T00:00:00+00:00"
+        }
+      ],
+      "source": {
+        "source_type": "synthetic",
+        "note": "Synthetic Memory comparison fixture; no customer feedback is used."
       }
     }
   ]

@@ -18,6 +18,23 @@ class AnnotationSource(StrictModel):
     note: str = Field(min_length=1)
 
 
+class PlannerExpectation(StrictModel):
+    reason_code: Literal[
+        "LOW_CONFIDENCE",
+        "EVIDENCE_MISSING",
+        "RETRIEVAL_INSUFFICIENT",
+        "ANALYZER_VERIFIER_CONFLICT",
+        "STRUCTURED_OUTPUT_INVALID",
+    ]
+    target_clause_id: str = Field(min_length=1)
+    expected_action: Literal[
+        "RETRIEVE_AGAIN",
+        "ANALYZE_AGAIN",
+        "REQUEST_HUMAN_REVIEW",
+        "TERMINATE",
+    ]
+
+
 class ContractAnnotation(StrictModel):
     contract_id: str = Field(min_length=1)
     file: str = Field(min_length=1)
@@ -26,6 +43,7 @@ class ContractAnnotation(StrictModel):
     expected_decision: str = Field(min_length=1)
     expected_terminal_status: str = Field(min_length=1)
     manual_review_expected: bool
+    planner_expectations: list[PlannerExpectation] = Field(default_factory=list)
     source: AnnotationSource
 
 
@@ -123,15 +141,35 @@ class MemoryComparisonAnnotation(StrictModel):
         return values
 
 
+class PromptInjectionAnnotation(StrictModel):
+    id: str = Field(min_length=1)
+    category: Literal[
+        "prompt_injection",
+        "forged_system_message",
+        "forged_tool_result",
+        "tool_instruction",
+        "output_override",
+        "oversized_untrusted_text",
+    ]
+    target: Literal["current_clause_text", "memory_note"]
+    text: str = Field(min_length=1)
+    repeat: int = Field(gt=0)
+    expected_outcome: Literal[
+        "PROMPT_INJECTION_DETECTED",
+        "CONTEXT_BUDGET_EXCEEDED",
+    ]
+
+
 class AnnotationBundle(StrictModel):
     model_config = ConfigDict(extra="forbid", title="EffectAnnotationBundle")
 
-    schema_version: Literal["effect-v1"]
+    schema_version: Literal["effect-v2"]
     contracts: list[ContractAnnotation] = Field(min_length=1)
     clauses: list[ClauseAnnotation] = Field(min_length=1)
     risks: list[RiskAnnotation] = Field(min_length=1)
     related_clauses: list[RelatedClauseAnnotation] = Field(min_length=1)
     memory: list[MemoryComparisonAnnotation] = Field(min_length=1)
+    prompt_injection: list[PromptInjectionAnnotation] = Field(min_length=1)
 
 
 class FailureSample(StrictModel):
@@ -166,6 +204,21 @@ class EvaluationVersion(StrictModel):
     parameters: dict
 
 
+class EvaluationMeasurement(StrictModel):
+    measurement: str
+    label: str
+    value: int | float | str | None
+    unit: str
+
+
+class EvaluationRuntime(StrictModel):
+    run_label: str
+    provider_call_count: int = Field(ge=0)
+    provider_success_count: int = Field(ge=0)
+    request_id_hashes: list[str]
+    measurements: list[EvaluationMeasurement]
+
+
 class EffectEvaluationSummary(StrictModel):
     evaluation_id: str
     evaluation_type: Literal["effect"]
@@ -175,6 +228,7 @@ class EffectEvaluationSummary(StrictModel):
     sample_count: int = Field(ge=0)
     metrics: list[EvaluationMetric]
     versions: EvaluationVersion
+    runtime: EvaluationRuntime
     evaluation_failures: list[FailureSample]
     summary_path: str = ""
     markdown_path: str = ""
