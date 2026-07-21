@@ -58,10 +58,11 @@ def cancel_review_task(
     state = event_store.request_cancel(task_id, normalized_reason)
     if not event_store.is_execution_active(task_id):
         state = event_store.finalize_cancel(task_id)
+    task_payload = event_store.get_task_payload(task_id) or state.to_dict()
     return {
-        "status": state.status.value,
-        "message": state.message,
-        "task": state.to_dict(),
+        "status": task_payload["status"],
+        "message": task_payload["message"],
+        "task": task_payload,
     }
 
 
@@ -91,10 +92,11 @@ def recover_review_task(
         operator_action=operator_action,
         reason=reason,
     )
+    task_payload = review_agent.event_store.get_task_payload(task_id) or state.to_dict()
     return {
-        "status": state.status.value,
-        "message": state.message,
-        "task": state.to_dict(),
+        "status": task_payload["status"],
+        "message": task_payload["message"],
+        "task": task_payload,
     }
 
 

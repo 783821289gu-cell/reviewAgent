@@ -31,6 +31,13 @@ from services.risk_critic import CriticOutputInvalidError
 from tools.registry import tool_registry
 
 
+EXECUTION_INTERRUPTS = (
+    TaskCancelledError,
+    NodeExecutionTimeoutError,
+    TaskExecutionTimeoutError,
+)
+
+
 class ReviewOrchestratorAgent:
     def __init__(
         self,
@@ -188,6 +195,7 @@ class ReviewOrchestratorAgent:
             task_started_at=perf_counter(),
             task_timeout_seconds=self.task_timeout_seconds,
             node_timeout_seconds=self.node_timeout_seconds,
+            execution_retry_index=state.recovery_count,
         )
         control_token = bind_execution_control(execution_control)
         logs = [StepLog(**item) for item in (state.logs or [])]
@@ -242,6 +250,8 @@ class ReviewOrchestratorAgent:
                         logs,
                         step_name="contract_type_classification",
                     )
+                except EXECUTION_INTERRUPTS:
+                    raise
                 except Exception as exc:
                     self.event_store.update_task(
                         task_id,
@@ -368,6 +378,8 @@ class ReviewOrchestratorAgent:
                                 "matched_rules": matched_rules,
                             }
                         )
+                except EXECUTION_INTERRUPTS:
+                    raise
                 except Exception as exc:
                     self.event_store.update_task(
                         task_id,
@@ -446,6 +458,8 @@ class ReviewOrchestratorAgent:
                                     related_memory=related_memory,
                                 )
                             )
+                except EXECUTION_INTERRUPTS:
+                    raise
                 except Exception as exc:
                     self.event_store.update_task(
                         task_id,
@@ -510,6 +524,8 @@ class ReviewOrchestratorAgent:
                         embedding_cache,
                         retrieval_repair_count,
                     )
+                except EXECUTION_INTERRUPTS:
+                    raise
                 except Exception as exc:
                     self.event_store.update_task(
                         task_id,
@@ -548,6 +564,8 @@ class ReviewOrchestratorAgent:
                             step_name="risk_analysis",
                         )
                         analysis_results.append(finding)
+                except EXECUTION_INTERRUPTS:
+                    raise
                 except Exception as exc:
                     target_context = review_context if "review_context" in locals() else None
                     if isinstance(target_context, dict):
@@ -567,6 +585,8 @@ class ReviewOrchestratorAgent:
                                 decision,
                                 _planner_retry_count(review_contexts),
                             )
+                        except EXECUTION_INTERRUPTS:
+                            raise
                         except Exception:
                             pass
                     self.event_store.update_task(
@@ -814,6 +834,8 @@ class ReviewOrchestratorAgent:
                             decision,
                             retrieval_repair_count,
                         )
+                    except EXECUTION_INTERRUPTS:
+                        raise
                     except Exception:
                         pass
                 self.event_store.update_task(
@@ -861,6 +883,8 @@ class ReviewOrchestratorAgent:
                             decision,
                             retrieval_repair_count,
                         )
+                    except EXECUTION_INTERRUPTS:
+                        raise
                     except Exception:
                         pass
                 self.event_store.update_task(
@@ -876,6 +900,8 @@ class ReviewOrchestratorAgent:
                     logs=[log.to_dict() for log in logs],
                 )
                 return
+            except EXECUTION_INTERRUPTS:
+                raise
             except Exception as exc:
                 self.event_store.update_task(
                     task_id,
@@ -930,12 +956,12 @@ class ReviewOrchestratorAgent:
                 if current is not None and current.status in RECOVERABLE_STATUS_ORDER
                 else ReviewStatus.UPLOAD_RECEIVED.value
             )
-            self.event_store.update_task(
+            self._update_terminal_or_cancel(
                 task_id,
                 ReviewStatus.NODE_TIMEOUT,
                 f"Node timeout at {exc.step_name}; manual recovery is required.",
+                logs,
                 step_name="node_timeout",
-                logs=[log.to_dict() for log in logs],
                 last_timeout={
                     "type": "node",
                     "step_name": exc.step_name,
@@ -951,12 +977,12 @@ class ReviewOrchestratorAgent:
                 if current is not None and current.status in RECOVERABLE_STATUS_ORDER
                 else ReviewStatus.UPLOAD_RECEIVED.value
             )
-            self.event_store.update_task(
+            self._update_terminal_or_cancel(
                 task_id,
                 ReviewStatus.TASK_TIMEOUT,
                 "Task execution timeout; completed results were retained for manual recovery.",
+                logs,
                 step_name="task_timeout",
-                logs=[log.to_dict() for log in logs],
                 last_timeout={
                     "type": "task",
                     "limit_seconds": self.task_timeout_seconds,
@@ -965,38 +991,26 @@ class ReviewOrchestratorAgent:
                 },
             )
         except RecoveryError as exc:
-            self.event_store.update_task(
+            self._update_terminal_or_cancel(
                 task_id,
                 ReviewStatus.NEED_MANUAL_REVIEW,
                 str(exc),
+                logs,
                 step_name="recovery_blocked",
-                logs=[log.to_dict() for log in logs],
             )
         except PdfParseError as exc:
-            self.event_store.update_task(
+            self._update_terminal_or_cancel(
                 task_id,
                 ReviewStatus.PARSE_FAILED,
                 f"PDF 解析失败：{exc}",
+                logs,
                 step_name="parse_failed",
                 tool_name="parse_document",
-                logs=[log.to_dict() for log in logs],
             )
         except ValueError:
-            self.event_store.update_task(
-                task_id,
-                ReviewStatus.PARSE_FAILED,
-                "合同解析失败，请确认文件为可读取的 DOCX 或 PDF。",
-                step_name="parse_failed",
-                logs=[log.to_dict() for log in logs],
-            )
-        except Exception as exc:
-            self.event_store.update_task(
-                task_id,
-                ReviewStatus.PARSE_FAILED,
-                f"合同处理失败：{exc}",
-                step_name="parse_failed",
-                logs=[log.to_dict() for log in logs],
-            )
+            self._record_unexpected_failure(task_id, logs)
+        except Exception:
+            self._record_unexpected_failure(task_id, logs)
         finally:
             reset_execution_control(control_token)
             self.event_store.release_execution(task_id, resolved_owner)
@@ -1006,6 +1020,49 @@ class ReviewOrchestratorAgent:
         if not self.event_store.try_acquire_execution(task_id, execution_owner):
             raise RuntimeError(f"task execution is already active: {task_id}")
         return execution_owner
+
+    def _record_unexpected_failure(self, task_id: str, logs: list[StepLog]) -> None:
+        current = self.event_store.get_task(task_id)
+        last_tool = logs[-1].tool_name if logs else ""
+        is_parse_failure = (
+            current is not None
+            and current.status in {ReviewStatus.START, ReviewStatus.UPLOAD_RECEIVED}
+            and last_tool in {"", "parse_document"}
+        )
+        self._update_terminal_or_cancel(
+            task_id,
+            ReviewStatus.PARSE_FAILED if is_parse_failure else ReviewStatus.TASK_ERROR,
+            (
+                "合同解析失败，请确认文件为可读取的 DOCX 或 PDF。"
+                if is_parse_failure
+                else "任务执行发生未分类错误，需要人工恢复。"
+            ),
+            logs,
+            step_name="parse_failed" if is_parse_failure else "task_error",
+            tool_name=last_tool,
+        )
+
+    def _update_terminal_or_cancel(
+        self,
+        task_id: str,
+        status: ReviewStatus,
+        message: str,
+        logs: list[StepLog],
+        **payload,
+    ) -> AgentState:
+        try:
+            return self.event_store.update_task(
+                task_id,
+                status,
+                message,
+                logs=[log.to_dict() for log in logs],
+                **payload,
+            )
+        except TaskCancelledError:
+            return self.event_store.finalize_cancel(
+                task_id,
+                logs=[log.to_dict() for log in logs],
+            )
 
 
 review_orchestrator_agent = ReviewOrchestratorAgent()

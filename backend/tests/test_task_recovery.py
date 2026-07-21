@@ -76,6 +76,11 @@ class TaskRecoveryTest(unittest.TestCase):
         self.assertEqual(tool_names.count("parse_document"), 1)
         self.assertEqual(tool_names.count("classify_contract_type"), 1)
         self.assertEqual(tool_names.count("extract_clauses"), 1)
+        recovered_logs = [
+            log for log in task["logs"] if log["tool_name"] == "retrieve_playbook_rules"
+        ]
+        self.assertTrue(recovered_logs)
+        self.assertTrue(all(log["retry_index"] == 1 for log in recovered_logs))
         self.assertEqual(
             [event["step_name"] for event in task["events"]].count("recovery_started"),
             1,

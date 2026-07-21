@@ -45,6 +45,7 @@ class ToolExecutionControl:
     task_started_at: float
     task_timeout_seconds: float
     node_timeout_seconds: float
+    execution_retry_index: int = 0
 
     def before_step(self, step_name: str) -> None:
         self.cancel_check()
@@ -120,7 +121,7 @@ def invoke_tool(
     trace_id = trace_id_for_task(task_id)
     step_id = f"step_{uuid4().hex}"
     parent_step_id = logs[-1].step_id if logs else ""
-    retry_index = _retry_index(resolved_step_name, tool_input)
+    retry_index = _retry_index(tool_input, execution_control)
     idempotency_key = _decision_idempotency_key(
         task_id,
         tool_name,
@@ -213,11 +214,19 @@ def _elapsed_ms(start: float) -> int:
     return max(0, int((perf_counter() - start) * 1000))
 
 
-def _retry_index(step_name: str, tool_input: dict) -> int:
+def _retry_index(
+    tool_input: dict,
+    execution_control: ToolExecutionControl | None,
+) -> int:
+    execution_retry = (
+        execution_control.execution_retry_index
+        if execution_control is not None
+        else 0
+    )
     explicit_retry = tool_input.get("retry_count")
     if isinstance(explicit_retry, int) and not isinstance(explicit_retry, bool):
-        return max(0, explicit_retry)
-    return 0
+        return max(0, execution_retry, explicit_retry)
+    return max(0, execution_retry)
 
 
 def _exception_status(exc: Exception) -> str:
@@ -256,6 +265,12 @@ def _decision_idempotency_key(
         "trigger_reason": str(tool_input.get("trigger_reason", "")),
         "current_status": str(tool_input.get("current_status", "")),
         "target_clause_id": str(tool_input.get("target_clause_id", "")),
+        "failure_reason_fingerprint": _identity_digest(
+            str(tool_input.get("failure_reason", ""))
+        ),
+        "contract_clause_ids": sorted(
+            str(clause_id) for clause_id in (tool_input.get("contract_clause_ids") or [])
+        ),
         "planner_retry_count": tool_input.get("retry_count", 0),
         "current_clause_id": str(current_clause.get("clause_id", "")),
         "finding_id": str(finding.get("risk_id", "")),

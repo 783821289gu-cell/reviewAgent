@@ -55,11 +55,12 @@ def generate_task_report(
         report_file=report_file,
         logs=[log.to_dict() for log in logs],
     )
+    task_payload = event_store.get_task_payload(task_id) or updated_task.to_dict()
     return {
         "status": ReviewStatus.REPORT_READY.value,
         "message": updated_task.message,
         "report_file": report_file,
-        "task": updated_task.to_dict(),
+        "task": task_payload,
     }
 
 

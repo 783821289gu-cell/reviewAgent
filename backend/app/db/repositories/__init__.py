@@ -98,8 +98,13 @@ class ReviewPersistence:
         finally:
             connection.close()
 
-    def load_states(self) -> list[tuple[AgentState, list[dict]]]:
-        self.task_repository.clear_execution_leases()
+    def load_states(
+        self,
+        *,
+        clear_execution_leases: bool = True,
+    ) -> list[tuple[AgentState, list[dict]]]:
+        if clear_execution_leases:
+            self.task_repository.clear_execution_leases()
         persisted = []
         for task in self.task_repository.list_all():
             try:

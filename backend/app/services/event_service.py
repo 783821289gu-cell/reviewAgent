@@ -1,6 +1,7 @@
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import Condition, Lock
 from uuid import uuid4
 
@@ -227,10 +228,19 @@ class ReviewEventStore:
             return []
         loaded_states = []
         with self._condition:
+            if self._execution_owners:
+                raise RuntimeError("cannot reload persisted state while tasks are executing")
+            store_key = self._store_key()
+            with _PROCESS_EXECUTION_LOCK:
+                clear_execution_leases = not any(
+                    key[0] == store_key for key in _PROCESS_EXECUTION_OWNERS
+                )
             self._states.clear()
             self._events.clear()
             self._execution_owners.clear()
-            for state, event_payloads in self.persistence.load_states():
+            for state, event_payloads in self.persistence.load_states(
+                clear_execution_leases=clear_execution_leases,
+            ):
                 events = [
                     ReviewEvent(
                         event_id=int(payload["event_id"]),
@@ -278,7 +288,7 @@ class ReviewEventStore:
         state = self.get_task(task_id)
         if state is None:
             raise ValueError(f"task not found: {task_id}")
-        if state.status == ReviewStatus.CANCEL_REQUESTED:
+        if state.status in {ReviewStatus.CANCEL_REQUESTED, ReviewStatus.CANCELLED}:
             return state
         if state.status in TERMINAL_STATUSES:
             raise ValueError(f"task is already terminal: {state.status.value}")
@@ -412,14 +422,26 @@ class ReviewEventStore:
             return self._execution_key(task_id) in _PROCESS_EXECUTION_OWNERS
 
     def _execution_key(self, task_id: str) -> tuple[str, str]:
-        store_key = self.db_path or f"memory:{id(self)}"
-        return store_key, task_id
+        return self._store_key(), task_id
+
+    def _store_key(self) -> str:
+        if self.db_path is None:
+            return f"memory:{id(self)}"
+        return str(Path(self.db_path).resolve()).casefold()
 
     def get_task(self, task_id: str) -> AgentState | None:
         with self._condition:
             if task_id not in self._states:
                 return None
             return self._snapshot_locked(task_id)
+
+    def get_task_payload(self, task_id: str) -> dict | None:
+        with self._condition:
+            state = self._states.get(task_id)
+            if state is None:
+                return None
+            events = [event.to_dict() for event in self._events.get(task_id, [])]
+            return deepcopy(self._state_payload(state, events))
 
     def wait_for_events(self, task_id: str, next_index: int, timeout_seconds: float = 15.0) -> list[dict]:
         with self._condition:

@@ -64,19 +64,25 @@ class AgentExecutionControlTest(unittest.TestCase):
                 ReviewPosition.PARTY_A,
             )
             self.assertTrue(classifier_started.wait(timeout=3))
-            requested = cancel_review_task(
-                started.task_id,
-                "User stopped the review.",
-                self.store,
-            )
-            self.assertEqual(requested["status"], "CANCEL_REQUESTED")
-            duplicate = cancel_review_task(
-                started.task_id,
-                "Duplicate cancellation must be idempotent.",
-                self.store,
-            )
-            self.assertEqual(duplicate["status"], "CANCEL_REQUESTED")
-            release_classifier.set()
+            try:
+                requested = cancel_review_task(
+                    started.task_id,
+                    "User stopped the review.",
+                    self.store,
+                )
+                self.assertIn(requested["status"], {"CANCEL_REQUESTED", "CANCELLED"})
+                duplicate = cancel_review_task(
+                    started.task_id,
+                    "Duplicate cancellation must be idempotent.",
+                    self.store,
+                )
+                self.assertIn(duplicate["status"], {"CANCEL_REQUESTED", "CANCELLED"})
+                self.assertEqual(
+                    duplicate["task"]["cancel_reason"],
+                    "User stopped the review.",
+                )
+            finally:
+                release_classifier.set()
             final = wait_for_status(self.store, started.task_id, {ReviewStatus.CANCELLED})
 
         self.assertIsNotNone(final.document)
@@ -148,6 +154,37 @@ class AgentExecutionControlTest(unittest.TestCase):
         self.assertEqual(task_state.logs[-1]["status"], "timeout")
         self.assertEqual(task_state.retry_counts, {"task_timeout": 1})
 
+        classification_store = ReviewEventStore(
+            ReviewPersistence(
+                str(self.root / "classification-timeout.sqlite3"),
+                str(self.root / "classification-timeout-uploads"),
+            )
+        )
+        original_classifier = tool_registry["classify_contract_type"]
+
+        def slow_classifier(tool_input):
+            time.sleep(0.03)
+            return original_classifier(tool_input)
+
+        with patch.dict(tool_registry, {"classify_contract_type": slow_classifier}):
+            classification_state = ReviewOrchestratorAgent(
+                classification_store,
+                node_timeout_seconds=0.01,
+                task_timeout_seconds=1,
+            ).run_sync(
+                "classification-timeout.docx",
+                "docx",
+                self.content,
+                ReviewPosition.PARTY_A,
+            )
+
+        self.assertEqual(classification_state.status, ReviewStatus.NODE_TIMEOUT)
+        self.assertEqual(
+            classification_state.last_timeout["step_name"],
+            "contract_type_classification",
+        )
+        self.assertEqual(classification_state.logs[-1]["status"], "timeout")
+
         blocked_store = ReviewEventStore(
             ReviewPersistence(
                 str(self.root / "blocked-timeout.sqlite3"),
@@ -179,6 +216,27 @@ class AgentExecutionControlTest(unittest.TestCase):
         self.assertLess(time.perf_counter() - started_at, 0.5)
         self.assertEqual(blocked_state.status, ReviewStatus.NODE_TIMEOUT)
         self.assertEqual(blocked_state.logs[-1]["status"], "timeout")
+
+    def test_non_parse_execution_error_uses_task_error_status(self):
+        def failing_clause_extractor(tool_input):
+            raise RuntimeError("forced clause extraction failure")
+
+        with patch.dict(
+            tool_registry,
+            {"extract_clauses": failing_clause_extractor},
+        ):
+            state = ReviewOrchestratorAgent(self.store).run_sync(
+                "task-error.docx",
+                "docx",
+                self.content,
+                ReviewPosition.PARTY_A,
+            )
+
+        self.assertEqual(state.status, ReviewStatus.TASK_ERROR)
+        self.assertEqual(state.events[-1]["step_name"], "task_error")
+        self.assertEqual(state.logs[-1]["tool_name"], "extract_clauses")
+        self.assertEqual(state.logs[-1]["status"], "failed")
+        self.assertEqual(state.retry_counts, {"task": 1})
 
     def test_cancel_http_endpoint_exposes_real_terminal_state(self):
         settings = Settings(
@@ -228,7 +286,18 @@ class AgentExecutionControlTest(unittest.TestCase):
                 json={"reason": "HTTP cancellation test"},
             )
             self.assertEqual(cancelled.status_code, 200, cancelled.text)
-            self.assertEqual(cancelled.json()["status"], "CANCEL_REQUESTED")
+            self.assertEqual(
+                cancelled.json()["status"],
+                cancelled.json()["task"]["status"],
+            )
+            self.assertEqual(
+                cancelled.json()["task"]["cancel_reason"],
+                "HTTP cancellation test",
+            )
+            self.assertIn(
+                cancelled.json()["status"],
+                {"CANCEL_REQUESTED", "CANCELLED"},
+            )
             release_classifier.set()
 
             deadline = time.time() + 5
@@ -242,6 +311,7 @@ class AgentExecutionControlTest(unittest.TestCase):
 
         self.assertEqual(final["events"][-1]["step_name"], "task_cancelled")
         self.assertEqual(final["logs"][-1]["status"], "cancelled")
+        self.assertFalse(final["execution_active"])
 
     def test_manual_recovery_persists_budget_and_exhaustion_across_restart(self):
         original_parser = tool_registry["parse_document"]
@@ -286,6 +356,7 @@ class AgentExecutionControlTest(unittest.TestCase):
         self.assertEqual(second.retry_counts, {"node_timeout": 2})
         self.assertEqual(second.recovery_count, 1)
         self.assertEqual(len(second.recovery_history), 1)
+        self.assertEqual(second.logs[-1]["retry_index"], 1)
         self.assertEqual(second.recovery_history[0]["operator_action"], "qa_manual_retry")
         self.assertEqual(second.recovery_history[0]["reason"], "Retry the timed out parser once.")
 
@@ -421,6 +492,20 @@ class AgentExecutionControlTest(unittest.TestCase):
             step_name="planner_route",
         )
         self.assertEqual(first_logs[0].idempotency_key, second_logs[0].idempotency_key)
+
+        changed_planner_logs: list[StepLog] = []
+        invoke_tool(
+            state.task_id,
+            tool_registry,
+            "plan_review_action",
+            {**planner_input, "failure_reason": "evidence missing"},
+            changed_planner_logs,
+            step_name="planner_route",
+        )
+        self.assertNotEqual(
+            first_logs[0].idempotency_key,
+            changed_planner_logs[0].idempotency_key,
+        )
 
         changed_retrieval_logs: list[StepLog] = []
         base_retrieval_input = {

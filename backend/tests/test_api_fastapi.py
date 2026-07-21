@@ -44,6 +44,16 @@ TERMINAL_STATUSES = {
     "TASK_ERROR",
 }
 OBSERVABILITY_TASK_KEYS = {"trace_id", "recovery_count", "recovery_from_status"}
+RUNTIME_TASK_KEYS = {
+    "retry_counts",
+    "retry_limits",
+    "recovery_history",
+    "cancel_requested_at",
+    "cancelled_at",
+    "cancel_reason",
+    "execution_active",
+    "last_timeout",
+}
 
 
 class FastApiContractTest(unittest.TestCase):
@@ -123,7 +133,9 @@ class FastApiContractTest(unittest.TestCase):
         task = self._wait_for_terminal_task(created["task_id"])
         task_contract = self.contract["success"]["task_get"]
         self.assertEqual(
-            set(task_contract["required_keys"]) | OBSERVABILITY_TASK_KEYS,
+            set(task_contract["required_keys"])
+            | OBSERVABILITY_TASK_KEYS
+            | RUNTIME_TASK_KEYS,
             set(task),
         )
         self.assertEqual(task["trace_id"], created["trace_id"])
@@ -132,6 +144,9 @@ class FastApiContractTest(unittest.TestCase):
         self.assertEqual(len(task["clauses"]), summary["clause_count"])
         self.assertEqual(len(task["risk_findings"]), summary["risk_count"])
         self.assertEqual(len(task["logs"]), summary["log_count"])
+        self.assertFalse(task["execution_active"])
+        self.assertEqual(task["retry_counts"], {})
+        self.assertEqual(task["retry_limits"]["node_timeout"], 2)
 
         with self.client.stream("GET", f"/api/tasks/{created['task_id']}/events") as response:
             self.assertEqual(response.status_code, 200)

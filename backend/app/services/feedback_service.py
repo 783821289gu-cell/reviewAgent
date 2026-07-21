@@ -97,12 +97,13 @@ def apply_feedback_to_task(
         risk_findings=risks,
         logs=[log.to_dict() for log in logs],
     )
+    task_payload = event_store.get_task_payload(task_id) or updated_task.to_dict()
     return {
         "status": ReviewStatus.MEMORY_UPDATED.value,
         "message": updated_task.message,
         "risk": risk,
         "memory_item": memory_item,
-        "task": updated_task.to_dict(),
+        "task": task_payload,
     }
 
 

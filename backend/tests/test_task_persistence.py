@@ -141,12 +141,49 @@ class TaskPersistenceTest(unittest.TestCase):
         self.assertTrue(restarted_store.try_acquire_execution(state.task_id, "new_owner"))
         restarted_store.release_execution(state.task_id, "new_owner")
 
+    def test_competing_store_load_does_not_clear_live_execution_lease(self):
+        state = self.event_store.create_task(
+            "active.docx",
+            "docx",
+            ReviewPosition.PARTY_A,
+            content=build_docx_bytes(),
+        )
+        owner = "live_owner"
+        self.assertTrue(self.event_store.try_acquire_execution(state.task_id, owner))
+        try:
+            competing_store = ReviewEventStore(self.persistence)
+            competing_store.load_persisted()
+
+            metadata = self.persistence.task_repository.get(state.task_id)
+            self.assertEqual(metadata["execution_owner"], owner)
+            self.assertFalse(
+                competing_store.try_acquire_execution(state.task_id, "competing_owner")
+            )
+            with self.assertRaisesRegex(RuntimeError, "tasks are executing"):
+                self.event_store.load_persisted()
+        finally:
+            self.event_store.release_execution(state.task_id, owner)
+
     def test_feedback_and_report_side_effects_are_idempotent_and_persisted(self):
         state = self.agent.run_sync(
             file_name="high-risk.docx",
             file_type="docx",
             content=build_high_risk_docx_bytes(),
             review_position=ReviewPosition.PARTY_B,
+        )
+        state = self.event_store.update_task(
+            state.task_id,
+            state.status,
+            state.message,
+            step_name="test_runtime_metadata",
+            retry_counts={"task": 1},
+            recovery_history=[
+                {
+                    "operator_action": "qa_retry",
+                    "reason": "Verify response metadata retention.",
+                    "recovery_from_status": ReviewStatus.TASK_ERROR.value,
+                }
+            ],
         )
         feedback = {
             "risk_id": state.risk_findings[0]["risk_id"],
@@ -160,12 +197,16 @@ class TaskPersistenceTest(unittest.TestCase):
             first_feedback["memory_item"]["memory_id"],
             second_feedback["memory_item"]["memory_id"],
         )
+        self.assertEqual(first_feedback["task"]["retry_counts"], {"task": 1})
+        self.assertEqual(len(first_feedback["task"]["recovery_history"]), 1)
 
         with patch.object(report_service, "REPORT_DIR", self.root / "reports"):
             first_report = generate_task_report(state.task_id, self.event_store)
             second_report = generate_task_report(state.task_id, self.event_store)
 
         self.assertEqual(first_report["report_file"], second_report["report_file"])
+        self.assertEqual(first_report["task"]["retry_counts"], {"task": 1})
+        self.assertEqual(len(first_report["task"]["recovery_history"]), 1)
         self.assertEqual(len(list((self.root / "reports").glob("*.md"))), 1)
 
         connection = connect(self.db_path)

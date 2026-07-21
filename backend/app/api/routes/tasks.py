@@ -73,10 +73,10 @@ def get_task(
     task_id: str,
     event_store: ReviewEventStore = Depends(get_event_store),
 ) -> dict:
-    task = event_store.get_task(task_id)
+    task = event_store.get_task_payload(task_id)
     if task is None:
         raise ApiError(status_code=404, payload={"error": "Task not found"})
-    return task.to_dict()
+    return task
 
 
 @router.post("/api/tasks/{task_id}/cancel")

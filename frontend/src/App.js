@@ -465,12 +465,15 @@ export function renderApp(root) {
       if (!response.ok) {
         throw new Error(payload.message || "恢复任务失败");
       }
+      const recoveryComplete = TERMINAL_STATUSES.has(payload.task.status);
       setState({
         task: payload.task,
-        loading: true,
+        loading: !recoveryComplete,
         taskControl: emptyTaskControl(),
       });
-      subscribeToTaskEvents(payload.task.task_id, latestEventId(payload.task));
+      if (!recoveryComplete) {
+        subscribeToTaskEvents(payload.task.task_id, latestEventId(payload.task));
+      }
     } catch (error) {
       setState({
         taskControl: { action: "", error: error.message || "恢复任务失败" },
