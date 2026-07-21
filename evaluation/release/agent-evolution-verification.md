@@ -119,3 +119,59 @@ Code Review 使用 `local_structured + local_sparse` 对全部 23 份合同执�
 - 相关条款 Recall@1 在 20 组标注上两轮均为 `1.0`。
 - 无证据正式风险率两轮均为 `0`。
 - 两次运行都保留了模型、Prompt、Playbook、标注、代码版本、token、P95、成本状态和脱敏请求 ID 摘要，没有只保留表现更好的一轮。
+
+## 任务 10 Web 与交付验证
+
+### Code Review 结论
+
+- 验证时间：2026-07-22（Asia/Shanghai）
+- 独立 Code Review、必要修复和全量验证已完成；没有把开发者自验直接当作发布验收。
+- 本轮未调用 DeepSeek，也未产生新的外部模型效果结论；任务 9 的两次真实子集运行及其失败限制保持不变。
+- 发布目标已确认：`origin` 指向项目 GitHub 仓库。提交、推送和最终工作树状态以实际 Git 命令结果为准，本记录不预先声明发布成功。
+
+### Review 发现与修复
+
+1. 修复已成功检索重试后仍把历史 Evidence 失败显示为当前失败的问题；当前提示只依据任务最终状态。
+2. 修复历史 Critic 冲突在后续 `PASS` 或人工处理后仍持续显示的问题；当前提示依据每个上下文的最后一次 Critic 决策和未解决风险。
+3. `CANCEL_REQUESTED` 与 `CANCELLED` 改为分别显示“取消请求已提交”和“任务已取消”，不再把请求阶段伪装成终态。
+4. 检索修复和 Memory 只统计成功工具调用；失败调用单独显示失败数，不再计为成功读写或成功修复。
+5. Provider 全部失败时显示“DeepSeek 调用失败”，不再显示“真实调用成功”；真实调用文案要求至少一次 Provider 成功。
+6. README 补充真实上下文预算、节点/任务超时和错误分类重试上限，避免只描述能力而省略运行边界。
+
+### 实际运行结果
+
+| 验证项 | 命令/范围 | 结果 |
+| --- | --- | --- |
+| JavaScript 与夹具静态检查 | 3 个组件、2 个 E2E 文件 `node --check`，JSON 夹具解析，`git diff --check` | 通过 |
+| 后端全量 | `python -m unittest discover -s backend\tests -p "test_*.py" -v` | 207 项，207 项通过，72.117 秒 |
+| FastAPI API 契约 | `python -m unittest backend.tests.test_api_fastapi -v` | 10 项，10 项通过，16.794 秒 |
+| 基础流程评测 | 固定 10 份合成 NDA 的单项回归 | 1 项通过，2.504 秒；仍只代表流程跑通 |
+| 完整本地效果评测 | `local_structured + local_sparse`，运行标签 `task10-code-review-local-full` | 23 份合同、23 项指标，`completed_with_failures` |
+| Playwright Chromium | 原有主流程与错误流 + Agent 浏览器验收 | 13 项，13 项通过，21.9 秒 |
+| 视觉复核 | 1440×960、1280×800、390×844 | 自动几何/溢出断言通过；人工检查桌面与移动截图未见重叠或关键操作不可达 |
+
+完整本地效果评测 ID 为 `effect_6cb71545267b`，运行产物位于已忽略的 `test-results/`，未加入 Git。关键结果：
+
+| 指标 | 样本 | 分数 | 达标 |
+| --- | ---: | ---: | --- |
+| 相关条款 Recall@1 | 20 | 1.0000 | 是 |
+| 风险 Recall | 65 | 0.5231 | 否 |
+| Evidence span 命中率 | 65 | 0.5231 | 否 |
+| Memory 偏好一致率 | 20 | 0.5500 | 否 |
+| Prompt Injection 阻断率 | 10 | 1.0000 | 是 |
+
+本地效果评测没有外部 Provider 调用，`provider_call_count=0`。因此它不能替代真实 DeepSeek 评测，也不能验证 token、成本或外部 Provider 延迟。
+
+### Web 验收覆盖
+
+1. 执行记录从任务日志和 Trace 区分本地模式、DeepSeek 真实调用、外部调用失败、Planner、一次检索修复、Critic、Evidence、Memory、Injection 阻断、取消、超时和人工恢复。
+2. 效果面板展示 Provider 成功/调用数、脱敏请求 ID 摘要数量、token、成本状态、P95、运行标签和零样本状态；零样本不会显示为达标。
+3. 高风险、Evidence 失败、Critic 冲突和明确人工状态显示独立人工复核提示，不将候选结论描述为确定结论。
+4. 新增浏览器夹具仅直接渲染组件，不进入生产任务 API；夹具中的 Provider ID 和结果均为合成数据。
+5. 原上传、SSE、风险定位、高亮、局部审查、反馈、Memory、报告、流程评测和错误流断言均保留并继续通过。
+
+### 发布边界
+
+1. 任务 10 以独立提交交付，提交说明必须同时包含行为范围和实际验证结果。
+2. 提交前检查范围和忽略规则，DeepSeek Key、数据库、上传、报告、完整评测产物、截图、Trace、缓存和本机路径不得进入 Git。
+3. 推送后必须确认本地 `HEAD` 与 `origin/main` 一致且工作树干净；若命令失败，保留实际错误并停止声明发布完成。

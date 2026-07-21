@@ -582,6 +582,10 @@ h4 {
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
+.workspace-review.has-review-attention {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
 .task-strip {
   z-index: 4;
   display: grid;
@@ -680,6 +684,52 @@ h4 {
   color: var(--danger);
   font-size: 10px;
   text-align: right;
+}
+
+.review-attention {
+  z-index: 3;
+  display: flex;
+  min-width: 0;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 7px 16px;
+  border-bottom: 1px solid #e4b94e;
+  background: #fff8df;
+  color: #5d4510;
+}
+
+.review-attention > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.review-attention .icon {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  color: #9a6d00;
+}
+
+.review-attention p,
+.review-attention strong,
+.review-attention span {
+  display: block;
+  margin: 0;
+}
+
+.review-attention strong {
+  font-size: 11px;
+}
+
+.review-attention span {
+  margin-top: 1px;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+  line-height: 1.35;
 }
 
 .report-export {
@@ -1734,6 +1784,64 @@ h4 {
   line-height: 1.4;
 }
 
+.agent-capability-status {
+  margin: 0 0 12px;
+}
+
+.agent-capability-status h3 {
+  margin: 0 0 6px;
+  color: #cbd5df;
+  font-size: 10px;
+}
+
+.agent-capability-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-capability-list li {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #36414c;
+  border-left: 3px solid #65717d;
+  border-radius: 5px;
+  background: #242d36;
+}
+
+.agent-capability-list span,
+.agent-capability-list strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.agent-capability-list span {
+  color: #96a3b0;
+  font-size: 9px;
+}
+
+.agent-capability-list strong {
+  margin-top: 3px;
+  color: #e6edf3;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.agent-capability-list .capability-success {
+  border-left-color: #4c9a6b;
+}
+
+.agent-capability-list .capability-warning {
+  border-left-color: #d2a53a;
+}
+
+.agent-capability-list .capability-failure {
+  border-left-color: #d5685e;
+}
+
 .log-list {
   display: grid;
   gap: 5px;
@@ -1973,6 +2081,60 @@ h4 {
   margin-top: 10px;
 }
 
+.evaluation-runtime {
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-subtle);
+}
+
+.evaluation-runtime-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.evaluation-runtime-head h3 {
+  margin: 0;
+  font-size: 11px;
+}
+
+.evaluation-runtime-head span {
+  color: var(--muted);
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-runtime-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.evaluation-runtime-summary > div {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.evaluation-runtime-summary dt {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.evaluation-runtime-summary dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+  font-weight: 650;
+}
+
 @media (max-width: 1180px) {
   .workbench-grid {
     grid-template-columns: 220px minmax(380px, 1fr) 330px;
@@ -2116,6 +2278,10 @@ h4 {
     grid-template-rows: auto auto minmax(0, 1fr) auto;
   }
 
+  .workspace-review.has-review-attention {
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  }
+
   .workspace-memory,
   .workspace-evaluation {
     grid-template-rows: auto minmax(0, 1fr) auto;
@@ -2129,6 +2295,22 @@ h4 {
   }
 
   .task-strip-meta {
+    display: none;
+  }
+
+  .review-attention {
+    min-height: 48px;
+    padding: 6px 10px;
+  }
+
+  .review-attention .button {
+    flex: 0 0 auto;
+    width: 32px;
+    min-width: 32px;
+    padding: 0;
+  }
+
+  .review-attention .button span:not(.icon) {
     display: none;
   }
 
@@ -2288,6 +2470,11 @@ h4 {
   }
 
   .task-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .agent-capability-list,
+  .evaluation-runtime-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

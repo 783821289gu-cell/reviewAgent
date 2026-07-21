@@ -5,6 +5,9 @@ const { test, expect } = require("playwright/test");
 
 const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 const FIXTURES = path.join(PROJECT_ROOT, "frontend", "tests", "fixtures");
+const AGENT_STATES = JSON.parse(
+  fs.readFileSync(path.join(FIXTURES, "agent-task-states.json"), "utf8"),
+);
 const TERMINAL_STATUS = /EVIDENCE_VERIFIED|HUMAN_REVIEW_PENDING/;
 
 
@@ -49,6 +52,7 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
     /"status":\s*"(?:EVIDENCE_VERIFIED|HUMAN_REVIEW_PENDING)"/,
   );
   await expect(page.locator(".progress-list")).toContainText(/证据已验证|等待人工复核/);
+  await expect(page.locator("[data-human-review-attention]")).toContainText("人工复核待处理");
 
   const riskCards = page.locator(".risk-card");
   await expect(riskCards).toHaveCount(4);
@@ -183,10 +187,137 @@ test("健康检查失败时页面显示服务错误并禁用上传", async ({ pa
 });
 
 
+test("执行记录区分 DeepSeek、本地模式和受控 Agent 决策", async ({ page }) => {
+  await page.goto("/");
+
+  await renderExecutionLog(page, AGENT_STATES.local_mode);
+  await expect(capability(page, "provider")).toContainText("本地模式 / 无外部 LLM");
+
+  await renderExecutionLog(page, AGENT_STATES.deepseek_repair);
+  await expect(capability(page, "provider")).toContainText("DeepSeek");
+  await expect(capability(page, "provider")).toContainText("真实调用 1/1 成功");
+  await expect(capability(page, "planner")).toContainText("RETRIEVE_AGAIN");
+  await expect(capability(page, "retrieval-repair")).toContainText("已成功执行 1 次");
+  await expect(capability(page, "critic")).toContainText("REQUEST_HUMAN_REVIEW");
+  await expect(capability(page, "evidence")).toContainText("失败 1");
+  await expect(capability(page, "memory")).toContainText("读取调用 1 / 写入调用 1");
+  await expect(page.locator("#component-test-root")).toContainText("调整 additional_keywords,top_k");
+
+  await renderWorkbench(page, AGENT_STATES.evidence_recovered);
+  await expect(page.locator("[data-human-review-attention]")).toHaveCount(0);
+
+  await renderWorkbench(page, AGENT_STATES.critic_conflict);
+  await expect(page.locator("[data-human-review-attention]")).toContainText(
+    "Critic 与风险分析存在冲突",
+  );
+});
+
+
+test("浏览器验收配置错误、非法 Planner、Injection、取消、超时和恢复", async ({ page }) => {
+  await page.goto("/");
+
+  await renderExecutionLog(page, AGENT_STATES.deepseek_config_error);
+  await expect(capability(page, "provider")).toContainText("调用失败：configuration_error");
+  await expect(page.locator("#component-test-root")).not.toContainText("本地模式 / 无外部 LLM");
+
+  await renderExecutionLog(page, AGENT_STATES.illegal_planner);
+  await expect(capability(page, "planner")).toContainText("非法动作已拒绝");
+  await expect(capability(page, "retrieval-repair")).toContainText("未触发");
+
+  await renderExecutionLog(page, AGENT_STATES.injection_blocked);
+  await expect(capability(page, "prompt-injection")).toContainText("已阻断并转人工复核");
+
+  await renderExecutionLog(page, AGENT_STATES.cancelled);
+  await expect(capability(page, "execution")).toContainText("任务已取消");
+  await expect(page.locator("#component-test-root")).toContainText("Operator stopped the review.");
+
+  await renderExecutionLog(page, AGENT_STATES.cancel_requested);
+  await expect(capability(page, "execution")).toContainText("取消请求已提交");
+  await expect(capability(page, "execution")).not.toContainText("任务已取消");
+
+  await renderExecutionLog(page, AGENT_STATES.timeout_recovered);
+  await expect(capability(page, "execution")).toContainText("发生超时 / 已人工恢复 1 次");
+  await expect(page.locator("#component-test-root")).toContainText("node_timeout / parse_document / 5");
+  await expect(page.locator("#component-test-root")).toContainText("web_manual_retry");
+
+  await renderExecutionLog(page, AGENT_STATES.failed_side_effects);
+  await expect(capability(page, "retrieval-repair")).toContainText("成功 0 / 失败 1");
+  await expect(capability(page, "memory")).toContainText("写入调用 0 / 失败 1");
+});
+
+
+test("效果面板如实展示真实 Provider 运行信息、未达标项和零样本", async ({ page }) => {
+  await page.goto("/");
+  await renderEvaluationPanel(page, AGENT_STATES.effect_result);
+
+  await expect(page.locator("[data-effect-provider]")).toContainText(
+    "DeepSeek 真实调用 1/2 成功",
+  );
+  await expect(page.locator(".effect-summary")).toContainText("已完成，存在未达标项");
+  await expect(page.locator(".evaluation-runtime")).toContainText("deepseek-stability-fixture");
+  await expect(page.locator(".evaluation-runtime")).toContainText("1 个脱敏摘要");
+  await expect(page.locator(".evaluation-runtime")).toContainText("估算成本");
+  await expect(page.locator(".evaluation-runtime")).toContainText("未配置");
+  await expect(page.locator(".effect-metric-row").filter({ hasText: "检索修复成功率" })).toContainText(
+    "无样本",
+  );
+
+  const failedProviderResult = JSON.parse(JSON.stringify(AGENT_STATES.effect_result));
+  failedProviderResult.runtime.provider_success_count = 0;
+  await renderEvaluationPanel(page, failedProviderResult);
+  await expect(page.locator("[data-effect-provider]")).toContainText("DeepSeek 调用失败 0/2 成功");
+  await expect(page.locator("[data-effect-provider]")).not.toContainText("DeepSeek 真实调用");
+});
+
+
 async function upload(page, filePath, reviewPosition) {
   await page.getByLabel("合同文件").setInputFiles(filePath);
   await page.getByLabel(reviewPosition, { exact: true }).check();
   await page.getByRole("button", { name: "上传并解析" }).click();
+}
+
+
+async function renderExecutionLog(page, task) {
+  await page.evaluate(async (fixtureTask) => {
+    document.body.innerHTML = '<main id="component-test-root"></main>';
+    const { ExecutionLog } = await import("/src/components/ExecutionLog.js");
+    ExecutionLog(document.querySelector("#component-test-root"), { task: fixtureTask });
+  }, task);
+}
+
+
+async function renderWorkbench(page, task) {
+  await page.evaluate(async (fixtureTask) => {
+    document.body.innerHTML = '<main id="component-test-root"></main>';
+    const { WorkbenchLayout } = await import("/src/components/WorkbenchLayout.js");
+    WorkbenchLayout(document.querySelector("#component-test-root"), {
+      task: fixtureTask,
+      workspaceView: "review",
+      mobileView: "risk",
+      riskFilter: "all",
+      localReview: {},
+      feedback: {},
+      report: {},
+      evaluation: {},
+      taskControl: {},
+    });
+  }, task);
+}
+
+
+async function renderEvaluationPanel(page, effectResult) {
+  await page.evaluate(async (fixtureResult) => {
+    document.body.innerHTML = '<main id="component-test-root"></main>';
+    const { EvaluationPanel } = await import("/src/components/EvaluationPanel.js");
+    EvaluationPanel(document.querySelector("#component-test-root"), {
+      evaluation: { activeView: "effect", effectResult: fixtureResult },
+    });
+  }, effectResult);
+}
+
+
+function capability(page, name) {
+  return page.locator(`[data-capability="${name}"]`);
 }
 
 

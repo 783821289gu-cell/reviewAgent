@@ -14,9 +14,13 @@ node_modules/
 dist/
 .coverage
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
 playwright-report/
 test-results/
 blob-report/
+*.trace.zip
 
 *.sqlite
 *.sqlite3

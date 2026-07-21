@@ -22,10 +22,12 @@ export function WorkbenchLayout(root, props) {
   const activeClauseId = props.activeClauseId || activeRisk?.clause_id || props.localReview?.clauseId || "";
   const activeRuleIds = activeRisk?.matched_rule_ids || [];
   const workspaceView = validWorkspace(props.workspaceView);
+  const reviewAttention = workspaceView === "review" ? reviewAttentionState(task, risks) : null;
 
   root.innerHTML = `
-    <section class="workbench workspace-${workspaceView}" aria-label="审查工作台">
+    <section class="workbench workspace-${workspaceView}${reviewAttention ? " has-review-attention" : ""}" aria-label="审查工作台">
       ${renderTaskStrip(task, props.report, props.taskControl)}
+      ${reviewAttention ? renderReviewAttention(reviewAttention) : ""}
       ${workspaceView === "review" ? renderReviewWorkspace(props.mobileView, risks, props.riskFilter) : ""}
       ${workspaceView === "memory" ? renderMemoryWorkspace(task, risks) : ""}
       ${workspaceView === "evaluation" ? renderEvaluationWorkspace() : ""}
@@ -43,6 +45,12 @@ export function WorkbenchLayout(root, props) {
   });
   root.querySelector("[data-recover-task]")?.addEventListener("click", () => {
     props.onRecoverTask?.();
+  });
+  root.querySelector("[data-human-review-action]")?.addEventListener("click", (event) => {
+    const riskId = event.currentTarget.dataset.humanReviewAction;
+    if (riskId) {
+      props.onLocateRisk?.(riskId);
+    }
   });
 
   if (workspaceView === "review") {
@@ -76,6 +84,48 @@ export function WorkbenchLayout(root, props) {
       props.onExecutionLogToggle?.(event.target.open);
     }
   });
+}
+
+function reviewAttentionState(task, risks) {
+  if (!task) return null;
+  const evidenceFailed = task.status === "EVIDENCE_MISSING";
+  const pendingRisks = risks.filter((risk) => (
+    risk.review_status === "NEED_MANUAL_REVIEW"
+    || (risk.severity === "高" && !["CONFIRMED_RISK", "IGNORED_RISK"].includes(risk.review_status))
+  ));
+  const statusRequiresHuman = [
+    "HUMAN_REVIEW_PENDING",
+    "NEED_MANUAL_REVIEW",
+    "EVIDENCE_MISSING",
+    "LLM_OUTPUT_INVALID",
+  ].includes(task.status);
+  const criticConflict = (statusRequiresHuman || pendingRisks.length > 0)
+    && (task.review_contexts || []).some((context) => {
+      const latestDecision = context.critic_trace?.at(-1)?.decision;
+      return latestDecision && latestDecision !== "PASS";
+    });
+
+  if (!evidenceFailed && !criticConflict && pendingRisks.length === 0 && !statusRequiresHuman) {
+    return null;
+  }
+  let message = "Agent 结论需要人工复核，不能作为确定结论。";
+  if (evidenceFailed) {
+    message = "证据校验未通过，相关候选未形成可确认的正式结论。";
+  } else if (criticConflict) {
+    message = "Critic 与风险分析存在冲突，当前结果需要人工裁决。";
+  } else if (pendingRisks.some((risk) => risk.severity === "高")) {
+    message = "存在高风险或低置信度结果，需由人工确认后再进入报告。";
+  }
+  return { message, riskId: pendingRisks[0]?.risk_id || "" };
+}
+
+function renderReviewAttention(attention) {
+  return `
+    <aside class="review-attention" role="status" data-human-review-attention>
+      <div>${icon("shield-alert")}<p><strong>人工复核待处理</strong><span>${escapeHtml(attention.message)}</span></p></div>
+      ${attention.riskId ? `<button class="button button-secondary compact-button" type="button" data-human-review-action="${escapeHtml(attention.riskId)}">${icon("shield-alert")}<span>查看待复核风险</span></button>` : ""}
+    </aside>
+  `;
 }
 
 function renderReviewComponents(root, props, context) {

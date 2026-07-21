@@ -1,0 +1,367 @@
+{
+  "local_mode": {
+    "status": "EVIDENCE_VERIFIED",
+    "message": "Local structured review completed.",
+    "trace_id": "trace_fixture_local",
+    "logs": [
+      {
+        "step_name": "risk_analysis",
+        "tool_name": "analyze_risk",
+        "status": "success",
+        "retry_index": 0,
+        "latency_ms": 8,
+        "token_cost_summary": "local_structured_no_external_llm",
+        "trace_summary": {
+          "provider": { "summary": "local_structured_no_external_llm" },
+          "versions": { "llm_mode": "local_structured", "llm_model": "deepseek-v4-pro" }
+        }
+      }
+    ]
+  },
+  "deepseek_repair": {
+    "status": "HUMAN_REVIEW_PENDING",
+    "message": "Evidence and critic require human review.",
+    "trace_id": "trace_fixture_deepseek",
+    "logs": [
+      {
+        "step_name": "risk_analysis",
+        "tool_name": "analyze_risk",
+        "status": "success",
+        "retry_index": 0,
+        "latency_ms": 321,
+        "token_cost_summary": "{\"mode\":\"openai_compatible\",\"calls\":[{\"model\":\"deepseek-v4-pro\",\"provider_request_id\":\"fixture-request-id\",\"prompt_tokens\":120,\"completion_tokens\":30,\"latency_ms\":321,\"estimated_cost\":null,\"cost_status\":\"not_configured\",\"error_type\":null}]}",
+        "trace_summary": {
+          "provider": {
+            "mode": "openai_compatible",
+            "calls": [
+              {
+                "model": "deepseek-v4-pro",
+                "provider_request_id": "fixture-request-id",
+                "prompt_tokens": 120,
+                "completion_tokens": 30,
+                "latency_ms": 321,
+                "cost_status": "not_configured",
+                "error_type": null
+              }
+            ]
+          },
+          "versions": { "prompt": "contract-review-agent.prompt.v1", "llm_model": "deepseek-v4-pro" }
+        }
+      },
+      {
+        "step_name": "evidence_repair_plan",
+        "tool_name": "plan_review_action",
+        "status": "success",
+        "retry_index": 0,
+        "latency_ms": 4,
+        "token_cost_summary": "deterministic_planner_no_external_llm",
+        "trace_summary": {
+          "decision": {
+            "type": "planner",
+            "action": "RETRIEVE_AGAIN",
+            "reason_code": "EVIDENCE_NOT_FOUND",
+            "query_adjustment_fields": ["additional_keywords", "top_k"]
+          }
+        }
+      },
+      {
+        "step_name": "related_clause_retrieval_repair",
+        "tool_name": "retrieve_related_clauses",
+        "status": "success",
+        "retry_index": 1,
+        "latency_ms": 6,
+        "token_cost_summary": "local_sparse_no_external_embedding",
+        "trace_summary": {
+          "decision": {
+            "type": "retrieval",
+            "candidate_count": 3,
+            "top_k": { "effective": 3, "maximum": 5 }
+          }
+        }
+      },
+      {
+        "step_name": "risk_critic",
+        "tool_name": "criticize_risk",
+        "status": "success",
+        "retry_index": 1,
+        "latency_ms": 5,
+        "token_cost_summary": "deterministic_support_check_no_external_llm",
+        "trace_summary": {
+          "decision": {
+            "type": "critic",
+            "decision": "REQUEST_HUMAN_REVIEW",
+            "reason_code": "ANALYZER_EVIDENCE_CONFLICT"
+          }
+        }
+      },
+      {
+        "step_name": "evidence_verification",
+        "tool_name": "verify_evidence",
+        "status": "success",
+        "retry_index": 1,
+        "latency_ms": 3,
+        "token_cost_summary": "not_applicable",
+        "trace_summary": {
+          "decision": {
+            "type": "evidence_verifier",
+            "is_valid": false,
+            "failure_reason": "evidence span not found"
+          }
+        }
+      },
+      {
+        "step_name": "memory_retrieval",
+        "tool_name": "retrieve_memory",
+        "status": "success",
+        "retry_index": 0,
+        "latency_ms": 2,
+        "token_cost_summary": "not_applicable"
+      },
+      {
+        "step_name": "feedback_memory_write",
+        "tool_name": "write_memory",
+        "status": "success",
+        "retry_index": 0,
+        "latency_ms": 2,
+        "token_cost_summary": "not_applicable"
+      }
+    ]
+  },
+  "deepseek_config_error": {
+    "status": "LLM_OUTPUT_INVALID",
+    "message": "DeepSeek provider configuration failed.",
+    "trace_id": "trace_fixture_config_error",
+    "logs": [
+      {
+        "step_name": "risk_analysis",
+        "tool_name": "analyze_risk",
+        "status": "failed",
+        "retry_index": 0,
+        "latency_ms": 1,
+        "error_message": "LLM provider configuration error",
+        "token_cost_summary": "{\"mode\":\"openai_compatible\",\"calls\":[{\"model\":\"deepseek-v4-pro\",\"provider_request_id\":null,\"prompt_tokens\":null,\"completion_tokens\":null,\"latency_ms\":1,\"estimated_cost\":null,\"cost_status\":\"not_available\",\"error_type\":\"configuration_error\"}]}",
+        "trace_summary": {
+          "provider": {
+            "mode": "openai_compatible",
+            "calls": [
+              { "model": "deepseek-v4-pro", "latency_ms": 1, "error_type": "configuration_error" }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "illegal_planner": {
+    "status": "LLM_OUTPUT_INVALID",
+    "message": "Planner output rejected.",
+    "trace_id": "trace_fixture_illegal_planner",
+    "logs": [
+      {
+        "step_name": "evidence_repair_plan",
+        "tool_name": "plan_review_action",
+        "status": "failed",
+        "retry_index": 0,
+        "latency_ms": 2,
+        "error_message": "planner action is not allowed by whitelist",
+        "token_cost_summary": "deterministic_planner_no_external_llm"
+      }
+    ]
+  },
+  "injection_blocked": {
+    "status": "HUMAN_REVIEW_PENDING",
+    "message": "Prompt injection signal blocked.",
+    "trace_id": "trace_fixture_injection",
+    "logs": [
+      {
+        "step_name": "critic_injection_blocked",
+        "tool_name": "criticize_risk",
+        "status": "success",
+        "retry_index": 0,
+        "latency_ms": 1,
+        "token_cost_summary": "deterministic_support_check_no_external_llm",
+        "trace_summary": {
+          "decision": {
+            "type": "critic",
+            "decision": "REQUEST_HUMAN_REVIEW",
+            "reason_code": "PROMPT_INJECTION_DETECTED"
+          }
+        }
+      }
+    ]
+  },
+  "cancelled": {
+    "status": "CANCELLED",
+    "message": "Task cancelled by operator.",
+    "trace_id": "trace_fixture_cancelled",
+    "cancel_reason": "Operator stopped the review.",
+    "logs": []
+  },
+  "cancel_requested": {
+    "status": "CANCEL_REQUESTED",
+    "message": "Cancellation will be applied at the next checkpoint.",
+    "trace_id": "trace_fixture_cancel_requested",
+    "logs": []
+  },
+  "timeout_recovered": {
+    "status": "PARSE_FAILED",
+    "message": "Timed out and manual recovery was attempted.",
+    "trace_id": "trace_fixture_timeout",
+    "recovery_count": 1,
+    "recovery_from_status": "NODE_TIMEOUT",
+    "last_timeout": {
+      "type": "node_timeout",
+      "step_name": "parse_document",
+      "limit_seconds": 5
+    },
+    "recovery_history": [
+      {
+        "operator_action": "web_manual_retry",
+        "reason": "Retry timed out parser.",
+        "resume_from_status": "UPLOAD_RECEIVED"
+      }
+    ],
+    "logs": []
+  },
+  "failed_side_effects": {
+    "status": "TASK_ERROR",
+    "message": "Repair and memory calls failed.",
+    "trace_id": "trace_fixture_failed_side_effects",
+    "logs": [
+      {
+        "step_name": "related_clause_retrieval_repair",
+        "tool_name": "retrieve_related_clauses",
+        "status": "failed",
+        "retry_index": 1,
+        "latency_ms": 5,
+        "error_message": "embedding provider failed",
+        "token_cost_summary": "local_sparse_no_external_embedding"
+      },
+      {
+        "step_name": "feedback_memory_write",
+        "tool_name": "write_memory",
+        "status": "failed",
+        "retry_index": 0,
+        "latency_ms": 2,
+        "error_message": "memory write rejected",
+        "token_cost_summary": "not_applicable"
+      }
+    ]
+  },
+  "evidence_recovered": {
+    "task_id": "task_fixture_evidence_recovered",
+    "file_name": "recovered-evidence.docx",
+    "status": "EVIDENCE_VERIFIED",
+    "message": "Evidence passed after one bounded repair.",
+    "trace_id": "trace_fixture_evidence_recovered",
+    "review_position": "甲方",
+    "review_contexts": [
+      { "critic_trace": [{ "decision": "PASS", "reason_code": "SUPPORTED" }] }
+    ],
+    "risk_findings": [],
+    "clauses": [],
+    "matched_rules": [],
+    "events": [],
+    "logs": [
+      {
+        "step_name": "evidence_verification",
+        "tool_name": "verify_evidence",
+        "status": "success",
+        "retry_index": 0,
+        "latency_ms": 2,
+        "token_cost_summary": "not_applicable",
+        "trace_summary": { "decision": { "type": "evidence_verifier", "is_valid": false } }
+      },
+      {
+        "step_name": "related_clause_retrieval_repair",
+        "tool_name": "retrieve_related_clauses",
+        "status": "success",
+        "retry_index": 1,
+        "latency_ms": 3,
+        "token_cost_summary": "local_sparse_no_external_embedding"
+      },
+      {
+        "step_name": "evidence_verification",
+        "tool_name": "verify_evidence",
+        "status": "success",
+        "retry_index": 1,
+        "latency_ms": 2,
+        "token_cost_summary": "not_applicable",
+        "trace_summary": { "decision": { "type": "evidence_verifier", "is_valid": true } }
+      }
+    ]
+  },
+  "critic_conflict": {
+    "task_id": "task_fixture_critic_conflict",
+    "file_name": "critic-conflict.docx",
+    "status": "HUMAN_REVIEW_PENDING",
+    "message": "Critic conflict requires human review.",
+    "trace_id": "trace_fixture_critic_conflict",
+    "review_position": "甲方",
+    "review_contexts": [
+      {
+        "critic_trace": [
+          { "decision": "REQUEST_HUMAN_REVIEW", "reason_code": "ANALYZER_EVIDENCE_CONFLICT" }
+        ]
+      }
+    ],
+    "risk_findings": [],
+    "clauses": [],
+    "matched_rules": [],
+    "events": [],
+    "logs": []
+  },
+  "effect_result": {
+    "evaluation_id": "effect_fixture_task_10",
+    "evaluation_type": "effect",
+    "status": "completed_with_failures",
+    "claim": "Fixture only verifies browser rendering of a recorded result.",
+    "sample_count": 2,
+    "versions": {
+      "annotation_version": "effect-v2",
+      "code_version": "fixture",
+      "git_dirty": false,
+      "playbook_version": "nda-v1",
+      "llm_mode": "openai_compatible",
+      "llm_model": "deepseek-v4-pro",
+      "embedding_mode": "local_sparse",
+      "embedding_model": "local_sparse_hash_v1",
+      "parameters": {}
+    },
+    "runtime": {
+      "run_label": "deepseek-stability-fixture",
+      "provider_call_count": 2,
+      "provider_success_count": 1,
+      "request_id_hashes": ["abc123fixture"],
+      "measurements": [
+        { "measurement": "total_tokens", "label": "Token 总数", "value": 1024, "unit": "tokens" },
+        { "measurement": "estimated_cost", "label": "估算成本", "value": null, "unit": "configured_currency" },
+        { "measurement": "provider_latency_p95", "label": "Provider P95 延迟", "value": 321, "unit": "ms" }
+      ]
+    },
+    "metrics": [
+      {
+        "metric": "risk_recall",
+        "label": "风险召回率",
+        "sample_count": 2,
+        "passed_count": 1,
+        "failed_count": 1,
+        "score": 0.5,
+        "threshold": 0.8,
+        "threshold_met": false,
+        "failure_samples": []
+      },
+      {
+        "metric": "retrieval_repair_success_rate",
+        "label": "检索修复成功率",
+        "sample_count": 0,
+        "passed_count": 0,
+        "failed_count": 0,
+        "score": 0,
+        "threshold": 0.8,
+        "threshold_met": false,
+        "failure_samples": []
+      }
+    ],
+    "evaluation_failures": []
+  }
+}

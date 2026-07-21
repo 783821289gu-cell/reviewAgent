@@ -1,12 +1,12 @@
 # ContractReviewAgent
 
-当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10、`UI_REDESIGN_PLAN.md` 的工作台界面迭代，以及 `TASKS_AGENT.md` 的任务 6。系统支持 AgentState、显式 Tool Registry、受控 Planner/Router、一次检索修复、受控 Critic、确定性 Evidence 最终准入、流式状态事件、执行日志、本地 NDA Playbook 规则检索、可配置 Embedding 的当前合同内相关条款检索、SQLite Memory 召回、风险分析上下文构建、结构化风险分析、证据验证、修改建议生成、Web 风险展示、原文高亮、风险跳转、局部审查、人工反馈动作、Memory 写入、Markdown 报告导出、流程评测、人工标注效果评测和文本型 PDF 页码/文本块定位；HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端。任务、上传文件、文档、条款、风险、日志和事件已接入 SQLite 持久化，并由 Playwright 覆盖浏览器主流程、错误流、三视口布局和基础可访问性。
+当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10、`UI_REDESIGN_PLAN.md` 的工作台界面迭代，以及 `TASKS_AGENT.md` 的任务 10。系统支持 AgentState、显式 Tool Registry、DeepSeek OpenAI-compatible Provider、受控 Planner/Router、一次检索修复、受控 Critic、确定性 Evidence 最终准入、Prompt Injection 阻断、真实 token 预算、Memory 生命周期、可恢复执行、流式状态事件和脱敏 Agent Trace。HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端；任务、上传文件、文档、条款、风险、日志和事件接入 SQLite 持久化。浏览器测试覆盖主流程、错误流、Agent 状态展示、三视口布局和基础可访问性。
 
 ## 当前已实现
 
 1. FastAPI / Uvicorn 后端服务启动入口。
 2. 后端健康检查接口。
-3. 审查状态模型：`START`、`UPLOAD_RECEIVED`、`DOCUMENT_PARSED`、`CONTRACT_TYPE_CLASSIFIED`、`CLAUSES_STRUCTURED`、`PLAYBOOK_RETRIEVED`、`CONTEXT_BUILT`、`RISK_ANALYZED`、`EVIDENCE_VERIFIED`、`HUMAN_REVIEW_PENDING`、`MEMORY_UPDATED`、`REPORT_READY`、`UNSUPPORTED_CONTRACT_TYPE`、`PARSE_FAILED`、`RETRIEVAL_FAILED`、`LLM_OUTPUT_INVALID`、`EVIDENCE_MISSING`、`NEED_MANUAL_REVIEW`、`TASK_ERROR`。
+3. 审查状态模型：`START`、`UPLOAD_RECEIVED`、`DOCUMENT_PARSED`、`CONTRACT_TYPE_CLASSIFIED`、`CLAUSES_STRUCTURED`、`PLAYBOOK_RETRIEVED`、`CONTEXT_BUILT`、`RISK_ANALYZED`、`EVIDENCE_VERIFIED`、`HUMAN_REVIEW_PENDING`、`MEMORY_UPDATED`、`REPORT_READY`、`UNSUPPORTED_CONTRACT_TYPE`、`PARSE_FAILED`、`RETRIEVAL_FAILED`、`LLM_OUTPUT_INVALID`、`EVIDENCE_MISSING`、`NEED_MANUAL_REVIEW`、`CANCEL_REQUESTED`、`CANCELLED`、`NODE_TIMEOUT`、`TASK_TIMEOUT`、`TASK_ERROR`。
 4. FastAPI 同源托管前端页面和静态资源。
 5. 独立的新建合同审查入口、合同文件上传和甲方 / 乙方审查立场选择。
 6. 未选择合同文件或审查立场时不能上传解析。
@@ -38,7 +38,7 @@
 32. 用户可以导出 Markdown 审查报告，报告生成通过 `tool_registry["generate_report"]` 调用。
 33. 报告包含合同名称、审查立场、Playbook 版本、风险等级、风险原因、原文证据、修改建议和人工反馈状态。
 34. 报告只导出用户明确允许进入报告且不处于待人工复核状态的风险，不包含完整执行日志和技术实现细节。
-35. `samples/` 提供 10 份项目内合成 NDA 样本，样本来源已在 `samples/README.md` 说明。
+35. `samples/` 提供 23 份项目内合成合同标注，其中基础流程评测固定使用 10 份 NDA；样本来源已在 `samples/README.md` 说明。
 36. `evaluation/` 支持手动触发基础评测摘要，覆盖任务是否跑通、文档解析、条款结构化、Playbook 命中、风险证据、Memory 写入、报告导出和失败原因。
 37. 全部 HTTP API 已迁移到 FastAPI，请求模型使用 Pydantic 校验，文件上传使用 `UploadFile` 分块读取并校验大小、扩展名、MIME、文件签名、空文件和安全文件名。
 38. SSE 使用 `StreamingResponse`，保留 `review_event` 事件格式，并在终态、客户端断开或服务关闭时结束。
@@ -55,10 +55,10 @@
 49. Embedding 查询包含当前条款正文、条款类型、风险类型、Playbook 检查点和关键字段；合同条款向量在单次任务上下文构建期间缓存，恢复时使用相同模型和输入重建。
 50. 相关条款结果包含 Embedding 模式、模型、向量维度、余弦相似度、rerank 因子和最终分数；前端 Context Trace 展示模型、相似度和最终分数。
 51. 外部 Embedding 调用日志记录模型、供应商请求 ID、输入数量、向量维度、耗时和错误类型，不记录 API Key 或完整合同文本；失败时进入 `RETRIEVAL_FAILED`，未启用静默词频降级。
-52. `samples/annotations/related_clauses.json` 提供 11 组人工相关条款标注，覆盖 8 类 NDA 风险；离线测试直接运行本地混合检索并计算 Recall@1，不使用语义命中 Stub 代替实际检索结果。
-53. `samples/annotations/` 提供 `effect-v1` 人工标注 schema，覆盖合同类型、条款边界和类型、预期规则、风险、可接受等级、证据 span、相关条款、人工复核和报告选择；当前数据全部为项目内合成夹具。
+52. `samples/annotations/related_clauses.json` 提供 20 组人工相关条款标注，覆盖 8 类 NDA 风险；离线测试直接运行本地混合检索并计算 Recall@1，不使用语义命中 Stub 代替实际检索结果。
+53. `samples/annotations/` 提供 `effect-v2` 人工标注 schema，覆盖 23 份合同、174 条条款、65 条唯一风险条款、20 组 Memory 对照和 10 组 Prompt Injection；当前数据全部为项目内合成夹具。
 54. `POST /api/evaluation/effect/run` 独立运行效果评测，不改写现有 `POST /api/evaluation/run` 流程评测响应。
-55. 效果评测分别计算 NDA 分类准确率、非 NDA 拒绝率、条款切分和类型准确率、Playbook/相关条款 Recall@K、风险 Precision/Recall/F1、证据 span、人工复核、报告过滤、工具调用和端到端指标。
+55. 效果评测计算 23 项指标，包括 NDA 分类、非 NDA 拒绝、条款、Playbook/相关条款、风险、证据、人工复核、报告、工具、端到端、Planner、结构化输出、修复、恢复、无证据风险、Memory 和 Injection；token、成本状态和 P95 延迟作为运行测量单独记录。
 56. 每个效果指标记录样本数、通过数、失败数、阈值和失败样本；版本化 JSON/Markdown 摘要记录 Git、Playbook、标注、LLM、Embedding 和关键参数。
 57. Web 评测面板使用“流程摘要”和“效果摘要”两个独立视图；未达阈值指标按实际失败状态展示。
 58. 扫描件、空文本、加密、复杂字体映射失败和损坏 PDF 会进入真实 `PARSE_FAILED` 状态，不生成伪造正文或正式风险。
@@ -72,18 +72,68 @@
 66. Playwright 额外验证 1440×960、1280×800、390×844 三个视口无横向溢出、面板不重叠、图标资源可访问、键盘焦点和减少动态效果设置生效。
 67. `plan_review_action` 作为第 13 个显式工具，只能返回四种白名单动作；Orchestrator 校验原因码、当前状态、当前合同条款和全任务一次重试预算后，才允许执行受限检索改写与重新分析。首次 Evidence 失败最多修复一次，再次失败进入 `EVIDENCE_MISSING`；正常确定性成功路径不调用 Planner。
 68. `criticize_risk` 作为独立显式工具位于 Analyzer 与 Evidence Verifier 之间，只能返回 `PASS`、`REJECT` 或 `REQUEST_HUMAN_REVIEW` 及固定原因码；它不能返回新证据、条款、规则或风险等级。Critic 冲突进入人工复核，只有确定性 Evidence Verifier 通过的候选才可能进入正式风险列表。
+69. Prompt 组装区分系统策略、任务、Playbook、合同数据、相关条款、Memory、证据约束和输出 Schema；合同与 Memory 作为不可信数据处理，注入信号不会触发额外工具或生成未绑定证据的正式风险。
+70. Context Budget 使用项目内固定的 DeepSeek tokenizer 计算 token，并记录各上下文类别占用、裁剪原因、最终预算和 Prompt 版本；当前条款、Playbook、Schema 和证据约束不可被预算裁剪。
+71. Memory 保留不可变人工反馈，同时聚合可追溯偏好；冲突并存、置信度可衰减、过期只影响派生偏好，不删除审计记录，也不能覆盖 Playbook 或合同证据。
+72. 任务支持取消、节点/任务超时、固定错误重试预算、人工恢复和同任务并发保护；恢复历史、父 Step、重试序号、幂等键和决策摘要进入脱敏 Trace。
+73. 已使用用户本机 Key 对固定的 2 份合成 NDA 子集完成两次真实 DeepSeek 稳定性运行。两轮均为 `completed_with_failures`；该结果只证明真实调用链已跑通，不代表 23 份完整标注集效果达标。
+74. Web Workbench 的执行记录可区分本地模式、DeepSeek 真实调用、Planner、一次检索修复、Critic、Evidence、Memory、Injection 阻断、取消、超时和人工恢复；高风险、证据失败和冲突结果持续显示人工复核提示。
 
 ## 当前未实现
 
-后续待做包括：扩大人工标注样本规模，以及使用实际外部 LLM/Embedding 在标注集上复测。OCR 尚未实现，是否在下一轮引入必须单独评估和决策，不默认引入本地大型 OCR 模型。
+仍未完成或未达标的事项如下：
 
-迭代技术方案、实施顺序和验收口径见 `NEXT_PLAN.md`、`TASKS_2.md` 和 `UI_REDESIGN_PLAN.md`；这些文件保留计划形成过程，当前完成状态以代码、测试和本 README 为准。
+1. 未使用 DeepSeek 对 23 份完整标注集完成两轮外部模型稳定性评测；当前真实运行只覆盖固定的 2 份合成 NDA 子集。
+2. 真实 DeepSeek 两轮的 Evidence span、Memory 一致性和结构化修复指标未全部达标，且两轮波动明显；不能声明 Agent 效果验收通过。
+3. 任务 9 Code Review 后的代码没有再次消耗 DeepSeek 复跑；现有外部结果对应 Review 前的未提交工作区，限制详见 `evaluation/release/agent-evolution-verification.md`。
+4. 尚未使用真实外部 Embedding 在完整标注集上复测，默认仍为 `local_sparse`。
+5. OCR 尚未实现；扫描件会进入明确的 `PARSE_FAILED`，是否引入 OCR 必须另立迭代计划。
 
-当前基础评测只验证流程跑通，不声明生产级准确率。人工相关条款集直接运行本地混合检索，不使用语义命中 Stub 代替结果，但仍不代表实际外部 Embedding 模型质量；因此默认正式配置仍为 `local_sparse`。真实外部 LLM 和 Embedding 是否可用及是否有实际效果提升，仍取决于调用方提供的有效服务配置、凭据和后续实测结果。
+迭代技术方案、实施顺序和验收口径见 `NEXT_PLAN.md`、`TASKS_2.md`、`UI_REDESIGN_PLAN.md`、`AGENT_EVOLUTION_PLAN.md` 和 `TASKS_AGENT.md`；这些文件保留计划形成过程，当前完成状态以代码、测试和本 README 为准。
 
-当前 `effect-v1` 包含 6 份合同类型样本、6 条条款、3 条风险和 11 组相关条款标注。默认本地模式的已运行结果中，扩大后的相关条款 Recall@1 为 `11/11`，达到清单阈值 `0.8`，效果摘要为 `completed`；这些合成样本结果不能外推为生产准确率或真实外部 Embedding 效果。
+当前基础评测只验证流程跑通，不声明生产级准确率。人工相关条款集直接运行本地混合检索，不使用语义命中 Stub 代替结果，但仍不代表实际外部 Embedding 模型质量；因此默认正式配置仍为 `local_sparse`。真实 DeepSeek 子集运行验证了外部调用链，不等于证明模型效果稳定或达到生产要求。
+
+当前 `effect-v2` 包含 23 份合同、174 条条款、65 条唯一风险条款、20 组相关条款、20 组 Memory 对照和 10 组 Prompt Injection。默认本地模式完整评测中相关条款 Recall@1 为 `20/20`，但风险 Recall 和 Evidence span 均为 `0.5231`、Memory 一致性为 `0.55`，摘要为 `completed_with_failures`；这些合成样本结果不能外推为生产准确率或真实外部模型效果。
 
 当前 14 个工具均已在 `tool_registry` 中注册契约。`classify_contract_type`、`extract_key_fields`、`analyze_risk`、`criticize_risk`、`plan_review_action` 和 `generate_revision` 具备 LLM Provider 调用边界；默认 `local_structured` 模式下 Critic 和 Planner 使用确定性策略，不记录为真实外部 LLM 调用。
+
+## Agent 架构
+
+```mermaid
+flowchart LR
+    Web["Web Workbench"] --> API["FastAPI + SSE"]
+    API --> Agent["ReviewOrchestratorAgent"]
+    Agent --> Registry["显式 tool_registry"]
+    Registry --> Parse["Parser / Classifier"]
+    Registry --> Retrieve["Playbook + Hybrid Retrieval + rerank"]
+    Registry --> Memory["Memory Recall / Lifecycle"]
+    Registry --> Analyze["DeepSeek or Local Structured Analyzer"]
+    Registry --> Planner["Controlled Planner"]
+    Registry --> Critic["Controlled Critic"]
+    Registry --> Evidence["Deterministic Evidence Verifier"]
+    Planner -->|"最多一次 RETRIEVE_AGAIN"| Retrieve
+    Analyze --> Critic --> Evidence
+    Evidence -->|"失败或冲突"| Human["Human Review"]
+    Evidence -->|"通过"| Result["Formal Risks / Report"]
+    Agent --> Trace["Redacted Step Log / Trace"]
+    Trace --> Web
+```
+
+Planner 只能选择白名单动作，Orchestrator 才能执行工具；Critic 不能创建证据；Evidence Verifier 拥有正式风险最终准入权。合同正文、Memory 和工具返回均按不可信数据处理，DeepSeek Key、Authorization、完整 Prompt 和完整合同不进入 Trace。
+
+## 已验证失败案例
+
+1. DeepSeek Key、Base URL 或模型配置缺失时，外部模式在实际调用点返回明确配置错误，不静默回退为本地成功。
+2. Planner 非法动作、未知条款、越权状态或耗尽重试预算会被拒绝，不执行对应工具。
+3. Evidence 第一次失败最多执行一次受限检索修复；再次失败进入人工复核或 `EVIDENCE_MISSING`。
+4. Critic 冲突、无效结构化输出和 Prompt Injection 信号不会生成可确认的正式风险。
+5. 取消、节点超时和任务超时保留已完成日志；可恢复状态必须由人工提供原因后恢复，重试预算不会因重启重置。
+
+## 项目表述边界
+
+可以表述为：已实现显式 Tool Registry、受控 Planner/Critic、确定性 Evidence 准入、混合检索、Memory 生命周期、可恢复执行和脱敏 Trace，并用真实 DeepSeek Key 在 2 份合成 NDA 子集上完成两次稳定性运行。
+
+不得表述为：完整标注集已通过 DeepSeek 效果验收、达到生产级准确率、Memory 已证明提升效果、真实外部 Embedding 已验证，或所有指标均已达标。
 
 ## PDF 支持边界
 
@@ -109,6 +159,33 @@ python -m pip install -r requirements.txt
 pnpm install --frozen-lockfile
 pnpm exec playwright install chromium
 ```
+
+## DeepSeek 配置
+
+Key 只通过进程环境变量 `REVIEW_AGENT_LLM_API_KEY` 提供，不写入代码、README 或受版本控制的文件。应用当前使用 `os.getenv` 读取环境变量，**不会自动加载项目根目录的 `.env`**；`.env` 已被 `.gitignore` 排除，`.env.example` 只提供变量名和非敏感示例。
+
+PowerShell 启动前可直接设置当前进程环境：
+
+```powershell
+$env:REVIEW_AGENT_LLM_MODE = "openai_compatible"
+$env:REVIEW_AGENT_LLM_BASE_URL = "https://api.deepseek.com"
+$env:REVIEW_AGENT_LLM_API_KEY = "<your-deepseek-key>"
+$env:REVIEW_AGENT_LLM_MODEL = "deepseek-v4-pro"
+python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
+```
+
+如果 Key 已保存在本机 `.env`，必须在启动服务前显式导入当前 PowerShell 进程：
+
+```powershell
+Get-Content .env | ForEach-Object {
+  if ($_ -match '^([^#][^=]*)=(.*)$') {
+    [Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2], "Process")
+  }
+}
+python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
+```
+
+未配置 Key 时服务仍可启动；只有选择 `openai_compatible` 并实际调用时才返回配置错误。默认代码配置是 `local_structured`，而 `.env.example` 有意展示 DeepSeek 外部模式。成本单价未配置时只记录 token 和“未配置”，不推测金额。
 
 ## 运行服务
 
@@ -159,13 +236,14 @@ http://127.0.0.1:8000/health
 27. 在默认 `local_sparse` 模式下完成审查，确认相关条款结果包含 `local_sparse_hash_v1`、固定 256 维向量、余弦相似度、rerank 因子和最终分数，且执行日志标记 `local_sparse_no_external_embedding`。
 28. 配置 `openai_compatible` Embedding 后，确认日志显示实际模型、供应商请求 ID、输入数量、向量维度和耗时；让供应商返回错误时，确认任务进入 `RETRIEVAL_FAILED` 且没有 `lexical_fallback`。
 29. 在评测面板切换“流程摘要”和“效果摘要”，确认两者结果和加载/失败状态彼此独立。
-30. 运行效果评测，确认返回 14 个指标，且每项包含样本数、通过数、失败数、阈值、达标状态和失败样本；当前默认本地模式下相关条款 Recall@1 应显示 `11/11` 且达到 `0.8` 阈值。
+30. 运行效果评测，确认返回 23 个指标，且每项包含样本数、通过数、失败数、阈值、达标状态和失败样本；样本数为 0 时必须显示“无样本”且不得视为达标。当前默认本地模式下相关条款 Recall@1 应显示 `20/20` 且达到 `0.8` 阈值，但完整摘要仍为 `completed_with_failures`。
 31. 确认效果摘要显示 Git、Playbook、标注、LLM 和 Embedding 版本，并在 `evaluation/effect/` 生成以评测 ID 命名的 JSON 和 Markdown 文件。
 32. 上传 `samples/pdf/nda_text_zh.pdf` 和 `samples/pdf/nda_text_en.pdf`，确认正文按页解析，条款 `source_location` 包含页码、块 ID 和 `bbox`；正式风险的 `evidence_location` 精确到证据命中的 PDF 块和块内字符范围。
 33. 上传 `backend/tests/fixtures/pdf/scanned_image.pdf`，确认任务进入 `PARSE_FAILED`、提示“需要 OCR”，且不生成文档、条款和风险。
 34. 使用加密、复杂字体映射失败或损坏 PDF 时，确认界面展示具体解析原因，不显示文档解析成功。
-35. 展开 Agent 执行记录，确认任务 Trace、工具 Step、恢复信息和 Provider 摘要可读，且不出现密钥、完整合同 prompt 或前端堆栈。
-36. 运行 Playwright，确认 10 个 Chromium 主流程、错误流、三视口和可访问性用例均实际通过；每次运行使用独立的数据库、上传、报告和评测目录，浏览器和测试数据写入本机缓存或已忽略目录，不进入 Git。
+35. 展开 Agent 执行记录，确认任务 Trace、工具 Step、恢复信息和 Provider 摘要可读；本地模式与 DeepSeek 真实调用明确区分，且不出现密钥、完整合同 Prompt 或前端堆栈。
+36. 确认配置错误、Planner 非法动作、一次检索修复、Injection 阻断、取消、超时和恢复均有浏览器验收状态，且没有把夹具状态写入生产任务 API。
+37. 运行 Playwright，确认 13 个 Chromium 主流程、错误流、Agent 状态、三视口和可访问性用例均实际通过；每次运行使用独立的数据库、上传、报告和评测目录，浏览器和测试数据写入本机缓存或已忽略目录，不进入 Git。
 
 默认上传请求大小上限为 10 MB，可通过 `REVIEW_AGENT_MAX_UPLOAD_BYTES` 调整。
 默认 CORS 不允许通配来源；可通过逗号分隔的 `REVIEW_AGENT_ALLOWED_ORIGINS` 配置明确来源。
@@ -173,8 +251,10 @@ http://127.0.0.1:8000/health
 默认上传目录为 `backend/app/data/uploads`，可通过 `REVIEW_AGENT_UPLOAD_DIR` 调整。
 默认报告目录为 `backend/app/reports`，可通过 `REVIEW_AGENT_REPORT_DIR` 调整；默认评测输出目录为 `evaluation`，可通过 `REVIEW_AGENT_EVALUATION_OUTPUT_DIR` 调整。
 默认 LLM 模式为 `local_structured`；外部模式通过 `REVIEW_AGENT_LLM_BASE_URL`、`REVIEW_AGENT_LLM_API_KEY`、`REVIEW_AGENT_LLM_MODEL` 和 `REVIEW_AGENT_LLM_TIMEOUT_SECONDS` 配置。
+默认 LLM 上下文预算为 6000 tokens，可通过 `REVIEW_AGENT_LLM_CONTEXT_BUDGET_TOKENS` 调整；值必须是正整数。
 可通过 `REVIEW_AGENT_LLM_PROMPT_COST_PER_1M` 和 `REVIEW_AGENT_LLM_COMPLETION_COST_PER_1M` 配置每百万 token 单价；未配置时日志显示“未配置”。
 默认 Embedding 模式为 `local_sparse`；外部模式通过 `REVIEW_AGENT_EMBEDDING_MODE=openai_compatible`、`REVIEW_AGENT_EMBEDDING_BASE_URL`、`REVIEW_AGENT_EMBEDDING_API_KEY`、`REVIEW_AGENT_EMBEDDING_MODEL` 和 `REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS` 配置。
+Orchestrator 当前固定单节点超时为 90 秒、全任务超时为 300 秒；这两个值不是环境变量。解析、检索、LLM 输出、Evidence、节点超时、任务超时和通用任务错误的人工恢复预算各为 2 次，服务重启不会重置。
 
 ## 运行测试
 

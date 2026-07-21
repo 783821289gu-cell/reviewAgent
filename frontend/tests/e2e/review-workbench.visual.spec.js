@@ -13,6 +13,7 @@ test("工作台在桌面和移动端视口保持可用且不产生横向溢出",
     timeout: 45_000,
   });
   await expect(page.locator(".risk-card")).toHaveCount(4);
+  await expect(page.locator("[data-human-review-attention]")).toBeVisible();
 
   const iconResponse = await page.request.get("/src/assets/icons/shield-alert.svg");
   expect(iconResponse.status()).toBe(200);
@@ -52,6 +53,7 @@ test("工作台在桌面和移动端视口保持可用且不产生横向溢出",
   await page.getByRole("button", { name: "执行记录", exact: true }).click();
   await expect(page.locator("details.execution-log")).toHaveAttribute("open", "");
   await expect(page.locator("[data-execution-log]")).toContainText("任务 Trace");
+  await expect(page.locator(".agent-capability-list")).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 
