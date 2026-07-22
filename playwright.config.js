@@ -35,6 +35,7 @@ module.exports = defineConfig({
       REVIEW_AGENT_HOST: "127.0.0.1",
       REVIEW_AGENT_PORT: String(port),
       REVIEW_AGENT_ALLOWED_ORIGINS: baseURL,
+      REVIEW_AGENT_LOAD_DOTENV: "0",
       REVIEW_AGENT_LLM_MODE: "local_structured",
       REVIEW_AGENT_EMBEDDING_MODE: "local_sparse",
       REVIEW_AGENT_MEMORY_DB_PATH: path.join(runRoot, "review-agent.sqlite3"),

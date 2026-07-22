@@ -1,6 +1,27 @@
 import os
 from dataclasses import dataclass, field
 from math import isfinite
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ENV_FILE = PROJECT_ROOT / ".env"
+
+
+def _load_project_environment(dotenv_path: str | Path = PROJECT_ENV_FILE) -> bool:
+    if os.getenv("REVIEW_AGENT_LOAD_DOTENV", "1").strip().lower() in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }:
+        return False
+    return load_dotenv(dotenv_path=dotenv_path, override=False)
+
+
+_load_project_environment()
 
 
 def _default_memory_db_path() -> str:

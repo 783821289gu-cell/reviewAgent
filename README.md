@@ -148,9 +148,10 @@ Planner 只能选择白名单动作，Orchestrator 才能执行工具；Critic �
 1. `fastapi`：提供 ASGI 应用、路由、Pydantic 请求校验和静态文件集成。
 2. `uvicorn`：运行 FastAPI ASGI 应用。
 3. `python-multipart`：解析 `multipart/form-data` 合同上传请求。
-4. `httpx`：供 FastAPI `TestClient` 执行 API 契约测试，并执行 OpenAI-compatible HTTP 调用。
-5. `pdfplumber`：提取 PDF 页、文本词块和边界坐标，底层使用 `pdfminer.six`；项目固定为 `0.11.10`，采用 MIT 许可证。该依赖会同时安装 `pdfminer.six`、Pillow 和 `pypdfium2`，不包含 OCR 模型，也不会将合同发送到网络服务。
-6. Node.js、pnpm 和 `playwright@1.60.0`：只用于 Chromium 浏览器 E2E，不属于应用运行依赖。
+4. `python-dotenv`：应用启动时读取项目根目录 `.env`，已存在的进程环境变量保持优先。
+5. `httpx`：供 FastAPI `TestClient` 执行 API 契约测试，并执行 OpenAI-compatible HTTP 调用。
+6. `pdfplumber`：提取 PDF 页、文本词块和边界坐标，底层使用 `pdfminer.six`；项目固定为 `0.11.10`，采用 MIT 许可证。该依赖会同时安装 `pdfminer.six`、Pillow 和 `pypdfium2`，不包含 OCR 模型，也不会将合同发送到网络服务。
+7. Node.js、pnpm 和 `playwright@1.60.0`：只用于 Chromium 浏览器 E2E，不属于应用运行依赖。
 
 安装：
 
@@ -162,26 +163,30 @@ pnpm exec playwright install chromium
 
 ## DeepSeek 配置
 
-Key 只通过进程环境变量 `REVIEW_AGENT_LLM_API_KEY` 提供，不写入代码、README 或受版本控制的文件。应用当前使用 `os.getenv` 读取环境变量，**不会自动加载项目根目录的 `.env`**；`.env` 已被 `.gitignore` 排除，`.env.example` 只提供变量名和非敏感示例。
+Key 通过 `REVIEW_AGENT_LLM_API_KEY` 提供，不写入代码、README 或受版本控制的文件。应用启动时使用 `python-dotenv` 自动读取项目根目录的 `.env`；`.env` 已被 `.gitignore` 排除，`.env.example` 只提供变量名和非敏感示例。加载使用 `override=False`，因此 CI、容器或 PowerShell 中已经设置的进程环境变量优先于 `.env`。
 
-PowerShell 启动前可直接设置当前进程环境：
+本地 `.env` 可以直接配置：
+
+```dotenv
+REVIEW_AGENT_LLM_MODE=openai_compatible
+REVIEW_AGENT_LLM_BASE_URL=https://api.deepseek.com
+REVIEW_AGENT_LLM_API_KEY=<your-deepseek-key>
+REVIEW_AGENT_LLM_MODEL=deepseek-v4-pro
+```
+
+配置完成后直接启动：
+
+```powershell
+python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
+```
+
+需要临时覆盖 `.env` 时，可在 PowerShell 启动前设置当前进程环境：
 
 ```powershell
 $env:REVIEW_AGENT_LLM_MODE = "openai_compatible"
 $env:REVIEW_AGENT_LLM_BASE_URL = "https://api.deepseek.com"
 $env:REVIEW_AGENT_LLM_API_KEY = "<your-deepseek-key>"
 $env:REVIEW_AGENT_LLM_MODEL = "deepseek-v4-pro"
-python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
-```
-
-如果 Key 已保存在本机 `.env`，必须在启动服务前显式导入当前 PowerShell 进程：
-
-```powershell
-Get-Content .env | ForEach-Object {
-  if ($_ -match '^([^#][^=]*)=(.*)$') {
-    [Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2], "Process")
-  }
-}
 python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
 ```
 
@@ -259,6 +264,10 @@ Orchestrator 当前固定单节点超时为 90 秒、全任务超时为 300 秒�
 ## 运行测试
 
 ```powershell
+$env:REVIEW_AGENT_LOAD_DOTENV = "0"
 python -m unittest discover -s backend\tests -p "test_*.py"
 pnpm test:e2e
+Remove-Item Env:REVIEW_AGENT_LOAD_DOTENV
 ```
+
+后端测试和 Playwright 测试服务显式设置 `REVIEW_AGENT_LOAD_DOTENV=0`，避免本机 `.env` 中的真实 Provider、数据库和输出目录污染隔离测试；应用正常启动时不设置该变量，会自动加载 `.env`。
