@@ -1,7 +1,10 @@
-from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from threading import Thread
 from time import perf_counter
+from typing import Callable
 from uuid import uuid4
 
 from db.repositories import RecoveryError
@@ -45,6 +48,14 @@ EXECUTION_INTERRUPTS = (
 )
 
 
+@dataclass(frozen=True)
+class _ToolOutcome:
+    item: object
+    output: object | None
+    logs: list[StepLog]
+    error: Exception | None
+
+
 class ReviewOrchestratorAgent:
     def __init__(
         self,
@@ -52,12 +63,22 @@ class ReviewOrchestratorAgent:
         *,
         node_timeout_seconds: float = 90.0,
         task_timeout_seconds: float = 900.0,
+        deepseek_task_timeout_seconds: float = 3600.0,
+        llm_max_concurrency: int = 2,
     ):
-        if node_timeout_seconds <= 0 or task_timeout_seconds <= 0:
+        if (
+            node_timeout_seconds <= 0
+            or task_timeout_seconds <= 0
+            or deepseek_task_timeout_seconds <= 0
+        ):
             raise ValueError("execution timeouts must be positive")
+        if not 1 <= llm_max_concurrency <= 4:
+            raise ValueError("llm_max_concurrency must be between 1 and 4")
         self.event_store = event_store
         self.node_timeout_seconds = node_timeout_seconds
         self.task_timeout_seconds = task_timeout_seconds
+        self.deepseek_task_timeout_seconds = deepseek_task_timeout_seconds
+        self.llm_max_concurrency = llm_max_concurrency
 
     def start(
         self,
@@ -223,10 +244,15 @@ class ReviewOrchestratorAgent:
             self.event_store.release_execution(task_id, resolved_owner)
             return
 
+        effective_task_timeout_seconds = (
+            self.deepseek_task_timeout_seconds
+            if state.llm_mode == LLMMode.DEEPSEEK
+            else self.task_timeout_seconds
+        )
         execution_control = ToolExecutionControl(
             cancel_check=lambda: self.event_store.raise_if_cancelled(task_id),
             task_started_at=perf_counter(),
-            task_timeout_seconds=self.task_timeout_seconds,
+            task_timeout_seconds=effective_task_timeout_seconds,
             node_timeout_seconds=self.node_timeout_seconds,
             execution_retry_index=state.recovery_count,
         )
@@ -239,7 +265,8 @@ class ReviewOrchestratorAgent:
             trace_id=state.trace_id,
             llm_mode=state.llm_mode.value,
             node_timeout_seconds=self.node_timeout_seconds,
-            task_timeout_seconds=self.task_timeout_seconds,
+            task_timeout_seconds=effective_task_timeout_seconds,
+            llm_max_concurrency=self._batch_width(state),
             recovery_count=state.recovery_count,
         )
         try:
@@ -383,56 +410,77 @@ class ReviewOrchestratorAgent:
                         step_name="clause_structure",
                     )
 
-                    clauses_with_fields = []
+                    clauses_with_fields = _restored_clause_prefix(
+                        clauses,
+                        state.clauses or [],
+                    )
                     clause_total = len(clauses)
+                    completed = len(clauses_with_fields)
+                    first_pending_clause = (
+                        clauses[completed] if completed < clause_total else None
+                    )
                     state = self._publish_progress(
                         state,
                         logs,
                         stage="key_field_extract",
                         stage_label="提取条款关键字段",
-                        completed=0,
+                        completed=completed,
                         total=clause_total,
-                        current_item=clauses[0].clause_id if clauses else "",
+                        current_item=(first_pending_clause.clause_id if first_pending_clause else ""),
                         message=(
-                            f"正在处理 {clauses[0].clause_id}（0/{clause_total}）。"
-                            if clauses
-                            else "合同中没有可处理条款。"
+                            f"正在处理 {first_pending_clause.clause_id}（{completed}/{clause_total}）。"
+                            if first_pending_clause
+                            else f"条款关键字段提取完成（{completed}/{clause_total}）。"
                         ),
                         tool_name="extract_key_fields",
-                        clauses=[],
+                        clauses=[item.to_dict() for item in clauses_with_fields],
                     )
-                    for clause_index, clause in enumerate(clauses):
-                        key_fields = invoke_tool(
+                    batch_width = self._batch_width(state)
+                    for batch_start in range(completed, clause_total, batch_width):
+                        batch = clauses[
+                            batch_start : min(batch_start + batch_width, clause_total)
+                        ]
+                        parent_step_id = logs[-1].step_id if logs else ""
+                        outcomes = self._invoke_independent_batch(
                             task_id,
-                            tool_registry,
-                            "extract_key_fields",
-                            {"clause": clause},
-                            logs,
-                            step_name="key_field_extract",
-                        )
-                        clauses_with_fields.append(replace(clause, key_fields=key_fields))
-                        completed = clause_index + 1
-                        next_item = (
-                            clauses[completed].clause_id
-                            if completed < clause_total
-                            else ""
-                        )
-                        state = self._publish_progress(
-                            state,
-                            logs,
-                            stage="key_field_extract",
-                            stage_label="提取条款关键字段",
-                            completed=completed,
-                            total=clause_total,
-                            current_item=next_item,
-                            message=(
-                                f"正在处理 {next_item}（{completed}/{clause_total}）。"
-                                if next_item
-                                else f"条款关键字段提取完成（{completed}/{clause_total}）。"
-                            ),
+                            batch,
                             tool_name="extract_key_fields",
-                            clauses=[item.to_dict() for item in clauses_with_fields],
+                            input_builder=lambda item: {"clause": item},
+                            step_name="key_field_extract",
+                            execution_control=execution_control,
+                            parent_step_id=parent_step_id,
+                            max_workers=batch_width,
                         )
+                        for outcome in outcomes:
+                            logs.extend(outcome.logs)
+                            if outcome.error is not None:
+                                raise outcome.error
+                            clause = outcome.item
+                            clauses_with_fields.append(
+                                replace(clause, key_fields=outcome.output)
+                            )
+                            completed += 1
+                            next_item = (
+                                clauses[completed].clause_id
+                                if completed < clause_total
+                                else ""
+                            )
+                            state = self._publish_progress(
+                                state,
+                                logs,
+                                stage="key_field_extract",
+                                stage_label="提取条款关键字段",
+                                completed=completed,
+                                total=clause_total,
+                                current_item=next_item,
+                                message=(
+                                    f"正在处理 {next_item}（{completed}/{clause_total}）。"
+                                    if next_item
+                                    else f"条款关键字段提取完成（{completed}/{clause_total}）。"
+                                ),
+                                tool_name="extract_key_fields",
+                                clauses=[item.to_dict() for item in clauses_with_fields],
+                            )
                 except LLMOutputInvalidError as exc:
                     self.event_store.update_task(
                         task_id,
@@ -747,12 +795,17 @@ class ReviewOrchestratorAgent:
                 )
 
             if _before(state.status, ReviewStatus.RISK_ANALYZED):
+                target_context = None
                 try:
-                    analysis_results = []
+                    analysis_results = _restored_analysis_prefix(
+                        review_contexts,
+                        state.analysis_results or [],
+                    )
                     analysis_total = len(review_contexts)
+                    completed = len(analysis_results)
                     first_analysis_item = (
-                        _review_context_progress_item(review_contexts[0])
-                        if review_contexts
+                        _review_context_progress_item(review_contexts[completed])
+                        if completed < analysis_total
                         else ""
                     )
                     state = self._publish_progress(
@@ -760,53 +813,71 @@ class ReviewOrchestratorAgent:
                         logs,
                         stage="risk_analysis",
                         stage_label="分析合同风险",
-                        completed=0,
+                        completed=completed,
                         total=analysis_total,
                         current_item=first_analysis_item,
                         message=(
-                            f"正在分析 {first_analysis_item}（0/{analysis_total}）。"
+                            f"正在分析 {first_analysis_item}（{completed}/{analysis_total}）。"
                             if first_analysis_item
-                            else "没有风险上下文需要分析。"
+                            else f"风险分析完成（{completed}/{analysis_total}）。"
                         ),
                         tool_name="analyze_risk",
-                        analysis_results=[],
+                        analysis_results=analysis_results,
                     )
-                    for analysis_index, review_context in enumerate(review_contexts):
-                        finding = invoke_tool(
+                    batch_width = self._batch_width(state)
+                    for batch_start in range(completed, analysis_total, batch_width):
+                        batch = review_contexts[
+                            batch_start : min(batch_start + batch_width, analysis_total)
+                        ]
+                        parent_step_id = logs[-1].step_id if logs else ""
+                        outcomes = self._invoke_independent_batch(
                             task_id,
-                            tool_registry,
-                            "analyze_risk",
-                            {"review_context": review_context},
-                            logs,
-                            step_name="risk_analysis",
-                        )
-                        analysis_results.append(finding)
-                        completed = analysis_index + 1
-                        next_item = (
-                            _review_context_progress_item(review_contexts[completed])
-                            if completed < analysis_total
-                            else ""
-                        )
-                        state = self._publish_progress(
-                            state,
-                            logs,
-                            stage="risk_analysis",
-                            stage_label="分析合同风险",
-                            completed=completed,
-                            total=analysis_total,
-                            current_item=next_item,
-                            message=(
-                                f"正在分析 {next_item}（{completed}/{analysis_total}）。"
-                                if next_item
-                                else f"风险分析完成（{completed}/{analysis_total}）。"
-                            ),
+                            batch,
                             tool_name="analyze_risk",
-                            analysis_results=analysis_results,
+                            input_builder=lambda item: {"review_context": item},
+                            step_name="risk_analysis",
+                            execution_control=execution_control,
+                            parent_step_id=parent_step_id,
+                            max_workers=batch_width,
                         )
+                        for outcome in outcomes:
+                            logs.extend(outcome.logs)
+                            target_context = outcome.item
+                            if outcome.error is not None:
+                                raise outcome.error
+                            finding = outcome.output
+                            if _analysis_result_key(finding) != target_context["context_id"]:
+                                raise ValueError(
+                                    "risk finding identity does not match review context"
+                                )
+                            analysis_results.append(finding)
+                            completed += 1
+                            next_item = (
+                                _review_context_progress_item(review_contexts[completed])
+                                if completed < analysis_total
+                                else ""
+                            )
+                            state = self._publish_progress(
+                                state,
+                                logs,
+                                stage="risk_analysis",
+                                stage_label="分析合同风险",
+                                completed=completed,
+                                total=analysis_total,
+                                current_item=next_item,
+                                message=(
+                                    f"正在分析 {next_item}（{completed}/{analysis_total}）。"
+                                    if next_item
+                                    else f"风险分析完成（{completed}/{analysis_total}）。"
+                                ),
+                                tool_name="analyze_risk",
+                                analysis_results=analysis_results,
+                            )
                 except EXECUTION_INTERRUPTS:
                     raise
+                except RecoveryError:
+                    raise
                 except Exception as exc:
-                    target_context = review_context if "review_context" in locals() else None
                     if isinstance(target_context, dict):
                         try:
                             decision = _invoke_planner(
@@ -835,7 +906,7 @@ class ReviewOrchestratorAgent:
                         step_name="llm_output_invalid",
                         tool_name="analyze_risk",
                         review_contexts=review_contexts,
-                        analysis_results=[],
+                        analysis_results=analysis_results,
                         risk_findings=[],
                         logs=[log.to_dict() for log in logs],
                     )
@@ -858,19 +929,39 @@ class ReviewOrchestratorAgent:
                 context["context_id"]: index
                 for index, context in enumerate(review_contexts)
             }
-            evidence_results = []
-            risk_findings = []
+            resuming_evidence = (
+                str((state.progress or {}).get("stage", "")) == "evidence_verification"
+                and state.recovery_from_status != ReviewStatus.EVIDENCE_MISSING.value
+            )
+            evidence_results = (
+                list(state.evidence_results or []) if resuming_evidence else []
+            )
+            risk_findings = list(state.risk_findings or []) if resuming_evidence else []
+            evidence_resume_progress = (state.progress or {}) if resuming_evidence else {}
             active_context = None
             evidence_candidates = [
                 finding
                 for finding in analysis_results
                 if finding.get("review_status") != "NO_RISK"
             ]
-            evidence_total = len(evidence_candidates)
-            evidence_completed = 0
+            completed_evidence_ids = _restored_evidence_completion_ids(
+                evidence_resume_progress,
+                analysis_results,
+                evidence_candidates,
+            )
+            completed_evidence_id_set = set(completed_evidence_ids)
+            evidence_total = max(
+                len(evidence_candidates),
+                int(evidence_resume_progress.get("total", 0)),
+            )
+            evidence_completed = len(completed_evidence_ids)
+            first_pending_evidence = _next_pending_finding(
+                evidence_candidates,
+                completed_evidence_id_set,
+            )
             first_evidence_item = (
-                _finding_progress_item(evidence_candidates[0])
-                if evidence_candidates
+                _finding_progress_item(first_pending_evidence)
+                if first_pending_evidence is not None
                 else ""
             )
             state = self._publish_progress(
@@ -878,25 +969,30 @@ class ReviewOrchestratorAgent:
                 logs,
                 stage="evidence_verification",
                 stage_label="校验风险与证据",
-                completed=0,
+                completed=evidence_completed,
                 total=evidence_total,
                 current_item=first_evidence_item,
                 message=(
-                    f"正在校验 {first_evidence_item}（0/{evidence_total}）。"
+                    f"正在校验 {first_evidence_item}（{evidence_completed}/{evidence_total}）。"
                     if first_evidence_item
-                    else "没有风险候选需要证据校验。"
+                    else f"风险与证据校验完成（{evidence_completed}/{evidence_total}）。"
                 ),
                 tool_name="verify_evidence",
-                evidence_results=[],
-                risk_findings=[],
+                completed_item_ids=completed_evidence_ids,
+                analysis_results=analysis_results,
+                evidence_results=evidence_results,
+                risk_findings=risk_findings,
             )
             try:
                 for finding_index in range(len(analysis_results)):
                     finding = analysis_results[finding_index]
                     if finding["review_status"] == "NO_RISK":
                         continue
+                    finding_identity = _analysis_result_key(finding)
+                    if finding_identity in completed_evidence_id_set:
+                        continue
                     finding = dict(finding)
-                    context_key = f"{finding['clause_id']}:{finding['matched_rule_ids'][0]}"
+                    context_key = finding_identity
                     review_context = context_by_id.get(context_key)
                     if review_context is None:
                         raise ValueError("risk finding cannot be mapped back to review context")
@@ -1074,10 +1170,16 @@ class ReviewOrchestratorAgent:
                         analysis_results[finding_index] = finding
 
                     if finding["review_status"] == "NO_RISK":
+                        completed_evidence_ids.append(context_key)
+                        completed_evidence_id_set.add(context_key)
                         evidence_completed += 1
+                        next_pending = _next_pending_finding(
+                            evidence_candidates,
+                            completed_evidence_id_set,
+                        )
                         next_item = (
-                            _finding_progress_item(evidence_candidates[evidence_completed])
-                            if evidence_completed < evidence_total
+                            _finding_progress_item(next_pending)
+                            if next_pending is not None
                             else ""
                         )
                         state = self._publish_progress(
@@ -1094,6 +1196,7 @@ class ReviewOrchestratorAgent:
                                 else f"风险与证据校验完成（{evidence_completed}/{evidence_total}）。"
                             ),
                             tool_name="verify_evidence",
+                            completed_item_ids=completed_evidence_ids,
                             review_contexts=review_contexts,
                             analysis_results=analysis_results,
                             evidence_results=evidence_results,
@@ -1109,10 +1212,16 @@ class ReviewOrchestratorAgent:
                     ):
                         finding["review_status"] = "NEED_MANUAL_REVIEW"
                     risk_findings.append(finding)
+                    completed_evidence_ids.append(context_key)
+                    completed_evidence_id_set.add(context_key)
                     evidence_completed += 1
+                    next_pending = _next_pending_finding(
+                        evidence_candidates,
+                        completed_evidence_id_set,
+                    )
                     next_item = (
-                        _finding_progress_item(evidence_candidates[evidence_completed])
-                        if evidence_completed < evidence_total
+                        _finding_progress_item(next_pending)
+                        if next_pending is not None
                         else ""
                     )
                     state = self._publish_progress(
@@ -1129,6 +1238,7 @@ class ReviewOrchestratorAgent:
                             else f"风险与证据校验完成（{evidence_completed}/{evidence_total}）。"
                         ),
                         tool_name="verify_evidence",
+                        completed_item_ids=completed_evidence_ids,
                         review_contexts=review_contexts,
                         analysis_results=analysis_results,
                         evidence_results=evidence_results,
@@ -1303,7 +1413,7 @@ class ReviewOrchestratorAgent:
                 step_name="task_timeout",
                 last_timeout={
                     "type": "task",
-                    "limit_seconds": self.task_timeout_seconds,
+                    "limit_seconds": execution_control.task_timeout_seconds,
                     "reason": str(exc),
                     "resume_from_status": resume_from_status,
                 },
@@ -1356,6 +1466,7 @@ class ReviewOrchestratorAgent:
         message: str,
         tool_name: str = "",
         progress_state: str = "running",
+        completed_item_ids: list[str] | None = None,
         **state_updates,
     ) -> AgentState:
         progress = {
@@ -1368,6 +1479,8 @@ class ReviewOrchestratorAgent:
             "message": message,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if completed_item_ids is not None:
+            progress["completed_item_ids"] = list(completed_item_ids)
         updated = self.event_store.update_task(
             state.task_id,
             state.status,
@@ -1389,6 +1502,53 @@ class ReviewOrchestratorAgent:
             state=progress_state,
         )
         return updated
+
+    def _invoke_independent_batch(
+        self,
+        task_id: str,
+        items: list[object],
+        *,
+        tool_name: str,
+        input_builder: Callable[[object], dict],
+        step_name: str,
+        execution_control: ToolExecutionControl,
+        parent_step_id: str,
+        max_workers: int,
+    ) -> list[_ToolOutcome]:
+        def execute(item: object) -> _ToolOutcome:
+            item_logs: list[StepLog] = []
+            try:
+                output = invoke_tool(
+                    task_id,
+                    tool_registry,
+                    tool_name,
+                    input_builder(item),
+                    item_logs,
+                    step_name=step_name,
+                    execution_control=execution_control,
+                    parent_step_id=parent_step_id,
+                )
+                return _ToolOutcome(item, output, item_logs, None)
+            except Exception as exc:
+                return _ToolOutcome(item, None, item_logs, exc)
+
+        if max_workers == 1 or len(items) <= 1:
+            return [execute(item) for item in items]
+
+        with ThreadPoolExecutor(
+            max_workers=min(max_workers, len(items)),
+            thread_name_prefix=f"review-batch-{step_name}",
+        ) as executor:
+            futures = [
+                executor.submit(copy_context().run, execute, item)
+                for item in items
+            ]
+            return [future.result() for future in futures]
+
+    def _batch_width(self, state: AgentState) -> int:
+        if state.llm_mode != LLMMode.DEEPSEEK:
+            return 1
+        return self.llm_max_concurrency
 
     def _acquire_execution(self, task_id: str) -> str:
         execution_owner = f"exec_{uuid4().hex}"
@@ -1584,6 +1744,94 @@ def _planner_retry_count(review_contexts: list[dict]) -> int:
         and not isinstance(context.get("planner_retry_count", 0), bool)
     ]
     return max(counts, default=0)
+
+
+def _restored_clause_prefix(clauses: list, persisted_clauses: list[dict]) -> list:
+    if len(persisted_clauses) > len(clauses):
+        raise RecoveryError("持久化关键字段进度超过当前条款数量。")
+    restored = [clause_from_dict(item) for item in persisted_clauses]
+    expected_ids = [clause.clause_id for clause in clauses[: len(restored)]]
+    restored_ids = [clause.clause_id for clause in restored]
+    if restored_ids != expected_ids:
+        raise RecoveryError("持久化关键字段进度不是当前条款的连续前缀。")
+    return restored
+
+
+def _restored_analysis_prefix(
+    review_contexts: list[dict],
+    persisted_results: list[dict],
+) -> list[dict]:
+    if len(persisted_results) > len(review_contexts):
+        raise RecoveryError("持久化风险分析结果超过 Review Context 数量。")
+    expected_ids = [
+        str(context.get("context_id", ""))
+        for context in review_contexts[: len(persisted_results)]
+    ]
+    restored_ids = [_analysis_result_key(result) for result in persisted_results]
+    if restored_ids != expected_ids or len(set(restored_ids)) != len(restored_ids):
+        raise RecoveryError("持久化风险分析结果不是当前上下文的连续前缀。")
+    return [dict(result) for result in persisted_results]
+
+
+def _analysis_result_key(finding: dict) -> str:
+    if not isinstance(finding, dict):
+        raise ValueError("risk finding must be a dict")
+    clause_id = str(finding.get("clause_id", "")).strip()
+    rule_ids = finding.get("matched_rule_ids")
+    if (
+        not clause_id
+        or not isinstance(rule_ids, list)
+        or len(rule_ids) != 1
+        or not isinstance(rule_ids[0], str)
+        or not rule_ids[0].strip()
+    ):
+        raise ValueError("risk finding identity is invalid")
+    return f"{clause_id}:{rule_ids[0].strip()}"
+
+
+def _restored_evidence_completion_ids(
+    progress: dict,
+    analysis_results: list[dict],
+    evidence_candidates: list[dict],
+) -> list[str]:
+    if str(progress.get("stage", "")) != "evidence_verification":
+        return []
+    analysis_ids = {_analysis_result_key(finding) for finding in analysis_results}
+    raw_ids = progress.get("completed_item_ids")
+    if raw_ids is None:
+        completed = progress.get("completed", 0)
+        if isinstance(completed, bool) or not isinstance(completed, int):
+            raise RecoveryError("持久化证据进度完成数无效。")
+        if completed < 0 or completed > len(evidence_candidates):
+            raise RecoveryError("持久化证据进度完成数超出候选范围。")
+        return [
+            _analysis_result_key(finding)
+            for finding in evidence_candidates[:completed]
+        ]
+    if (
+        not isinstance(raw_ids, list)
+        or not all(isinstance(item, str) and item.strip() for item in raw_ids)
+    ):
+        raise RecoveryError("持久化证据进度标识无效。")
+    restored_ids = [item.strip() for item in raw_ids]
+    if len(restored_ids) != len(set(restored_ids)):
+        raise RecoveryError("持久化证据进度包含重复标识。")
+    if any(item not in analysis_ids for item in restored_ids):
+        raise RecoveryError("持久化证据进度不属于当前风险分析结果。")
+    completed = progress.get("completed", len(restored_ids))
+    if completed != len(restored_ids):
+        raise RecoveryError("持久化证据进度数量与标识不一致。")
+    return restored_ids
+
+
+def _next_pending_finding(
+    evidence_candidates: list[dict],
+    completed_ids: set[str],
+) -> dict | None:
+    for finding in evidence_candidates:
+        if _analysis_result_key(finding) not in completed_ids:
+            return finding
+    return None
 
 
 def _context_progress_item(current_clause: dict, matched_rule: dict) -> str:

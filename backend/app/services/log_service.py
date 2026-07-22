@@ -116,6 +116,7 @@ def invoke_tool(
     logs: list[StepLog],
     step_name: str | None = None,
     execution_control: ToolExecutionControl | None = None,
+    parent_step_id: str | None = None,
 ):
     if tool_name not in tool_registry:
         raise ValueError(f"未注册工具：{tool_name}")
@@ -124,7 +125,9 @@ def invoke_tool(
     resolved_step_name = step_name or tool_name
     trace_id = trace_id_for_task(task_id)
     step_id = f"step_{uuid4().hex}"
-    parent_step_id = logs[-1].step_id if logs else ""
+    resolved_parent_step_id = (
+        parent_step_id if parent_step_id is not None else (logs[-1].step_id if logs else "")
+    )
     retry_index = _retry_index(tool_input, execution_control)
     idempotency_key = _decision_idempotency_key(
         task_id,
@@ -134,6 +137,7 @@ def invoke_tool(
         retry_index,
     )
     start = perf_counter()
+    operation_started = False
     llm_calls: list[LLMCallMetadata] = []
     embedding_calls: list[EmbeddingCallMetadata] = []
     runtime_tool_input = tool_input
@@ -157,6 +161,7 @@ def invoke_tool(
         if execution_control is not None:
             execution_control.before_step(resolved_step_name)
         operation = lambda: tool_registry[tool_name](runtime_tool_input)
+        operation_started = True
         output = (
             execution_control.invoke(resolved_step_name, start, operation)
             if execution_control is not None
@@ -166,7 +171,15 @@ def invoke_tool(
             execution_control.after_step(resolved_step_name, start)
     except Exception as exc:
         status = _exception_status(exc)
-        token_summary = _token_cost_summary(tool_name, llm_calls, embedding_calls)
+        token_summary = _token_cost_summary(
+            tool_name,
+            llm_calls,
+            embedding_calls,
+            result_not_adopted=isinstance(
+                exc,
+                (TaskCancelledError, NodeExecutionTimeoutError, TaskExecutionTimeoutError),
+            ) and operation_started,
+        )
         failed_log = StepLog(
                 task_id=task_id,
                 trace_id=trace_id,
@@ -179,7 +192,7 @@ def invoke_tool(
                 output_summary="",
                 token_cost_summary=token_summary,
                 error_message=_safe_error_message(exc, tool_input),
-                parent_step_id=parent_step_id,
+                parent_step_id=resolved_parent_step_id,
                 retry_index=retry_index,
                 idempotency_key=idempotency_key,
                 trace_summary=_trace_summary(
@@ -217,7 +230,7 @@ def invoke_tool(
             output_summary=_summarize_output(output),
             token_cost_summary=token_summary,
             error_message="",
-            parent_step_id=parent_step_id,
+            parent_step_id=resolved_parent_step_id,
             retry_index=retry_index,
             idempotency_key=idempotency_key,
             trace_summary=_trace_summary(
@@ -747,6 +760,8 @@ def _token_cost_summary(
     tool_name: str,
     llm_calls: list[LLMCallMetadata] | None = None,
     embedding_calls: list[EmbeddingCallMetadata] | None = None,
+    *,
+    result_not_adopted: bool = False,
 ) -> str:
     if tool_name == "retrieve_related_clauses":
         if embedding_calls:
@@ -782,4 +797,6 @@ def _token_cost_summary(
         )
     if not runtime_calls_llm(tool_name):
         return runtime_llm_mode(tool_name)
+    if result_not_adopted:
+        return "openai_compatible_in_flight_result_not_adopted"
     return "openai_compatible_not_invoked"

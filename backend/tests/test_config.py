@@ -83,8 +83,19 @@ class ConfigTest(unittest.TestCase):
 
         self.assertEqual(settings.node_timeout_seconds, 90)
         self.assertEqual(settings.task_timeout_seconds, 900)
+        self.assertEqual(settings.deepseek_task_timeout_seconds, 3600)
+        self.assertEqual(settings.llm_max_concurrency, 2)
         self.assertTrue(settings.runtime_log_file.endswith("review_agent.log"))
         self.assertEqual(settings.runtime_log_level, "INFO")
+
+    def test_llm_concurrency_is_bounded(self):
+        with patch.dict(
+            os.environ,
+            {"REVIEW_AGENT_LLM_MAX_CONCURRENCY": "5"},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(ValueError, "must not exceed 4"):
+                Settings()
 
 
 if __name__ == "__main__":

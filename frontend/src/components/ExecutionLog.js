@@ -220,6 +220,9 @@ function providerCapability(logs, taskLlmMode = "") {
   const externalCalls = external.flatMap((provider) => provider.calls || []);
   const failedCall = externalCalls.find((call) => call.error_type);
   const successfulCall = externalCalls.find((call) => !call.error_type);
+  const hasUnadoptedInFlightCall = providers.some(
+    (provider) => provider.summary === "openai_compatible_in_flight_result_not_adopted",
+  );
   const models = externalCalls.map((call) => String(call.model || "").toLowerCase());
   const isDeepSeek = taskLlmMode === "openai_compatible"
     || models.some((model) => model.includes("deepseek"));
@@ -234,12 +237,24 @@ function providerCapability(logs, taskLlmMode = "") {
     };
   }
   if (successfulCall) {
+    const successfulCount = externalCalls.filter((call) => !call.error_type).length;
     return {
       key: "provider",
       label: isDeepSeek ? "DeepSeek" : "外部 LLM",
-      value: `真实调用 ${externalCalls.filter((call) => !call.error_type).length}/${externalCalls.length} 成功`,
-      tone: failedCall ? "warning" : "success",
+      value: hasUnadoptedInFlightCall
+        ? `真实调用 ${successfulCount}/${externalCalls.length} 成功；另有在途调用结果未采纳`
+        : `真实调用 ${successfulCount}/${externalCalls.length} 成功`,
+      tone: failedCall || hasUnadoptedInFlightCall ? "warning" : "success",
       outcome: "external_success",
+    };
+  }
+  if (hasUnadoptedInFlightCall) {
+    return {
+      key: "provider",
+      label: taskLlmMode === "openai_compatible" ? "DeepSeek" : "外部 LLM",
+      value: "调用超时，在途结果未采纳",
+      tone: "failure",
+      outcome: "external_failure",
     };
   }
   if (external.length > 0 || providers.some((provider) => provider.summary === "openai_compatible_not_invoked")) {
@@ -379,6 +394,9 @@ function formatProviderSummary(rawSummary) {
     }
     if (rawSummary === "openai_compatible_not_invoked") {
       return "外部 LLM 模式（本步骤未调用）";
+    }
+    if (rawSummary === "openai_compatible_in_flight_result_not_adopted") {
+      return "外部 LLM 调用超时（在途结果未采纳）";
     }
     return rawSummary || "not_applicable";
   }

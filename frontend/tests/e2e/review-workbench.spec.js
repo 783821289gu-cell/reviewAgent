@@ -282,6 +282,29 @@ test("执行记录区分 DeepSeek、本地模式和受控 Agent 决策", async (
   await expect(capability(page, "evidence")).toContainText("失败 1");
   await expect(capability(page, "memory")).toContainText("读取调用 1 / 写入调用 1");
   await expect(page.locator("#component-test-root")).toContainText("调整 additional_keywords,top_k");
+
+  const unadoptedInFlight = {
+    ...AGENT_STATES.deepseek_repair,
+    logs: [
+      ...AGENT_STATES.deepseek_repair.logs,
+      {
+        ...AGENT_STATES.deepseek_repair.logs[0],
+        step_id: "step-timeout",
+        status: "timeout",
+        token_cost_summary: "openai_compatible_in_flight_result_not_adopted",
+        trace_summary: {
+          ...AGENT_STATES.deepseek_repair.logs[0].trace_summary,
+          provider: { summary: "openai_compatible_in_flight_result_not_adopted" },
+        },
+      },
+    ],
+  };
+  await renderExecutionLog(page, unadoptedInFlight);
+  await expect(capability(page, "provider")).toContainText("在途调用结果未采纳");
+  await expect(page.locator("#component-test-root")).toContainText(
+    "外部 LLM 调用超时（在途结果未采纳）",
+  );
+
   await renderWorkbench(page, AGENT_STATES.deepseek_repair);
   await expect(page.locator("[data-task-provider]")).toContainText("DeepSeek · 真实调用 1/1 成功");
   await expect(page.locator("[data-task-provider-brief]")).toHaveText("DeepSeek 已调用");

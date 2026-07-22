@@ -51,6 +51,8 @@ def create_app(
         event_store,
         node_timeout_seconds=app_settings.node_timeout_seconds,
         task_timeout_seconds=app_settings.task_timeout_seconds,
+        deepseek_task_timeout_seconds=app_settings.deepseek_task_timeout_seconds,
+        llm_max_concurrency=app_settings.llm_max_concurrency,
     )
     application.state.recovered_task_ids = []
     application.state.accepting_tasks = False

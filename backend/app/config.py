@@ -68,6 +68,13 @@ def _positive_int(name: str, default: str) -> int:
     return int(raw_value)
 
 
+def _bounded_positive_int(name: str, default: str, maximum: int) -> int:
+    value = _positive_int(name, default)
+    if value > maximum:
+        raise ValueError(f"{name} must not exceed {maximum}")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str = os.getenv("REVIEW_AGENT_HOST", "127.0.0.1")
@@ -104,6 +111,16 @@ class Settings:
     )
     task_timeout_seconds: float = field(
         default_factory=lambda: _positive_float("REVIEW_AGENT_TASK_TIMEOUT_SECONDS", "900")
+    )
+    deepseek_task_timeout_seconds: float = field(
+        default_factory=lambda: _positive_float(
+            "REVIEW_AGENT_DEEPSEEK_TASK_TIMEOUT_SECONDS", "3600"
+        )
+    )
+    llm_max_concurrency: int = field(
+        default_factory=lambda: _bounded_positive_int(
+            "REVIEW_AGENT_LLM_MAX_CONCURRENCY", "2", 4
+        )
     )
     memory_db_path: str = os.getenv("REVIEW_AGENT_MEMORY_DB_PATH", _default_memory_db_path())
     upload_dir: str = os.getenv("REVIEW_AGENT_UPLOAD_DIR", _default_upload_dir())
