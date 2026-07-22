@@ -121,7 +121,7 @@ function capabilityStates(task) {
   ));
 
   return [
-    providerCapability(logs),
+    taskProviderStatus(task),
     plannerCapability(plannerLogs),
     retrievalRepairCapability(retrievalRepairLogs),
     decisionCapability("critic", "Critic", criticLogs),
@@ -135,6 +135,10 @@ function capabilityStates(task) {
       tone: injectionBlocked ? "warning" : "neutral",
     },
   ];
+}
+
+export function taskProviderStatus(task) {
+  return providerCapability(task?.logs || []);
 }
 
 function retrievalRepairCapability(logs) {
@@ -190,6 +194,7 @@ function providerCapability(logs) {
       label: isDeepSeek ? "DeepSeek" : "外部 LLM",
       value: `调用失败：${failedCall.error_type}`,
       tone: "failure",
+      outcome: "external_failure",
     };
   }
   if (successfulCall) {
@@ -198,6 +203,7 @@ function providerCapability(logs) {
       label: isDeepSeek ? "DeepSeek" : "外部 LLM",
       value: `真实调用 ${externalCalls.filter((call) => !call.error_type).length}/${externalCalls.length} 成功`,
       tone: failedCall ? "warning" : "success",
+      outcome: "external_success",
     };
   }
   if (external.length > 0 || providers.some((provider) => provider.summary === "openai_compatible_not_invoked")) {
@@ -206,6 +212,7 @@ function providerCapability(logs) {
       label: "外部 LLM",
       value: "外部模式已配置，本任务未产生调用",
       tone: "neutral",
+      outcome: "external_not_invoked",
     };
   }
   if (providers.some((provider) => String(provider.summary || "").includes("no_external_llm"))) {
@@ -214,9 +221,16 @@ function providerCapability(logs) {
       label: "LLM",
       value: "本地模式 / 无外部 LLM",
       tone: "neutral",
+      outcome: "local",
     };
   }
-  return { key: "provider", label: "LLM", value: "未产生调用记录", tone: "neutral" };
+  return {
+    key: "provider",
+    label: "LLM",
+    value: "未产生调用记录",
+    tone: "neutral",
+    outcome: "unknown",
+  };
 }
 
 function plannerCapability(logs) {

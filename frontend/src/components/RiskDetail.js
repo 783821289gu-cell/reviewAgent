@@ -1,6 +1,7 @@
 import { MemoryTrace } from "./MemoryTrace.js";
 import { ReviewActions } from "./ReviewActions.js";
 import { icon } from "./Icon.js";
+import { riskFeedbackState } from "./riskFeedback.js";
 
 export function RiskDetail(root, props) {
   root.textContent = "";
@@ -40,8 +41,10 @@ export function RiskDetail(root, props) {
   severity.textContent = `${risk.severity || "未分级"}风险`;
   const confidence = document.createElement("span");
   confidence.textContent = `置信度 ${formatConfidence(risk.confidence)}`;
+  const feedbackState = riskFeedbackState(risk);
   const reviewStatus = document.createElement("span");
-  reviewStatus.textContent = reviewStatusLabel(risk.review_status);
+  reviewStatus.className = `risk-decision decision-${feedbackState.tone}`;
+  reviewStatus.textContent = feedbackState.label;
   statusLine.append(severity, confidence, reviewStatus);
   item.append(header, statusLine, renderFieldList(risk));
 
@@ -82,19 +85,6 @@ function renderFieldList(risk) {
   appendField(fields, "报告", reportChoiceLabel(risk.include_in_report));
 
   return fields;
-}
-
-function reviewStatusLabel(status) {
-  if (status === "NEED_MANUAL_REVIEW") {
-    return "待人工复核";
-  }
-  if (status === "CONFIRMED_RISK") {
-    return "已确认";
-  }
-  if (status === "IGNORED_RISK") {
-    return "已忽略";
-  }
-  return status || "未知状态";
 }
 
 function reportChoiceLabel(includeInReport) {

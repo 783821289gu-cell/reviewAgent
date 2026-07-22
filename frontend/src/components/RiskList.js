@@ -1,4 +1,5 @@
 import { icon } from "./Icon.js";
+import { riskFeedbackState } from "./riskFeedback.js";
 
 export function RiskList(root, props) {
   root.textContent = "";
@@ -16,8 +17,13 @@ export function RiskList(root, props) {
   list.className = "risk-list";
 
   risks.forEach((risk) => {
+    const feedbackState = riskFeedbackState(risk);
     const item = document.createElement("article");
-    item.className = risk.risk_id === props.activeRiskId ? "risk-card risk-card-active" : "risk-card";
+    item.className = [
+      "risk-card",
+      `risk-card-${feedbackState.tone}`,
+      risk.risk_id === props.activeRiskId ? "risk-card-active" : "",
+    ].filter(Boolean).join(" ");
 
     const selectRisk = () => {
       if (typeof props.onSelectRisk === "function") {
@@ -61,7 +67,12 @@ export function RiskList(root, props) {
 
     const meta = document.createElement("p");
     meta.className = "risk-meta";
-    meta.textContent = `${risk.clause_id || "未知条款"} / 置信度 ${formatConfidence(risk.confidence)} / ${reviewStatusLabel(risk.review_status)}`;
+    const context = document.createElement("span");
+    context.textContent = `${risk.clause_id || "未知条款"} / 置信度 ${formatConfidence(risk.confidence)}`;
+    const decision = document.createElement("span");
+    decision.className = `risk-decision decision-${feedbackState.tone}`;
+    decision.textContent = feedbackState.label;
+    meta.append(context, decision);
     item.appendChild(meta);
 
     list.appendChild(item);
@@ -79,14 +90,4 @@ function formatConfidence(value) {
     return "-";
   }
   return `${Math.round(value * 100)}%`;
-}
-
-function reviewStatusLabel(status) {
-  if (status === "NEED_MANUAL_REVIEW") {
-    return "待人工复核";
-  }
-  if (status === "CONFIRMED_RISK") {
-    return "已验证";
-  }
-  return status || "未知状态";
 }

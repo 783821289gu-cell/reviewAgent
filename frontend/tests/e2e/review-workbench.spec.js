@@ -56,6 +56,8 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
 
   const riskCards = page.locator(".risk-card");
   await expect(riskCards).toHaveCount(4);
+  await expect(page.locator("[data-pending-risk-count]")).toHaveText("4");
+  await expect(page.locator("[data-task-provider-brief]")).toContainText("未使用 DeepSeek");
   const firstRiskId = await riskId(riskCards.nth(0));
   const secondRiskId = await riskId(riskCards.nth(1));
 
@@ -70,19 +72,27 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
 
   await page.getByLabel("加入报告").check();
   await submitFeedback(page, "采纳风险");
+  await expect(page.locator("[data-pending-risk-count]")).toHaveText("3");
+  await expect(riskCards.nth(0).locator(".risk-decision")).toHaveText("已采纳");
+  await expect(page.getByRole("button", { name: "已采纳" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".memory-trace")).toContainText("本次人工反馈已写入 Memory");
 
   await riskCards.nth(1).click();
   await page.getByLabel("忽略原因").fill("E2E 合成样本中确认不纳入报告");
   await submitFeedback(page, "忽略风险");
+  await expect(page.locator("[data-pending-risk-count]")).toHaveText("2");
+  await expect(riskCards.nth(1).locator(".risk-decision")).toHaveText("已忽略");
   await expect(page.locator(".review-entry-status")).toHaveText("已忽略");
 
   await riskCards.nth(2).click();
   await page.getByLabel("风险等级").selectOption("低");
   await submitFeedback(page, "保存等级");
-  await expect(page.locator(".review-entry-status")).toHaveText("已确认");
+  await expect(page.locator("[data-pending-risk-count]")).toHaveText("1");
+  await expect(page.locator(".review-entry-status")).toHaveText("等级已修改");
   await page.getByLabel("修改建议").fill("E2E 更新后的合成修改建议");
   await submitFeedback(page, "保存建议");
+  await expect(page.locator("[data-pending-risk-count]")).toHaveText("1");
+  await expect(page.locator(".review-entry-status")).toHaveText("建议已修改");
   await expect(page.locator("[data-risk-detail] .risk-detail-fields")).toContainText(
     "E2E 更新后的合成修改建议",
   );
@@ -192,6 +202,8 @@ test("执行记录区分 DeepSeek、本地模式和受控 Agent 决策", async (
 
   await renderExecutionLog(page, AGENT_STATES.local_mode);
   await expect(capability(page, "provider")).toContainText("本地模式 / 无外部 LLM");
+  await renderWorkbench(page, AGENT_STATES.local_mode);
+  await expect(page.locator("[data-task-provider-brief]")).toContainText("未使用 DeepSeek");
 
   await renderExecutionLog(page, AGENT_STATES.deepseek_repair);
   await expect(capability(page, "provider")).toContainText("DeepSeek");
@@ -202,6 +214,9 @@ test("执行记录区分 DeepSeek、本地模式和受控 Agent 决策", async (
   await expect(capability(page, "evidence")).toContainText("失败 1");
   await expect(capability(page, "memory")).toContainText("读取调用 1 / 写入调用 1");
   await expect(page.locator("#component-test-root")).toContainText("调整 additional_keywords,top_k");
+  await renderWorkbench(page, AGENT_STATES.deepseek_repair);
+  await expect(page.locator("[data-task-provider]")).toContainText("DeepSeek · 真实调用 1/1 成功");
+  await expect(page.locator("[data-task-provider-brief]")).toHaveText("DeepSeek 已调用");
 
   await renderWorkbench(page, AGENT_STATES.evidence_recovered);
   await expect(page.locator("[data-human-review-attention]")).toHaveCount(0);
@@ -328,7 +343,7 @@ async function submitFeedback(page, actionName) {
   await page.getByRole("button", { name: actionName }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(200);
-  await expect(page.locator(".feedback-message")).toContainText("人工反馈");
+  await expect(page.locator("[data-feedback-notice]")).toContainText("人工反馈");
 }
 
 

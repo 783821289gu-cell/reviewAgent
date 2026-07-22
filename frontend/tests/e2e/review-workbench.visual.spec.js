@@ -38,7 +38,7 @@ test("工作台在桌面和移动端视口保持可用且不产生横向溢出",
   });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("button", { name: "风险", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "待处理", exact: true })).toBeVisible();
   await expect(page.locator(".inspector-pane")).toBeVisible();
   await expect(page.locator(".document-pane")).toBeHidden();
   await expectNoHorizontalOverflow(page);

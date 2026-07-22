@@ -224,6 +224,7 @@ export function renderApp(root) {
         feedback: {
           riskId: feedbackPayload.riskId || "",
           loadingRiskId: "",
+          action: feedbackPayload.action || "",
           error: "请先完成合同上传和审查任务。",
           message: "",
         },
@@ -235,6 +236,7 @@ export function renderApp(root) {
       feedback: {
         riskId: feedbackPayload.riskId,
         loadingRiskId: feedbackPayload.riskId,
+        action: feedbackPayload.action,
         error: "",
         message: "",
       },
@@ -267,6 +269,7 @@ export function renderApp(root) {
         feedback: {
           riskId: feedbackPayload.riskId,
           loadingRiskId: "",
+          action: feedbackPayload.action,
           error: "",
           message: payload.message || "人工反馈已记录。",
         },
@@ -276,6 +279,7 @@ export function renderApp(root) {
         feedback: {
           riskId: feedbackPayload.riskId,
           loadingRiskId: "",
+          action: feedbackPayload.action,
           error: error.message || "人工反馈提交失败",
           message: "",
         },
@@ -683,6 +687,7 @@ function emptyFeedback() {
   return {
     riskId: "",
     loadingRiskId: "",
+    action: "",
     error: "",
     message: "",
   };

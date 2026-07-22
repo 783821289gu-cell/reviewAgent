@@ -1,7 +1,7 @@
 import { ContractViewer } from "./ContractViewer.js";
 import { ContextTrace } from "./ContextTrace.js";
 import { EvaluationPanel } from "./EvaluationPanel.js";
-import { ExecutionLog } from "./ExecutionLog.js";
+import { ExecutionLog, taskProviderStatus } from "./ExecutionLog.js";
 import { icon } from "./Icon.js";
 import { LocalReviewPanel } from "./LocalReviewPanel.js";
 import { MemoryTrace } from "./MemoryTrace.js";
@@ -10,6 +10,7 @@ import { ReviewProgress } from "./ReviewProgress.js";
 import { RiskDetail } from "./RiskDetail.js";
 import { RiskList } from "./RiskList.js";
 import { RuleDetail } from "./RuleDetail.js";
+import { pendingRiskCount } from "./riskFeedback.js";
 
 export function WorkbenchLayout(root, props) {
   const task = props.task;
@@ -28,7 +29,7 @@ export function WorkbenchLayout(root, props) {
     <section class="workbench workspace-${workspaceView}${reviewAttention ? " has-review-attention" : ""}" aria-label="审查工作台">
       ${renderTaskStrip(task, props.report, props.taskControl)}
       ${reviewAttention ? renderReviewAttention(reviewAttention) : ""}
-      ${workspaceView === "review" ? renderReviewWorkspace(props.mobileView, risks, props.riskFilter) : ""}
+      ${workspaceView === "review" ? renderReviewWorkspace(props.mobileView, risks, props.riskFilter, props.feedback) : ""}
       ${workspaceView === "memory" ? renderMemoryWorkspace(task, risks) : ""}
       ${workspaceView === "evaluation" ? renderEvaluationWorkspace() : ""}
       ${renderExecutionDrawer(task, props.executionLogOpen, props.mobileView)}
@@ -198,19 +199,25 @@ function renderTaskStrip(task, report, taskControl) {
     && !TASK_TERMINAL_STATUSES.has(task.status);
   const canRecover = task && RECOVERABLE_TASK_STATUSES.has(task.status);
   const controlBusy = Boolean(taskControl?.action);
+  const provider = taskProviderStatus(task);
+  const providerDetail = `${provider.label} · ${provider.value}`;
   return `
     <header class="task-strip">
       <div class="task-title">
         ${icon("file-text")}
         <div>
           <strong data-contract-name>${escapeHtml(task?.file_name || "未创建任务")}</strong>
-          <span>${escapeHtml(task?.contract_classification?.contract_type || "等待合同识别")}</span>
+          <div class="task-title-meta">
+            <span>${escapeHtml(task?.contract_classification?.contract_type || "等待合同识别")}</span>
+            <span class="task-provider-brief provider-${provider.tone}" data-task-provider-brief title="${escapeHtml(providerDetail)}">${escapeHtml(providerBrief(provider))}</span>
+          </div>
         </div>
       </div>
       <dl class="task-strip-meta">
         <div><dt>状态</dt><dd data-review-status>${escapeHtml(task?.status || "START")}</dd></div>
         <div><dt>立场</dt><dd>${escapeHtml(task?.review_position || "未选择")}</dd></div>
         <div><dt>Playbook</dt><dd data-playbook-version>${escapeHtml(playbookVersion(task))}</dd></div>
+        <div class="task-provider-meta provider-${provider.tone}"><dt>LLM</dt><dd data-task-provider title="${escapeHtml(providerDetail)}">${escapeHtml(providerDetail)}</dd></div>
       </dl>
       <div class="task-actions">
         <div class="task-control-actions">
@@ -259,11 +266,12 @@ const RECOVERABLE_TASK_STATUSES = new Set([
   "TASK_ERROR",
 ]);
 
-function renderReviewWorkspace(mobileView, risks, activeFilter) {
+function renderReviewWorkspace(mobileView, risks, activeFilter, feedback) {
   const view = validMobileView(mobileView);
+  const pendingCount = pendingRiskCount(risks);
   return `
     <nav class="mobile-mode-tabs" aria-label="审查视图">
-      ${mobileModeButton("risk", "风险", view, risks.length)}
+      ${mobileModeButton("risk", "待处理", view, pendingCount)}
       ${mobileModeButton("contract", "合同", view)}
       ${mobileModeButton("log", "执行记录", view)}
     </nav>
@@ -306,9 +314,13 @@ function renderReviewWorkspace(mobileView, risks, activeFilter) {
 
       <aside class="inspector-pane" aria-label="风险检查器">
         <header class="pane-toolbar inspector-toolbar">
-          <div><span class="section-kicker">RISKS</span><h2>风险检查器 <b>${risks.length}</b></h2></div>
+          <div><span class="section-kicker">RISKS · 待处理</span><h2>风险检查器 <b data-pending-risk-count>${pendingCount}</b></h2></div>
+          <span class="inspector-progress">已处理 ${risks.length - pendingCount} / 总计 ${risks.length}</span>
         </header>
-        ${renderRiskFilters(risks, activeFilter)}
+        <div class="inspector-controls">
+          ${renderRiskFilters(risks, activeFilter)}
+          ${renderFeedbackNotice(feedback)}
+        </div>
         <div class="inspector-scroll">
           <div data-risk-list></div>
           <div data-risk-detail></div>
@@ -324,6 +336,27 @@ function renderReviewWorkspace(mobileView, risks, activeFilter) {
       </aside>
     </div>
   `;
+}
+
+function renderFeedbackNotice(feedback) {
+  if (feedback?.loadingRiskId) {
+    return `<div class="risk-feedback-notice is-loading" role="status" data-feedback-notice>${icon("rotate-ccw")}<span>${escapeHtml(feedback.loadingRiskId)} 正在提交人工反馈…</span></div>`;
+  }
+  if (feedback?.error) {
+    return `<div class="risk-feedback-notice is-error" role="alert" data-feedback-notice>${icon("shield-alert")}<span>${escapeHtml(feedback.error)}</span></div>`;
+  }
+  if (feedback?.message) {
+    return `<div class="risk-feedback-notice is-success" role="status" data-feedback-notice>${icon("check")}<span>${escapeHtml(feedback.message)}</span></div>`;
+  }
+  return "";
+}
+
+function providerBrief(provider) {
+  if (provider.outcome === "external_success") return `${provider.label} 已调用`;
+  if (provider.outcome === "external_failure") return `${provider.label} 调用失败`;
+  if (provider.outcome === "external_not_invoked") return "外部 LLM 未调用";
+  if (provider.outcome === "local") return "本地模式 · 未使用 DeepSeek";
+  return "LLM 使用情况待确认";
 }
 
 function renderRiskFilters(risks, activeFilter) {

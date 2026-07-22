@@ -633,6 +633,44 @@ h4 {
   font-size: 11px;
 }
 
+.task-title-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.task-title-meta > span:first-child {
+  flex: 0 1 auto;
+}
+
+.task-title-meta .task-provider-brief {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.task-provider-brief::before {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #7d8994;
+  content: "";
+}
+
+.task-provider-brief.provider-success::before,
+.task-provider-brief.provider-warning::before {
+  background: var(--success);
+}
+
+.task-provider-brief.provider-failure::before {
+  background: var(--danger);
+}
+
 .task-strip-meta {
   display: flex;
   align-items: center;
@@ -658,6 +696,15 @@ h4 {
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.task-provider-meta.provider-success dd,
+.task-provider-meta.provider-warning dd {
+  color: var(--success);
+}
+
+.task-provider-meta.provider-failure dd {
+  color: var(--danger);
 }
 
 .task-report {
@@ -1217,13 +1264,72 @@ h4 {
   vertical-align: middle;
 }
 
+.inspector-progress {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.inspector-controls {
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
 .risk-filters {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 4px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
   background: var(--surface-subtle);
+}
+
+.risk-feedback-notice {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  margin: 0 12px 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.risk-feedback-notice .icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.risk-feedback-notice span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.risk-feedback-notice.is-success {
+  border-color: #b8d8c4;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.risk-feedback-notice.is-error {
+  border-color: #e5bbb6;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.risk-feedback-notice.is-loading .icon {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .risk-filters button {
@@ -1282,6 +1388,19 @@ h4 {
 
 .risk-card-active {
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.risk-card-accepted {
+  border-left: 3px solid var(--success);
+}
+
+.risk-card-ignored {
+  border-left: 3px solid #89949e;
+  background: #f7f8f9;
+}
+
+.risk-card-updated {
+  border-left: 3px solid var(--info);
 }
 
 .risk-card-header {
@@ -1355,6 +1474,53 @@ h4 {
   color: var(--muted);
   font-size: 10px;
   line-height: 1.45;
+}
+
+.risk-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+}
+
+.risk-decision {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.risk-decision.decision-pending,
+.review-entry-status.decision-pending {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.risk-decision.decision-accepted,
+.review-entry-status.decision-accepted,
+.risk-status-line > span.risk-decision.decision-accepted {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.risk-decision.decision-ignored,
+.review-entry-status.decision-ignored,
+.risk-status-line > span.risk-decision.decision-ignored {
+  background: #edf0f2;
+  color: #596570;
+}
+
+.risk-decision.decision-updated,
+.review-entry-status.decision-updated,
+.risk-status-line > span.risk-decision.decision-updated {
+  background: var(--info-soft);
+  color: var(--info);
 }
 
 .risk-detail-card {
@@ -1507,6 +1673,24 @@ h4 {
   color: var(--warning);
   font-size: 10px;
   font-weight: 700;
+}
+
+.review-feedback-notice {
+  margin: 8px 0 0;
+  padding: 7px 8px;
+  border-radius: 5px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.review-feedback-notice.is-success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.review-feedback-notice.is-error {
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .risk-editor {

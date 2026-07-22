@@ -1,5 +1,6 @@
 import { RiskEditor } from "./RiskEditor.js";
 import { icon } from "./Icon.js";
+import { riskFeedbackState } from "./riskFeedback.js";
 
 export function ReviewActions(root, props) {
   root.textContent = "";
@@ -14,20 +15,29 @@ export function ReviewActions(root, props) {
   label.textContent = "人工复核";
 
   const status = document.createElement("span");
-  status.className = "review-entry-status";
-  status.textContent = reviewStatusLabel(risk.review_status);
+  const feedbackState = riskFeedbackState(risk);
+  status.className = `review-entry-status decision-${feedbackState.tone}`;
+  status.textContent = feedbackState.label;
 
   panel.append(label, status);
+
+  if (props.error || props.message) {
+    const notice = document.createElement("p");
+    notice.className = props.error ? "review-feedback-notice is-error" : "review-feedback-notice is-success";
+    notice.setAttribute("role", props.error ? "alert" : "status");
+    notice.textContent = props.error || props.message;
+    panel.appendChild(notice);
+  }
 
   const editor = RiskEditor(panel, risk);
   const actions = document.createElement("div");
   actions.className = "feedback-actions";
 
   actions.append(
-    actionButton("采纳风险", "accept", "check", props, editor, "button-primary"),
-    actionButton("忽略风险", "ignore", "x", props, editor, "button-secondary"),
-    actionButton("保存等级", "update_severity", "pencil", props, editor, "button-secondary"),
-    actionButton("保存建议", "update_suggestion", "pencil", props, editor, "button-secondary"),
+    actionButton("采纳风险", "accept", "check", props, editor, "button-primary", feedbackState.action),
+    actionButton("忽略风险", "ignore", "x", props, editor, "button-secondary", feedbackState.action),
+    actionButton("保存等级", "update_severity", "pencil", props, editor, "button-secondary", feedbackState.action),
+    actionButton("保存建议", "update_suggestion", "pencil", props, editor, "button-secondary", feedbackState.action),
   );
 
   const rerun = document.createElement("button");
@@ -43,29 +53,18 @@ export function ReviewActions(root, props) {
   actions.appendChild(rerun);
   panel.appendChild(actions);
 
-  if (props.error) {
-    const error = document.createElement("p");
-    error.className = "error-message";
-    error.textContent = props.error;
-    panel.appendChild(error);
-  }
-
-  if (props.message) {
-    const message = document.createElement("p");
-    message.className = "feedback-message";
-    message.textContent = props.message;
-    panel.appendChild(message);
-  }
-
   root.appendChild(panel);
 }
 
-function actionButton(label, action, iconName, props, editor, variant) {
+function actionButton(label, action, iconName, props, editor, variant, currentAction) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `button ${variant} compact-button`;
-  button.innerHTML = `${icon(iconName)}<span>${props.loading ? "提交中" : label}</span>`;
+  const selected = currentAction === action;
+  const visibleLabel = selected ? completedActionLabel(action) : label;
+  button.innerHTML = `${icon(iconName)}<span>${props.loading ? "提交中" : visibleLabel}</span>`;
   button.disabled = Boolean(props.loading);
+  button.setAttribute("aria-pressed", String(selected));
   button.addEventListener("click", () => {
     if (typeof props.onSubmitFeedback !== "function") {
       return;
@@ -83,15 +82,10 @@ function actionButton(label, action, iconName, props, editor, variant) {
   return button;
 }
 
-function reviewStatusLabel(status) {
-  if (status === "NEED_MANUAL_REVIEW") {
-    return "待人工复核";
-  }
-  if (status === "CONFIRMED_RISK") {
-    return "已确认";
-  }
-  if (status === "IGNORED_RISK") {
-    return "已忽略";
-  }
-  return status || "未知状态";
+function completedActionLabel(action) {
+  if (action === "accept") return "已采纳";
+  if (action === "ignore") return "已忽略";
+  if (action === "update_severity") return "等级已保存";
+  if (action === "update_suggestion") return "建议已保存";
+  return "已保存";
 }
