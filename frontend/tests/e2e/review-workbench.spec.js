@@ -31,6 +31,34 @@ test("FastAPI 托管首页并阻止未选择文件或立场的提交", async ({ 
   await expect(page.getByRole("button", { name: "上传并解析" })).toBeDisabled();
   await page.getByLabel("甲方", { exact: true }).check();
   await expect(page.getByRole("button", { name: "上传并解析" })).toBeEnabled();
+  await expect(page.getByRole("switch", { name: "使用 DeepSeek LLM" })).not.toBeChecked();
+  await page.getByRole("switch", { name: "使用 DeepSeek LLM" }).check();
+  await expect(page.locator("[data-llm-mode-label]")).toContainText("DeepSeek LLM");
+});
+
+
+test("DeepSeek 开关向新任务提交任务级 LLM 模式", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    document.body.innerHTML = '<main id="component-test-root"></main>';
+    const { UploadPanel } = await import("/src/components/UploadPanel.js");
+    window.__uploadPayload = null;
+    UploadPanel(document.querySelector("#component-test-root"), {
+      disabled: false,
+      loading: false,
+      error: "",
+      canCancel: false,
+      onSubmit: (payload) => { window.__uploadPayload = payload; },
+    });
+  });
+  await page.getByLabel("合同文件").setInputFiles(path.join(FIXTURES, "nda_high_risk.docx"));
+  await page.getByLabel("甲方", { exact: true }).check();
+  await page.getByRole("switch", { name: "使用 DeepSeek LLM" }).check();
+  await page.getByRole("button", { name: "上传并解析" }).click();
+
+  await expect.poll(() => page.evaluate(() => window.__uploadPayload?.llmMode)).toBe(
+    "openai_compatible",
+  );
 });
 
 
@@ -61,9 +89,24 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
   const firstRiskId = await riskId(riskCards.nth(0));
   const secondRiskId = await riskId(riskCards.nth(1));
 
-  await riskCards.nth(0).getByRole("button", { name: "定位" }).click();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const contextScroll = page.locator('[data-scroll-region="context"]');
+  const documentScroll = page.locator('[data-scroll-region="document"]');
+  const inspectorScroll = page.locator('[data-scroll-region="inspector"]');
+  await contextScroll.evaluate((element) => { element.scrollTop = 80; });
+  await inspectorScroll.evaluate((element) => { element.scrollTop = 40; });
+  const sideScrollBeforeLocate = await sideScrollPositions(contextScroll, inspectorScroll);
+  await riskCards.nth(0).getByRole("button", { name: "定位" }).dispatchEvent("click");
   await expect(page.locator(".clause-active")).toBeVisible();
   await expect(page.locator(".risk-highlight-active")).toBeVisible();
+  await expect.poll(() => sideScrollPositions(contextScroll, inspectorScroll)).toEqual(
+    sideScrollBeforeLocate,
+  );
+  const firstLocateTop = await documentScroll.evaluate((element) => element.scrollTop);
+  await riskCards.nth(0).getByRole("button", { name: "定位" }).dispatchEvent("click");
+  await expect.poll(() => documentScroll.evaluate((element) => element.scrollTop)).toBe(
+    firstLocateTop,
+  );
 
   await selectClauseText(page.locator(".clause-active .clause-text"));
   await expect(page.locator(".local-selection")).toContainText("框选文本");
@@ -96,6 +139,21 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
   await expect(page.locator("[data-risk-detail] .risk-detail-fields")).toContainText(
     "E2E 更新后的合成修改建议",
   );
+
+  const persistedTaskId = await page.evaluate(() => (
+    window.localStorage.getItem("review-agent.active-task-id")
+  ));
+  await page.reload();
+  await expect(page.getByText("后端已连接")).toBeVisible();
+  await expect(page.locator("[data-review-status]")).toHaveText("MEMORY_UPDATED");
+  await expect(page.locator(".risk-card")).toHaveCount(4);
+  await expect(page.locator("[data-pending-risk-count]")).toHaveText("1");
+  await expect(page.locator(".risk-card").nth(0).locator(".risk-decision")).toHaveText("已采纳");
+  await expect(page.locator(".risk-card").nth(1).locator(".risk-decision")).toHaveText("已忽略");
+  await expect(page.locator(".risk-card").nth(2).locator(".risk-decision")).toHaveText("建议已修改");
+  await expect.poll(() => page.evaluate(() => (
+    window.localStorage.getItem("review-agent.active-task-id")
+  ))).toBe(persistedTaskId);
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出报告" }).click();
@@ -218,6 +276,12 @@ test("执行记录区分 DeepSeek、本地模式和受控 Agent 决策", async (
   await expect(page.locator("[data-task-provider]")).toContainText("DeepSeek · 真实调用 1/1 成功");
   await expect(page.locator("[data-task-provider-brief]")).toHaveText("DeepSeek 已调用");
 
+  const deepseekWaiting = { ...AGENT_STATES.local_mode, llm_mode: "openai_compatible", logs: [] };
+  await renderWorkbench(page, deepseekWaiting);
+  await expect(page.locator("[data-task-provider-brief]")).toHaveText(
+    "DeepSeek 已启用 · 等待调用",
+  );
+
   await renderWorkbench(page, AGENT_STATES.evidence_recovered);
   await expect(page.locator("[data-human-review-attention]")).toHaveCount(0);
 
@@ -333,6 +397,14 @@ async function renderEvaluationPanel(page, effectResult) {
 
 function capability(page, name) {
   return page.locator(`[data-capability="${name}"]`);
+}
+
+
+async function sideScrollPositions(contextScroll, inspectorScroll) {
+  return {
+    context: await contextScroll.evaluate((element) => element.scrollTop),
+    inspector: await inspectorScroll.evaluate((element) => element.scrollTop),
+  };
 }
 
 

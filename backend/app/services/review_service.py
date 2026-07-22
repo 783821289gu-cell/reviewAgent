@@ -10,6 +10,7 @@ from models.planner import PlannerAction, PlannerReasonCode
 from models.risk import CriticDecision, CriticReasonCode
 from models.review import (
     AgentState,
+    LLMMode,
     NodeExecutionTimeoutError,
     ReviewPosition,
     ReviewStatus,
@@ -17,7 +18,11 @@ from models.review import (
     TaskExecutionTimeoutError,
 )
 from parsers.pdf_parser import PdfParseError
-from providers.llm_provider import LLMOutputInvalidError
+from providers.llm_provider import (
+    LLMOutputInvalidError,
+    bind_llm_mode,
+    reset_llm_mode,
+)
 from services.context_builder import build_review_context
 from services.event_service import ReviewEventStore, review_event_store
 from services.log_service import (
@@ -52,8 +57,21 @@ class ReviewOrchestratorAgent:
         self.node_timeout_seconds = node_timeout_seconds
         self.task_timeout_seconds = task_timeout_seconds
 
-    def start(self, file_name: str, file_type: str, content: bytes, review_position: ReviewPosition) -> AgentState:
-        state = self.event_store.create_task(file_name, file_type, review_position, content=content)
+    def start(
+        self,
+        file_name: str,
+        file_type: str,
+        content: bytes,
+        review_position: ReviewPosition,
+        llm_mode: LLMMode = LLMMode.LOCAL_STRUCTURED,
+    ) -> AgentState:
+        state = self.event_store.create_task(
+            file_name,
+            file_type,
+            review_position,
+            content=content,
+            llm_mode=llm_mode,
+        )
         state = self.event_store.update_task(
             state.task_id,
             ReviewStatus.UPLOAD_RECEIVED,
@@ -72,8 +90,21 @@ class ReviewOrchestratorAgent:
             raise
         return state
 
-    def run_sync(self, file_name: str, file_type: str, content: bytes, review_position: ReviewPosition) -> AgentState:
-        state = self.event_store.create_task(file_name, file_type, review_position, content=content)
+    def run_sync(
+        self,
+        file_name: str,
+        file_type: str,
+        content: bytes,
+        review_position: ReviewPosition,
+        llm_mode: LLMMode = LLMMode.LOCAL_STRUCTURED,
+    ) -> AgentState:
+        state = self.event_store.create_task(
+            file_name,
+            file_type,
+            review_position,
+            content=content,
+            llm_mode=llm_mode,
+        )
         state = self.event_store.update_task(
             state.task_id,
             ReviewStatus.UPLOAD_RECEIVED,
@@ -197,6 +228,7 @@ class ReviewOrchestratorAgent:
             node_timeout_seconds=self.node_timeout_seconds,
             execution_retry_index=state.recovery_count,
         )
+        llm_mode_token = bind_llm_mode(state.llm_mode.value)
         control_token = bind_execution_control(execution_control)
         logs = [StepLog(**item) for item in (state.logs or [])]
         try:
@@ -1013,6 +1045,7 @@ class ReviewOrchestratorAgent:
             self._record_unexpected_failure(task_id, logs)
         finally:
             reset_execution_control(control_token)
+            reset_llm_mode(llm_mode_token)
             self.event_store.release_execution(task_id, resolved_owner)
 
     def _acquire_execution(self, task_id: str) -> str:

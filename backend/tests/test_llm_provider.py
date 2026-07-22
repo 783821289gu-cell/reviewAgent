@@ -26,7 +26,10 @@ from providers.llm_provider import (
     LLMRequest,
     LocalStructuredProvider,
     OpenAICompatibleProvider,
+    bind_llm_mode,
     create_llm_provider,
+    effective_llm_mode,
+    reset_llm_mode,
 )
 from services.clause_service import extract_key_fields
 from services.evaluation_service import _docx_bytes_from_text
@@ -554,6 +557,26 @@ class LLMProviderTest(unittest.TestCase):
             create_llm_provider(_external_settings()),
             OpenAICompatibleProvider,
         )
+
+    def test_task_llm_mode_override_is_context_local(self):
+        with patch(
+            "providers.llm_provider.settings",
+            Settings(llm_mode="local_structured"),
+        ):
+            self.assertEqual(effective_llm_mode(), "local_structured")
+            token = bind_llm_mode("openai_compatible")
+            try:
+                self.assertEqual(effective_llm_mode(), "openai_compatible")
+                self.assertIsInstance(
+                    create_llm_provider(
+                        _external_settings(llm_mode="local_structured"),
+                        llm_mode=effective_llm_mode(),
+                    ),
+                    OpenAICompatibleProvider,
+                )
+            finally:
+                reset_llm_mode(token)
+            self.assertEqual(effective_llm_mode(), "local_structured")
 
     def test_small_non_zero_cost_is_not_rounded_to_zero(self):
         def handler(request: httpx.Request) -> httpx.Response:

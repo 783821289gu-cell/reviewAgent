@@ -24,11 +24,11 @@
 18. `retrieve_related_clauses` 已通过显式 `tool_registry` 调用；支持 `local_sparse` 离线测试模式和 `openai_compatible` 真实 Embedding 模式，在当前合同条款内合并关键词与 Embedding 候选、去重，并执行动态 Top-K 和可解释 rerank。
 19. `retrieve_memory` 已通过显式 `tool_registry` 调用；支持从调用方提供的 `memory_items` 中过滤召回，也支持从 SQLite Memory 中按合同类型、条款类型、风险类型和审查立场检索历史反馈。
 20. 后端构建风险分析上下文，包含当前条款、命中规则、相关条款、相关 Memory 字段、输出约束和证据约束。
-21. `analyze_risk` 已通过显式 `tool_registry` 调用；`REVIEW_AGENT_LLM_MODE` 支持 `local_structured` 和 `openai_compatible`，本地模式不会记录为真实外部 LLM 调用。
+21. `analyze_risk` 已通过显式 `tool_registry` 调用；新建审查可按任务选择 `local_structured` 或 `openai_compatible`，本地模式不会记录为真实外部 LLM 调用。
 22. `verify_evidence` 已通过显式 `tool_registry` 调用，校验 `clause_id`、`evidence_text`、风险原因与证据文本相关性，以及命中规则一致性。
 23. `generate_revision` 已通过显式 `tool_registry` 调用，并与风险分析共用结构化 LLM Provider 边界。
 24. 前端展示上下文 Trace、已验证风险列表、规则详情、证据文本、风险原因和修改建议。
-25. 点击风险可定位到左侧对应条款，并高亮正式风险证据文本。
+25. 点击风险可定位到中间合同原文的对应证据；定位只滚动文档区，左右栏保持原位，目标已可见时不重复跳动。
 26. 用户可以在合同原文中框选文本并发起局部审查，局部审查结果与正式风险列表分开展示。
 27. 局部审查只返回当前框选文本的复核结果，不写入正式风险列表，不写入 Memory。
 28. 用户可以对正式风险执行采纳、忽略、修改等级、修改建议，并选择是否加入报告。
@@ -78,6 +78,8 @@
 72. 任务支持取消、节点/任务超时、固定错误重试预算、人工恢复和同任务并发保护；恢复历史、父 Step、重试序号、幂等键和决策摘要进入脱敏 Trace。
 73. 已使用用户本机 Key 对固定的 2 份合成 NDA 子集完成两次真实 DeepSeek 稳定性运行。两轮均为 `completed_with_failures`；该结果只证明真实调用链已跑通，不代表 23 份完整标注集效果达标。
 74. Web Workbench 的执行记录可区分本地模式、DeepSeek 真实调用、Planner、一次检索修复、Critic、Evidence、Memory、Injection 阻断、取消、超时和人工恢复；高风险、证据失败和冲突结果持续显示人工复核提示。
+75. 新建审查入口提供任务级 DeepSeek 开关；任务选择、实际调用成功和调用失败分别显示，不把“已选择”伪装成“已调用”。
+76. 完整任务状态继续由 SQLite 保存；浏览器只保存当前任务 ID，刷新后通过任务查询接口恢复文档、条款、风险、反馈、日志和事件，后端重启后仍可读取。
 
 ## 当前未实现
 
@@ -123,7 +125,7 @@ Planner 只能选择白名单动作，Orchestrator 才能执行工具；Critic �
 
 ## 已验证失败案例
 
-1. DeepSeek Key、Base URL 或模型配置缺失时，外部模式在实际调用点返回明确配置错误，不静默回退为本地成功。
+1. DeepSeek Key、Base URL 或模型配置缺失时，创建外部模式任务会返回明确配置错误，不静默回退为本地成功。
 2. Planner 非法动作、未知条款、越权状态或耗尽重试预算会被拒绝，不执行对应工具。
 3. Evidence 第一次失败最多执行一次受限检索修复；再次失败进入人工复核或 `EVIDENCE_MISSING`。
 4. Critic 冲突、无效结构化输出和 Prompt Injection 信号不会生成可确认的正式风险。
@@ -190,7 +192,7 @@ $env:REVIEW_AGENT_LLM_MODEL = "deepseek-v4-pro"
 python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
 ```
 
-未配置 Key 时服务仍可启动；只有选择 `openai_compatible` 并实际调用时才返回配置错误。默认代码配置是 `local_structured`，而 `.env.example` 有意展示 DeepSeek 外部模式。成本单价未配置时只记录 token 和“未配置”，不推测金额。
+未配置 Key 时服务仍可启动；界面打开 DeepSeek 开关创建任务时会返回配置错误。默认代码配置是 `local_structured`，而 `.env.example` 有意展示 DeepSeek 外部模式。成本单价未配置时只记录 token 和“未配置”，不推测金额。
 
 ## 运行服务
 
@@ -248,14 +250,14 @@ http://127.0.0.1:8000/health
 34. 使用加密、复杂字体映射失败或损坏 PDF 时，确认界面展示具体解析原因，不显示文档解析成功。
 35. 展开 Agent 执行记录，确认任务 Trace、工具 Step、恢复信息和 Provider 摘要可读；本地模式与 DeepSeek 真实调用明确区分，且不出现密钥、完整合同 Prompt 或前端堆栈。
 36. 确认配置错误、Planner 非法动作、一次检索修复、Injection 阻断、取消、超时和恢复均有浏览器验收状态，且没有把夹具状态写入生产任务 API。
-37. 运行 Playwright，确认 13 个 Chromium 主流程、错误流、Agent 状态、三视口和可访问性用例均实际通过；每次运行使用独立的数据库、上传、报告和评测目录，浏览器和测试数据写入本机缓存或已忽略目录，不进入 Git。
+37. 运行 Playwright，确认 14 个 Chromium 主流程、错误流、Agent 状态、三视口和可访问性用例均实际通过；每次运行使用独立的数据库、上传、报告和评测目录，浏览器和测试数据写入本机缓存或已忽略目录，不进入 Git。
 
 默认上传请求大小上限为 10 MB，可通过 `REVIEW_AGENT_MAX_UPLOAD_BYTES` 调整。
 默认 CORS 不允许通配来源；可通过逗号分隔的 `REVIEW_AGENT_ALLOWED_ORIGINS` 配置明确来源。
 默认 SQLite 业务与 Memory 数据库路径为 `backend/app/data/review_agent_memory.sqlite3`，可通过 `REVIEW_AGENT_MEMORY_DB_PATH` 调整。
 默认上传目录为 `backend/app/data/uploads`，可通过 `REVIEW_AGENT_UPLOAD_DIR` 调整。
 默认报告目录为 `backend/app/reports`，可通过 `REVIEW_AGENT_REPORT_DIR` 调整；默认评测输出目录为 `evaluation`，可通过 `REVIEW_AGENT_EVALUATION_OUTPUT_DIR` 调整。
-默认 LLM 模式为 `local_structured`；外部模式通过 `REVIEW_AGENT_LLM_BASE_URL`、`REVIEW_AGENT_LLM_API_KEY`、`REVIEW_AGENT_LLM_MODEL` 和 `REVIEW_AGENT_LLM_TIMEOUT_SECONDS` 配置。
+新建审查默认选择 `local_structured`；界面打开 DeepSeek 开关后，该任务固定使用 `openai_compatible`。外部 Provider 的连接与凭据通过 `REVIEW_AGENT_LLM_BASE_URL`、`REVIEW_AGENT_LLM_API_KEY`、`REVIEW_AGENT_LLM_MODEL` 和 `REVIEW_AGENT_LLM_TIMEOUT_SECONDS` 配置，任务选择会随完整任务状态写入 SQLite。
 默认 LLM 上下文预算为 6000 tokens，可通过 `REVIEW_AGENT_LLM_CONTEXT_BUDGET_TOKENS` 调整；值必须是正整数。
 可通过 `REVIEW_AGENT_LLM_PROMPT_COST_PER_1M` 和 `REVIEW_AGENT_LLM_COMPLETION_COST_PER_1M` 配置每百万 token 单价；未配置时日志显示“未配置”。
 默认 Embedding 模式为 `local_sparse`；外部模式通过 `REVIEW_AGENT_EMBEDDING_MODE=openai_compatible`、`REVIEW_AGENT_EMBEDDING_BASE_URL`、`REVIEW_AGENT_EMBEDDING_API_KEY`、`REVIEW_AGENT_EMBEDDING_MODEL` 和 `REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS` 配置。

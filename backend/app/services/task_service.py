@@ -1,16 +1,18 @@
-from models.review import AgentState, ReviewPosition, ReviewStatus, ReviewTask, new_task
+from models.review import AgentState, LLMMode, ReviewPosition, ReviewStatus, ReviewTask, new_task
 from services.document_service import SUPPORTED_FILE_TYPES
 from services.event_service import ReviewEventStore
 from services.review_service import ReviewOrchestratorAgent, review_orchestrator_agent
 
 
 SUPPORTED_REVIEW_POSITIONS = {position.value: position for position in ReviewPosition}
+SUPPORTED_LLM_MODES = {mode.value: mode for mode in LLMMode}
 
 
 def create_task_shell(payload: dict) -> ReviewTask:
     file_name = str(payload.get("file_name", "")).strip()
     file_type = str(payload.get("file_type", "")).strip().lower()
     review_position_value = str(payload.get("review_position", "")).strip()
+    llm_mode_value = str(payload.get("llm_mode", LLMMode.LOCAL_STRUCTURED.value)).strip()
 
     if not file_name:
         raise ValueError("file_name is required")
@@ -23,16 +25,30 @@ def create_task_shell(payload: dict) -> ReviewTask:
 
     if review_position_value not in SUPPORTED_REVIEW_POSITIONS:
         raise ValueError("review_position must be 甲方 or 乙方")
+    if llm_mode_value not in SUPPORTED_LLM_MODES:
+        raise ValueError("llm_mode must be local_structured or openai_compatible")
 
     return new_task(
         file_name=file_name,
         file_type=file_type,
         review_position=SUPPORTED_REVIEW_POSITIONS[review_position_value],
+        llm_mode=SUPPORTED_LLM_MODES[llm_mode_value],
     )
 
 
-def create_review_task(file_name: str, content: bytes, review_position_value: str) -> ReviewTask:
-    state = _run_review(file_name, content, review_position_value, async_mode=False)
+def create_review_task(
+    file_name: str,
+    content: bytes,
+    review_position_value: str,
+    llm_mode_value: str = LLMMode.LOCAL_STRUCTURED.value,
+) -> ReviewTask:
+    state = _run_review(
+        file_name,
+        content,
+        review_position_value,
+        llm_mode_value,
+        async_mode=False,
+    )
     return state.to_review_task()
 
 
@@ -40,9 +56,17 @@ def start_review_task(
     file_name: str,
     content: bytes,
     review_position_value: str,
+    llm_mode_value: str = LLMMode.LOCAL_STRUCTURED.value,
     review_agent: ReviewOrchestratorAgent = review_orchestrator_agent,
 ) -> AgentState:
-    return _run_review(file_name, content, review_position_value, async_mode=True, review_agent=review_agent)
+    return _run_review(
+        file_name,
+        content,
+        review_position_value,
+        llm_mode_value,
+        async_mode=True,
+        review_agent=review_agent,
+    )
 
 
 def cancel_review_task(
@@ -104,12 +128,14 @@ def _run_review(
     file_name: str,
     content: bytes,
     review_position_value: str,
+    llm_mode_value: str,
     async_mode: bool,
     review_agent: ReviewOrchestratorAgent = review_orchestrator_agent,
 ) -> AgentState:
     normalized_file_name = file_name.strip()
     file_type = _get_file_type(normalized_file_name)
     review_position = _get_review_position(review_position_value)
+    llm_mode = _get_llm_mode(llm_mode_value)
 
     if file_type not in SUPPORTED_FILE_TYPES:
         raise ValueError("仅支持上传 .docx 或 .pdf 文件。")
@@ -122,12 +148,14 @@ def _run_review(
             file_type=file_type,
             content=content,
             review_position=review_position,
+            llm_mode=llm_mode,
         )
     return review_agent.run_sync(
         file_name=normalized_file_name,
         file_type=file_type,
         content=content,
         review_position=review_position,
+        llm_mode=llm_mode,
     )
 
 
@@ -144,3 +172,10 @@ def _get_review_position(review_position_value: str) -> ReviewPosition:
     if normalized_value not in SUPPORTED_REVIEW_POSITIONS:
         raise ValueError("review_position must be 甲方 or 乙方")
     return SUPPORTED_REVIEW_POSITIONS[normalized_value]
+
+
+def _get_llm_mode(llm_mode_value: str) -> LLMMode:
+    normalized_value = str(llm_mode_value or "").strip()
+    if normalized_value not in SUPPORTED_LLM_MODES:
+        raise ValueError("llm_mode must be local_structured or openai_compatible")
+    return SUPPORTED_LLM_MODES[normalized_value]

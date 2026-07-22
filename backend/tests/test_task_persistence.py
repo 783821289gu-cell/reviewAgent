@@ -14,7 +14,7 @@ sys.path.insert(0, str(TEST_DIR))
 import services.report_service as report_service
 from db.repositories import ReviewPersistence
 from db.sqlite import connect
-from models.review import ReviewPosition, ReviewStatus
+from models.review import LLMMode, ReviewPosition, ReviewStatus
 from services.event_service import ReviewEventStore
 from services.feedback_service import apply_feedback_to_task
 from services.report_task_service import generate_task_report
@@ -74,7 +74,7 @@ class TaskPersistenceTest(unittest.TestCase):
             }
             task_row = connection.execute(
                 """
-                SELECT task_id, status, current_node, created_at, updated_at
+                SELECT task_id, status, llm_mode, current_node, created_at, updated_at
                 FROM review_tasks WHERE task_id = ?
                 """,
                 (state.task_id,),
@@ -94,6 +94,7 @@ class TaskPersistenceTest(unittest.TestCase):
         self.assertEqual(counts["step_logs"], len(state.logs))
         self.assertEqual(counts["task_events"], len(state.events))
         self.assertEqual(task_row["status"], ReviewStatus.EVIDENCE_VERIFIED.value)
+        self.assertEqual(task_row["llm_mode"], LLMMode.LOCAL_STRUCTURED.value)
         self.assertEqual(task_row["current_node"], "evidence_verified")
         self.assertTrue(task_row["created_at"])
         self.assertTrue(task_row["updated_at"])
@@ -113,6 +114,23 @@ class TaskPersistenceTest(unittest.TestCase):
         self.assertTrue(all(log["trace_summary"] for log in restored.logs))
         self.assertEqual(restored.logs[0]["parent_step_id"], "")
         self.assertTrue(all("retry_index" in log for log in restored.logs))
+
+    def test_selected_deepseek_mode_survives_restart_without_provider_call(self):
+        state = self.event_store.create_task(
+            "deepseek-review.docx",
+            "docx",
+            ReviewPosition.PARTY_B,
+            content=build_docx_bytes(),
+            llm_mode=LLMMode.DEEPSEEK,
+        )
+
+        restarted_store = ReviewEventStore(self.persistence)
+        restarted_store.load_persisted()
+        restored = restarted_store.get_task(state.task_id)
+
+        self.assertEqual(restored.llm_mode, LLMMode.DEEPSEEK)
+        self.assertEqual(restored.to_dict()["llm_mode"], "openai_compatible")
+        self.assertEqual(restored.to_dict(), state.to_dict())
 
     def test_restart_clears_stale_execution_lease_before_recovery(self):
         state = self.event_store.create_task(

@@ -276,7 +276,7 @@ function renderReviewWorkspace(mobileView, risks, activeFilter, feedback) {
       ${mobileModeButton("log", "执行记录", view)}
     </nav>
     <div class="workbench-grid mobile-view-${view}">
-      <aside class="context-pane" aria-label="任务上下文">
+      <aside class="context-pane" aria-label="任务上下文" data-scroll-region="context">
         <section class="context-section-block">
           <div class="pane-heading"><div><span class="section-kicker">CONTEXT</span><h2>合同上下文</h2></div></div>
           <div data-contract-classification></div>
@@ -305,7 +305,7 @@ function renderReviewWorkspace(mobileView, risks, activeFilter, feedback) {
             <span class="document-mode">证据联动</span>
           </div>
         </header>
-        <div class="document-scroll" data-contract-viewer></div>
+        <div class="document-scroll" data-contract-viewer data-scroll-region="document"></div>
         <div class="local-review-dock">
           <div class="dock-heading"><strong>局部审查</strong><span>框选合同原文后提交</span></div>
           <div data-local-review></div>
@@ -321,7 +321,7 @@ function renderReviewWorkspace(mobileView, risks, activeFilter, feedback) {
           ${renderRiskFilters(risks, activeFilter)}
           ${renderFeedbackNotice(feedback)}
         </div>
-        <div class="inspector-scroll">
+        <div class="inspector-scroll" data-scroll-region="inspector">
           <div data-risk-list></div>
           <div data-risk-detail></div>
           <details class="inspector-disclosure">
@@ -354,6 +354,7 @@ function renderFeedbackNotice(feedback) {
 function providerBrief(provider) {
   if (provider.outcome === "external_success") return `${provider.label} 已调用`;
   if (provider.outcome === "external_failure") return `${provider.label} 调用失败`;
+  if (provider.outcome === "external_enabled") return "DeepSeek 已启用 · 等待调用";
   if (provider.outcome === "external_not_invoked") return "外部 LLM 未调用";
   if (provider.outcome === "local") return "本地模式 · 未使用 DeepSeek";
   return "LLM 使用情况待确认";

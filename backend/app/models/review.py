@@ -34,6 +34,11 @@ class ReviewPosition(StrEnum):
     PARTY_B = "乙方"
 
 
+class LLMMode(StrEnum):
+    LOCAL_STRUCTURED = "local_structured"
+    DEEPSEEK = "openai_compatible"
+
+
 class TaskCancelledError(RuntimeError):
     pass
 
@@ -61,6 +66,7 @@ class ReviewTask:
     file_type: str
     review_position: ReviewPosition
     message: str
+    llm_mode: LLMMode = LLMMode.LOCAL_STRUCTURED
     document: dict | None = None
     contract_classification: dict | None = None
     clauses: list[dict] | None = None
@@ -94,6 +100,7 @@ class AgentState:
     file_type: str
     review_position: ReviewPosition
     message: str
+    llm_mode: LLMMode = LLMMode.LOCAL_STRUCTURED
     document: dict | None = None
     contract_classification: dict | None = None
     clauses: list[dict] | None = None
@@ -130,6 +137,7 @@ class AgentState:
             file_type=self.file_type,
             review_position=self.review_position,
             message=self.message,
+            llm_mode=self.llm_mode,
             document=self.document,
             contract_classification=self.contract_classification,
             clauses=self.clauses,
@@ -170,6 +178,7 @@ def new_task(
     report_file: dict | None = None,
     logs: list[dict] | None = None,
     task_id: str | None = None,
+    llm_mode: LLMMode = LLMMode.LOCAL_STRUCTURED,
 ) -> ReviewTask:
     resolved_task_id = task_id or f"task_{uuid4().hex[:12]}"
     return ReviewTask(
@@ -179,6 +188,7 @@ def new_task(
         file_type=file_type,
         review_position=review_position,
         message=message,
+        llm_mode=llm_mode,
         document=document,
         contract_classification=contract_classification,
         clauses=clauses,
@@ -204,6 +214,7 @@ def _serialize_task(task: ReviewTask | AgentState) -> dict:
     payload = asdict(task)
     payload["status"] = task.status.value
     payload["review_position"] = task.review_position.value
+    payload["llm_mode"] = task.llm_mode.value
     return payload
 
 

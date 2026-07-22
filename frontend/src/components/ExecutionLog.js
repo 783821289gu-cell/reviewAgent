@@ -138,7 +138,29 @@ function capabilityStates(task) {
 }
 
 export function taskProviderStatus(task) {
-  return providerCapability(task?.logs || []);
+  const capability = providerCapability(task?.logs || [], task?.llm_mode);
+  if (capability.outcome !== "unknown") {
+    return capability;
+  }
+  if (task?.llm_mode === "openai_compatible") {
+    return {
+      key: "provider",
+      label: "DeepSeek",
+      value: "本任务已启用，等待实际调用",
+      tone: "warning",
+      outcome: "external_enabled",
+    };
+  }
+  if (task?.llm_mode === "local_structured") {
+    return {
+      key: "provider",
+      label: "LLM",
+      value: "本地模式 / 无外部 LLM",
+      tone: "neutral",
+      outcome: "local",
+    };
+  }
+  return capability;
 }
 
 function retrievalRepairCapability(logs) {
@@ -176,7 +198,7 @@ function memoryCapability(logs) {
   };
 }
 
-function providerCapability(logs) {
+function providerCapability(logs, taskLlmMode = "") {
   const providers = logs
     .filter((log) => log.tool_name !== "retrieve_related_clauses")
     .map(providerRecord)
@@ -186,7 +208,8 @@ function providerCapability(logs) {
   const failedCall = externalCalls.find((call) => call.error_type);
   const successfulCall = externalCalls.find((call) => !call.error_type);
   const models = externalCalls.map((call) => String(call.model || "").toLowerCase());
-  const isDeepSeek = models.some((model) => model.includes("deepseek"));
+  const isDeepSeek = taskLlmMode === "openai_compatible"
+    || models.some((model) => model.includes("deepseek"));
 
   if (failedCall && !successfulCall) {
     return {
@@ -209,7 +232,7 @@ function providerCapability(logs) {
   if (external.length > 0 || providers.some((provider) => provider.summary === "openai_compatible_not_invoked")) {
     return {
       key: "provider",
-      label: "外部 LLM",
+      label: taskLlmMode === "openai_compatible" ? "DeepSeek" : "外部 LLM",
       value: "外部模式已配置，本任务未产生调用",
       tone: "neutral",
       outcome: "external_not_invoked",

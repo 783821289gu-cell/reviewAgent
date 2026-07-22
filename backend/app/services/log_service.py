@@ -25,6 +25,7 @@ from providers.embedding_provider import (
     EmbeddingCallMetadata,
 )
 from providers.llm_provider import LLMCallMetadata, LLM_CALL_RECORDS_INPUT_KEY
+from providers.llm_provider import effective_llm_mode
 from tools.contracts import runtime_calls_llm, runtime_llm_mode, tool_contracts
 
 
@@ -350,10 +351,15 @@ def _runtime_versions(tool_input: dict) -> dict:
         else {}
     )
     matched_rule = review_context.get("matched_rule") or tool_input.get("matched_rule") or {}
+    llm_mode = effective_llm_mode()
     return {
         "prompt": str(review_context.get("prompt_version") or "not_applicable"),
-        "llm_mode": settings.llm_mode,
-        "llm_model": settings.llm_model or "unconfigured",
+        "llm_mode": llm_mode,
+        "llm_model": (
+            settings.llm_model or "unconfigured"
+            if llm_mode == "openai_compatible"
+            else "no_external_llm"
+        ),
         "embedding_mode": settings.embedding_mode,
         "embedding_model": settings.embedding_model or "unconfigured",
         "playbook": _playbook_version(),

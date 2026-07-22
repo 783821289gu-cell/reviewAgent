@@ -1,4 +1,5 @@
 import json
+from contextvars import ContextVar, Token
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 from math import isfinite
@@ -55,6 +56,10 @@ class LLMResponse:
 
 
 LLM_CALL_RECORDS_INPUT_KEY = "_llm_call_records"
+_LLM_MODE_OVERRIDE: ContextVar[str | None] = ContextVar(
+    "review_agent_llm_mode",
+    default=None,
+)
 
 
 class LLMProvider(Protocol):
@@ -86,6 +91,20 @@ def mark_latest_llm_call_schema_error(
 ) -> None:
     if call_records:
         call_records[-1].error_type = "schema_error"
+
+
+def bind_llm_mode(llm_mode: str) -> Token:
+    if llm_mode not in {"local_structured", "openai_compatible"}:
+        raise ValueError(f"unsupported task llm_mode: {llm_mode}")
+    return _LLM_MODE_OVERRIDE.set(llm_mode)
+
+
+def reset_llm_mode(token: Token) -> None:
+    _LLM_MODE_OVERRIDE.reset(token)
+
+
+def effective_llm_mode() -> str:
+    return _LLM_MODE_OVERRIDE.get() or settings.llm_mode
 
 
 class LocalStructuredProvider:
@@ -349,14 +368,16 @@ class OpenAICompatibleProvider:
 def create_llm_provider(
     app_settings: Settings = settings,
     transport: httpx.BaseTransport | None = None,
+    llm_mode: str | None = None,
 ) -> LLMProvider:
-    if app_settings.llm_mode == "local_structured":
+    resolved_mode = llm_mode or app_settings.llm_mode
+    if resolved_mode == "local_structured":
         return LocalStructuredProvider()
-    if app_settings.llm_mode == "openai_compatible":
+    if resolved_mode == "openai_compatible":
         return OpenAICompatibleProvider(app_settings, transport=transport)
     raise LLMProviderError(
         "configuration_error",
-        f"unsupported REVIEW_AGENT_LLM_MODE: {app_settings.llm_mode}",
+        f"unsupported REVIEW_AGENT_LLM_MODE: {resolved_mode}",
         False,
     )
 

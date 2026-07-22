@@ -180,7 +180,8 @@
       "request_example": {
         "content_type": "multipart/form-data; boundary=<boundary>",
         "fields": {
-          "review_position": "甲方"
+          "review_position": "甲方",
+          "llm_mode": "local_structured"
         },
         "file": {
           "field_name": "contract_file",
@@ -195,6 +196,7 @@
         "file_name",
         "file_type",
         "review_position",
+        "llm_mode",
         "message",
         "document",
         "contract_classification",
@@ -212,7 +214,8 @@
         "status": "UPLOAD_RECEIVED",
         "file_name": "baseline.docx",
         "file_type": "docx",
-        "review_position": "甲方"
+        "review_position": "甲方",
+        "llm_mode": "local_structured"
       }
     },
     "task_get": {
@@ -230,6 +233,7 @@
         "file_name",
         "file_type",
         "review_position",
+        "llm_mode",
         "message",
         "document",
         "contract_classification",
@@ -279,6 +283,7 @@
             "file_name": "baseline.docx",
             "file_type": "docx",
             "review_position": "甲方",
+            "llm_mode": "local_structured",
             "message": "审查任务已创建，等待上传处理。",
             "document": null,
             "contract_classification": null,

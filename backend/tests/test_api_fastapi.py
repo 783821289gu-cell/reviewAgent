@@ -129,6 +129,7 @@ class FastApiContractTest(unittest.TestCase):
         self.assertEqual(created["recovery_from_status"], "")
         for key, value in create_contract["response_body_summary"].items():
             self.assertEqual(created[key], value)
+        self.assertEqual(created["llm_mode"], "local_structured")
 
         task = self._wait_for_terminal_task(created["task_id"])
         task_contract = self.contract["success"]["task_get"]
@@ -346,6 +347,25 @@ class FastApiContractTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("DOCX 文件签名无效", response.json()["message"])
 
+        response = self._post_upload(
+            "baseline.docx",
+            self.docx_bytes,
+            "甲方",
+            llm_mode="unsupported",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("LLM 模式无效", response.json()["message"])
+
+        response = self._post_upload(
+            "baseline.docx",
+            self.docx_bytes,
+            "甲方",
+            llm_mode="openai_compatible",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("DeepSeek 配置不完整", response.json()["message"])
+        self.assertNotIn("API Key is not configured", response.text)
+
         response = self._post_upload("baseline.pdf", b"not-a-pdf", "甲方", "application/pdf")
         self.assertEqual(response.status_code, 400)
         self.assertIn("PDF 文件签名无效", response.json()["message"])
@@ -437,10 +457,11 @@ class FastApiContractTest(unittest.TestCase):
         content: bytes,
         review_position: str,
         content_type: str = "application/octet-stream",
+        llm_mode: str = "local_structured",
     ):
         return self.client.post(
             "/api/tasks",
-            data={"review_position": review_position},
+            data={"review_position": review_position, "llm_mode": llm_mode},
             files={"contract_file": (file_name, content, content_type)},
         )
 

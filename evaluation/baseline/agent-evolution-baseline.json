@@ -239,7 +239,7 @@
     "source_note": "The source fixture retains its pre-migration filename and is enforced against the current FastAPI routes by backend/tests/test_api_fastapi.py.",
     "success_fields": {
       "health": ["status", "service", "scope"],
-      "task": ["task_id", "status", "file_name", "file_type", "review_position", "message", "document", "contract_classification", "clauses", "matched_rules", "review_contexts", "analysis_results", "risk_findings", "evidence_results", "report_file", "logs", "events"],
+      "task": ["task_id", "status", "file_name", "file_type", "review_position", "llm_mode", "message", "document", "contract_classification", "clauses", "matched_rules", "review_contexts", "analysis_results", "risk_findings", "evidence_results", "report_file", "logs", "events"],
       "local_review": ["review_id", "task_id", "scope", "clause_id", "clause_type", "selected_text", "matched_rules", "related_formal_risks", "local_findings", "skipped_rule_ids", "formal_risk_generated", "message", "logs"],
       "feedback": ["status", "message", "risk", "memory_item", "task"],
       "report": ["status", "message", "report_file", "task"],

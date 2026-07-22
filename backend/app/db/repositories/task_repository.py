@@ -28,7 +28,7 @@ class TaskRepository:
         connection.execute(
             """
             INSERT INTO review_tasks (
-                task_id, trace_id, status, file_name, file_type, review_position, message,
+                task_id, trace_id, status, file_name, file_type, review_position, llm_mode, message,
                 current_node, error_message, contract_classification_json,
                 matched_rules_json, review_contexts_json,
                 analysis_results_json, evidence_results_json, report_file_json,
@@ -36,13 +36,14 @@ class TaskRepository:
                 cancel_requested_at, cancelled_at, cancel_reason, last_timeout_json,
                 created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(task_id) DO UPDATE SET
                 trace_id = excluded.trace_id,
                 status = excluded.status,
                 file_name = excluded.file_name,
                 file_type = excluded.file_type,
                 review_position = excluded.review_position,
+                llm_mode = excluded.llm_mode,
                 message = excluded.message,
                 current_node = excluded.current_node,
                 error_message = excluded.error_message,
@@ -67,6 +68,7 @@ class TaskRepository:
                 state.file_name,
                 state.file_type,
                 state.review_position.value,
+                state.llm_mode.value,
                 state.message,
                 current_node,
                 state.message if state.status.value in ERROR_STATUSES else "",
@@ -183,6 +185,7 @@ def _task_payload(row: sqlite3.Row) -> dict:
         "file_name": str(row["file_name"]),
         "file_type": str(row["file_type"]),
         "review_position": str(row["review_position"]),
+        "llm_mode": str(row["llm_mode"]),
         "message": str(row["message"]),
         "current_node": str(row["current_node"]),
         "contract_classification": _json_load(row["contract_classification_json"]),

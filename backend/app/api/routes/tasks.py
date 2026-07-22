@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from api.dependencies import get_event_store, get_review_agent, get_settings, require_accepting_tasks
 from api.errors import ApiError, task_error
 from config import Settings
+from models.review import LLMMode
 from services.event_service import TERMINAL_STATUSES, ReviewEventStore
 from services.review_service import ReviewOrchestratorAgent
 from services.task_service import (
@@ -41,6 +42,7 @@ async def create_task(
     request: Request,
     contract_file: UploadFile | None = File(default=None),
     review_position: str = Form(default=""),
+    llm_mode: str = Form(default=LLMMode.LOCAL_STRUCTURED.value),
     app_settings: Settings = Depends(get_settings),
     review_agent: ReviewOrchestratorAgent = Depends(get_review_agent),
     _accepting_tasks: None = Depends(require_accepting_tasks),
@@ -55,12 +57,14 @@ async def create_task(
     _validate_mime_type(file_type, contract_file.content_type)
     content = await _read_upload(contract_file, app_settings.max_upload_bytes)
     _validate_signature(file_type, content)
+    _validate_llm_configuration(llm_mode, app_settings)
 
     try:
         task = start_review_task(
             file_name=file_name,
             content=content,
             review_position_value=review_position,
+            llm_mode_value=llm_mode,
             review_agent=review_agent,
         )
     except ValueError as exc:
@@ -206,6 +210,22 @@ def _validate_signature(file_type: str, content: bytes) -> None:
         raise task_error("PDF 文件签名无效。")
     if file_type == "docx" and not content.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")):
         raise task_error("DOCX 文件签名无效。")
+
+
+def _validate_llm_configuration(llm_mode: str, app_settings: Settings) -> None:
+    if llm_mode == LLMMode.LOCAL_STRUCTURED.value:
+        return
+    if llm_mode != LLMMode.DEEPSEEK.value:
+        raise task_error("LLM 模式无效，请选择本地模式或 DeepSeek。")
+    missing = []
+    if not app_settings.llm_base_url:
+        missing.append("REVIEW_AGENT_LLM_BASE_URL")
+    if not app_settings.llm_api_key:
+        missing.append("REVIEW_AGENT_LLM_API_KEY")
+    if not app_settings.llm_model:
+        missing.append("REVIEW_AGENT_LLM_MODEL")
+    if missing:
+        raise task_error(f"DeepSeek 配置不完整：缺少 {', '.join(missing)}。")
 
 
 def _sse_event(event: dict) -> str:

@@ -1,5 +1,5 @@
-from config import settings
 from models.tool import ToolContract
+from providers.llm_provider import effective_llm_mode
 
 
 LOCAL_NO_EXTERNAL_LLM_MODES = {
@@ -16,18 +16,19 @@ def runtime_calls_llm(tool_name: str) -> bool:
     contract = tool_contracts.get(tool_name)
     if contract is None or not contract.calls_llm:
         return False
-    return settings.llm_mode == "openai_compatible"
+    return effective_llm_mode() == "openai_compatible"
 
 
 def runtime_llm_mode(tool_name: str) -> str:
     contract = tool_contracts.get(tool_name)
     if contract is None or not contract.calls_llm:
         return "not_applicable"
-    if settings.llm_mode == "local_structured":
+    llm_mode = effective_llm_mode()
+    if llm_mode == "local_structured":
         return LOCAL_NO_EXTERNAL_LLM_MODES.get(tool_name, "no_external_llm")
-    if settings.llm_mode == "openai_compatible":
+    if llm_mode == "openai_compatible":
         return "openai_compatible"
-    return f"invalid_llm_mode:{settings.llm_mode}"
+    return f"invalid_llm_mode:{llm_mode}"
 
 
 tool_contracts = {

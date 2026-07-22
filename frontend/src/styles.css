@@ -434,8 +434,8 @@ h4 {
 .upload-tool {
   display: grid;
   grid-template-columns: minmax(280px, 1fr) 220px auto;
-  gap: 22px;
-  align-items: end;
+  gap: 14px 22px;
+  align-items: center;
   padding: 26px 28px;
 }
 
@@ -452,6 +452,7 @@ h4 {
   border-radius: 7px;
   background: var(--surface-subtle);
   cursor: pointer;
+  grid-row: span 2;
 }
 
 .upload-icon {
@@ -547,11 +548,96 @@ h4 {
   outline: 2px solid var(--focus);
 }
 
+.llm-mode-field {
+  display: flex;
+  min-width: 0;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-subtle);
+}
+
+.llm-mode-field > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.llm-mode-field strong {
+  font-size: 12px;
+}
+
+.llm-mode-field [data-llm-mode-label] {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switch-control {
+  position: relative;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.switch-control input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.switch-track {
+  display: block;
+  width: 36px;
+  height: 20px;
+  padding: 2px;
+  border: 1px solid #aeb8c3;
+  border-radius: 10px;
+  background: #dfe4e8;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.switch-track i {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(25, 35, 45, 0.24);
+  transition: transform 160ms ease;
+}
+
+.switch-control input:checked + .switch-track {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.switch-control input:checked + .switch-track i {
+  transform: translateX(16px);
+}
+
+.switch-control input:focus-visible + .switch-track {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.switch-control input:disabled + .switch-track {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .upload-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  grid-row: span 2;
 }
 
 .upload-status {
@@ -2440,6 +2526,11 @@ h4 {
     grid-template-columns: 1fr;
     gap: 16px;
     padding: 16px;
+  }
+
+  .file-drop-field,
+  .upload-actions {
+    grid-row: auto;
   }
 
   .file-drop-field {

@@ -51,6 +51,7 @@ def initialize(connection: sqlite3.Connection) -> None:
             file_name TEXT NOT NULL,
             file_type TEXT NOT NULL,
             review_position TEXT NOT NULL,
+            llm_mode TEXT NOT NULL DEFAULT 'local_structured',
             message TEXT NOT NULL,
             current_node TEXT NOT NULL,
             error_message TEXT NOT NULL,
@@ -197,6 +198,12 @@ def initialize(connection: sqlite3.Connection) -> None:
     )
     _ensure_column(connection, "review_tasks", "contract_classification_json", "TEXT")
     _ensure_column(connection, "review_tasks", "trace_id", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(
+        connection,
+        "review_tasks",
+        "llm_mode",
+        "TEXT NOT NULL DEFAULT 'local_structured'",
+    )
     _ensure_column(connection, "step_logs", "trace_id", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "step_logs", "step_id", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "step_logs", "parent_step_id", "TEXT NOT NULL DEFAULT ''")

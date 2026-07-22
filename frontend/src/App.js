@@ -3,6 +3,7 @@ import { WorkbenchLayout } from "./components/WorkbenchLayout.js";
 import { icon } from "./components/Icon.js";
 
 const API_BASE_URL = "";
+const ACTIVE_TASK_STORAGE_KEY = "review-agent.active-task-id";
 const TERMINAL_STATUSES = new Set([
   "EVIDENCE_VERIFIED",
   "HUMAN_REVIEW_PENDING",
@@ -61,8 +62,41 @@ export function renderApp(root) {
         throw new Error("health check failed");
       }
       setState({ backendStatus: "online" });
+      await restoreRememberedTask();
     } catch {
       setState({ backendStatus: "offline" });
+    }
+  }
+
+  async function restoreRememberedTask() {
+    const taskId = rememberedTaskId();
+    if (!taskId) {
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tasks/${encodeURIComponent(taskId)}`);
+      const payload = await response.json();
+      if (response.status === 404) {
+        forgetTask();
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(payload.message || payload.error || "任务恢复失败");
+      }
+      const complete = TERMINAL_STATUSES.has(payload.status);
+      setState({
+        task: payload,
+        loading: !complete,
+        showUpload: false,
+        error: "",
+        workspaceView: "review",
+        mobileView: "risk",
+      });
+      if (!complete) {
+        subscribeToTaskEvents(payload.task_id, latestEventId(payload));
+      }
+    } catch (error) {
+      setState({ error: error.message || "任务恢复失败", loading: false });
     }
   }
 
@@ -73,6 +107,7 @@ export function renderApp(root) {
       const formData = new FormData();
       formData.append("contract_file", formState.file);
       formData.append("review_position", formState.reviewPosition);
+      formData.append("llm_mode", formState.llmMode || "local_structured");
 
       const response = await fetch(`${API_BASE_URL}/api/tasks`, {
         method: "POST",
@@ -84,6 +119,7 @@ export function renderApp(root) {
         throw new Error(payload.message || "任务创建失败");
       }
 
+      rememberTask(payload.task_id);
       setState({
         task: payload,
         loading: true,
@@ -109,7 +145,7 @@ export function renderApp(root) {
       activeRiskId: risk.risk_id || "",
       activeClauseId: risk.clause_id || "",
     });
-    focusClause(risk.clause_id);
+    focusDocumentTarget(risk.clause_id, risk.risk_id);
   }
 
   function handleRiskLocate(risk) {
@@ -119,7 +155,7 @@ export function renderApp(root) {
       workspaceView: "review",
       mobileView: "contract",
     });
-    focusClause(risk.clause_id);
+    focusDocumentTarget(risk.clause_id, risk.risk_id);
   }
 
   function handleClauseSelect(clauseId) {
@@ -128,7 +164,7 @@ export function renderApp(root) {
       workspaceView: "review",
       mobileView: "contract",
     });
-    focusClause(clauseId);
+    focusDocumentTarget(clauseId);
   }
 
   function handleRiskFilter(riskFilter) {
@@ -565,6 +601,7 @@ export function renderApp(root) {
   }
 
   function render() {
+    const scrollPositions = captureScrollPositions(root);
     const taskId = state.task?.task_id || "";
     const traceId = state.task?.trace_id || "";
     root.innerHTML = `
@@ -663,6 +700,7 @@ export function renderApp(root) {
         onCancelTask: cancelTask,
         onRecoverTask: recoverTask,
       });
+      restoreScrollPositions(root, scrollPositions);
     }
 
     root.querySelectorAll("[data-workspace]").forEach((button) => {
@@ -755,16 +793,87 @@ function fileStem(fileName) {
   return base.replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "_") || "review-report";
 }
 
-function focusClause(clauseId) {
+function focusDocumentTarget(clauseId, riskId = "") {
   if (!clauseId) {
     return;
   }
   window.setTimeout(() => {
-    document.getElementById(clauseId)?.scrollIntoView({
+    const container = document.querySelector('[data-scroll-region="document"]');
+    const clause = document.getElementById(clauseId);
+    if (!container || !clause || !container.contains(clause)) {
+      return;
+    }
+    const evidence = riskId
+      ? Array.from(clause.querySelectorAll("[data-risk-id]")).find(
+        (element) => element.dataset.riskId === riskId,
+      )
+      : null;
+    const target = evidence || clause;
+    if (isDocumentTargetVisible(container, target)) {
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const nextTop = container.scrollTop
+      + targetRect.top
+      - containerRect.top
+      - (container.clientHeight - Math.min(targetRect.height, container.clientHeight)) / 2;
+    container.scrollTo({
+      top: Math.max(0, nextTop),
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-      block: "center",
     });
   }, 0);
+}
+
+function isDocumentTargetVisible(container, target) {
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const margin = 20;
+  const visibleTargetBottom = targetRect.top + Math.min(targetRect.height, 40);
+  return targetRect.top >= containerRect.top + margin
+    && visibleTargetBottom <= containerRect.bottom - margin;
+}
+
+function captureScrollPositions(root) {
+  return Object.fromEntries(
+    Array.from(root.querySelectorAll("[data-scroll-region]"), (element) => [
+      element.dataset.scrollRegion,
+      element.scrollTop,
+    ]),
+  );
+}
+
+function restoreScrollPositions(root, positions) {
+  root.querySelectorAll("[data-scroll-region]").forEach((element) => {
+    const position = positions[element.dataset.scrollRegion];
+    if (Number.isFinite(position)) {
+      element.scrollTop = position;
+    }
+  });
+}
+
+function rememberTask(taskId) {
+  try {
+    window.localStorage.setItem(ACTIVE_TASK_STORAGE_KEY, taskId);
+  } catch {
+    // Backend persistence remains authoritative when browser storage is unavailable.
+  }
+}
+
+function rememberedTaskId() {
+  try {
+    return window.localStorage.getItem(ACTIVE_TASK_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function forgetTask() {
+  try {
+    window.localStorage.removeItem(ACTIVE_TASK_STORAGE_KEY);
+  } catch {
+    // No action is required when browser storage is unavailable.
+  }
 }
 
 function workspaceButton(view, label, iconName, activeView, disabled) {

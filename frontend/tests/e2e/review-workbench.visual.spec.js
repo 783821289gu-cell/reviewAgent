@@ -57,18 +57,28 @@ test("工作台在桌面和移动端视口保持可用且不产生横向溢出",
   await expectNoHorizontalOverflow(page);
 });
 
-test("上传入口和工作台控件支持键盘焦点与减少动态效果", async ({ page }) => {
+test("上传入口和工作台控件支持键盘焦点与减少动态效果", async ({ page }, testInfo) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "新建合同审查" })).toBeVisible();
+  await expect(page.getByRole("switch", { name: "使用 DeepSeek LLM" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await page.getByLabel("合同文件").focus();
   await expect(page.getByLabel("合同文件")).toBeFocused();
   await page.getByLabel("甲方", { exact: true }).focus();
   await page.keyboard.press("Space");
   await expect(page.getByLabel("甲方", { exact: true })).toBeChecked();
+  await page.getByRole("switch", { name: "使用 DeepSeek LLM" }).focus();
+  await expect(page.getByRole("switch", { name: "使用 DeepSeek LLM" })).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(page.getByRole("switch", { name: "使用 DeepSeek LLM" })).toBeChecked();
+  await expect(page.locator("[data-llm-mode-label]")).toContainText("DeepSeek LLM");
+  await page.screenshot({
+    path: testInfo.outputPath("upload-390x844.png"),
+    fullPage: false,
+  });
 
   const transitionDuration = await page.locator(".button-primary").first().evaluate((element) => (
     getComputedStyle(element).transitionDuration

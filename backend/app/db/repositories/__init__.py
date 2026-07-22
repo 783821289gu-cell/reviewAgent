@@ -8,7 +8,7 @@ from db.repositories.memory_repository import MemoryRepository
 from db.repositories.review_result_repository import ReviewResultRepository
 from db.repositories.task_repository import TaskRepository
 from db.sqlite import connect
-from models.review import AgentState, ReviewPosition, ReviewStatus
+from models.review import AgentState, LLMMode, ReviewPosition, ReviewStatus
 
 
 class RecoveryError(ValueError):
@@ -110,6 +110,7 @@ class ReviewPersistence:
             try:
                 status = ReviewStatus(task["status"])
                 review_position = ReviewPosition(task["review_position"])
+                llm_mode = LLMMode(task["llm_mode"])
             except ValueError as exc:
                 raise RecoveryError(f"任务 {task['task_id']} 的持久化枚举值无效：{exc}") from exc
             events = self.event_repository.list_for_task(task["task_id"])
@@ -121,6 +122,7 @@ class ReviewPersistence:
                 file_type=task["file_type"],
                 review_position=review_position,
                 message=task["message"],
+                llm_mode=llm_mode,
                 document=self.document_repository.get_document(task["task_id"]),
                 contract_classification=task["contract_classification"],
                 clauses=self.document_repository.get_clauses(task["task_id"]),

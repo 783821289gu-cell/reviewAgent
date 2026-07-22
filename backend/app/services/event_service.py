@@ -8,6 +8,7 @@ from uuid import uuid4
 from db.repositories import ReviewPersistence
 from models.review import (
     AgentState,
+    LLMMode,
     ReviewPosition,
     ReviewStatus,
     TaskCancelledError,
@@ -98,6 +99,7 @@ class ReviewEventStore:
         file_type: str,
         review_position: ReviewPosition,
         content: bytes | None = None,
+        llm_mode: LLMMode = LLMMode.LOCAL_STRUCTURED,
     ) -> AgentState:
         task_id = f"task_{uuid4().hex[:12]}"
         state = AgentState(
@@ -108,6 +110,7 @@ class ReviewEventStore:
             file_type=file_type,
             review_position=review_position,
             message="审查任务已创建，等待上传处理。",
+            llm_mode=llm_mode,
             logs=[],
             events=[],
         )

@@ -12,6 +12,7 @@ from providers.llm_provider import (
     LLMOutputInvalidError,
     LLMRequest,
     create_llm_provider,
+    effective_llm_mode,
 )
 
 
@@ -263,7 +264,7 @@ def _generate_structured(
     local_output: dict,
     llm_calls: list[LLMCallMetadata] | None,
 ) -> dict:
-    provider = create_llm_provider(settings)
+    provider = create_llm_provider(settings, llm_mode=effective_llm_mode())
     response = provider.generate_structured(
         LLMRequest(
             operation=operation,

@@ -34,6 +34,17 @@ export function UploadPanel(root, props) {
           </div>
         </fieldset>
 
+        <div class="llm-mode-field">
+          <div>
+            <strong>审查引擎</strong>
+            <span data-llm-mode-label>本地模式 · DeepSeek 关闭</span>
+          </div>
+          <label class="switch-control">
+            <input id="use-deepseek" type="checkbox" role="switch" aria-label="使用 DeepSeek LLM" ${isDisabled ? "disabled" : ""} />
+            <span class="switch-track" aria-hidden="true"><i></i></span>
+          </label>
+        </div>
+
         <div class="upload-actions">
           ${props.canCancel ? '<button class="button button-ghost" type="button" data-cancel-upload>取消</button>' : ""}
           <button class="button button-primary" id="start-review" type="button" disabled>
@@ -58,6 +69,8 @@ export function UploadPanel(root, props) {
   const message = root.querySelector("#upload-message");
   const errorMessage = root.querySelector("#upload-error");
   const fileName = root.querySelector("[data-file-name]");
+  const deepSeekInput = root.querySelector("#use-deepseek");
+  const llmModeLabel = root.querySelector("[data-llm-mode-label]");
 
   if (props.error) {
     errorMessage.hidden = false;
@@ -73,6 +86,9 @@ export function UploadPanel(root, props) {
     const hasFile = Boolean(file);
     const hasRole = Boolean(getSelectedRole());
     const supportedFile = hasFile && /\.(docx|pdf)$/i.test(file.name);
+    llmModeLabel.textContent = deepSeekInput.checked
+      ? "DeepSeek LLM · 本任务已选择"
+      : "本地模式 · DeepSeek 关闭";
     fileName.textContent = hasFile ? file.name : "选择 DOCX 或 PDF 文件";
     startButton.disabled = isDisabled || !(supportedFile && hasRole);
 
@@ -91,11 +107,13 @@ export function UploadPanel(root, props) {
 
   fileInput.addEventListener("change", updateState);
   roleInputs.forEach((input) => input.addEventListener("change", updateState));
+  deepSeekInput.addEventListener("change", updateState);
   updateState();
   startButton.addEventListener("click", () => {
     props.onSubmit({
       file: fileInput.files[0],
       reviewPosition: getSelectedRole(),
+      llmMode: deepSeekInput.checked ? "openai_compatible" : "local_structured",
     });
   });
   root.querySelector("[data-cancel-upload]")?.addEventListener("click", props.onCancel);
