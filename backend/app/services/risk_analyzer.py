@@ -11,12 +11,14 @@ from services.llm_service import (
     generate_structured_revision,
     generate_structured_risk,
 )
+from services.prompt_service import PROMPT_VERSION
 
 
 def analyze_risk(tool_input: dict) -> dict:
     review_context = tool_input.get("review_context")
     if not isinstance(review_context, dict):
         raise ValueError("review_context must be a dict")
+    review_context = _with_authoritative_output_constraints(review_context)
     llm_calls = llm_call_records_from_tool_input(tool_input)
 
     last_error = None
@@ -28,6 +30,7 @@ def analyze_risk(tool_input: dict) -> dict:
                 llm_calls=llm_calls,
             )
             _validate_output_fields(candidate, RISK_OUTPUT_SCHEMA, "risk finding")
+            candidate = _apply_authoritative_fields(candidate, review_context)
             finding = validate_risk_finding(candidate)
             _validate_position_basis(finding.to_dict(), review_context)
             return finding.to_dict()
@@ -40,6 +43,46 @@ def analyze_risk(tool_input: dict) -> dict:
             mark_latest_llm_call_schema_error(llm_calls)
             break
     raise LLMOutputInvalidError(f"LLM output invalid: {last_error}")
+
+
+def _apply_authoritative_fields(candidate: dict, review_context: dict) -> dict:
+    normalized = dict(candidate)
+    authoritative = _authoritative_fields(review_context)
+    normalized["risk_focus"] = authoritative["risk_focus"]
+    normalized["revision_suggestion"] = authoritative["revision_suggestion"]
+    return normalized
+
+
+def _with_authoritative_output_constraints(review_context: dict) -> dict:
+    normalized = dict(review_context)
+    output_constraints = dict(review_context.get("output_constraints") or {})
+    output_constraints["authoritative_fields"] = _authoritative_fields(review_context)
+    normalized["output_constraints"] = output_constraints
+    normalized["prompt_version"] = PROMPT_VERSION
+    return normalized
+
+
+def _authoritative_fields(review_context: dict) -> dict:
+    review_position = str(review_context.get("review_position", "")).strip()
+    if not review_position:
+        raise ValueError("review_context review_position is required")
+    matched_rule = review_context.get("matched_rule")
+    if not isinstance(matched_rule, dict):
+        raise ValueError("review_context matched_rule must be a dict")
+    position_config = matched_rule.get("position_config")
+    if not isinstance(position_config, dict):
+        raise ValueError("matched rule position_config is required")
+    current_clause = review_context.get("current_clause")
+    if not isinstance(current_clause, dict):
+        raise ValueError("review_context current_clause must be a dict")
+    return {
+        "risk_type": str(matched_rule.get("risk_type", "")),
+        "clause_id": str(current_clause.get("clause_id", "")),
+        "matched_rule_ids": [str(matched_rule.get("rule_id", ""))],
+        "review_position": review_position,
+        "risk_focus": str(position_config.get("risk_focus", "")),
+        "revision_suggestion": str(position_config.get("revision_template", "")),
+    }
 
 
 def _validate_position_basis(finding: dict, review_context: dict) -> None:

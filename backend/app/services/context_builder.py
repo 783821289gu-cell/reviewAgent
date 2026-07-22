@@ -127,6 +127,19 @@ def _make_context(
     clause_id = str(current_clause.get("clause_id", ""))
     rule_id = str(matched_rule.get("rule_id", ""))
     resolved_rule = _validated_position_rule(matched_rule, review_position)
+    output_constraints = {
+        **OUTPUT_CONSTRAINTS,
+        "authoritative_fields": {
+            "risk_type": str(resolved_rule.get("risk_type", "")),
+            "clause_id": clause_id,
+            "matched_rule_ids": [rule_id],
+            "review_position": review_position,
+            "risk_focus": str(resolved_rule["position_config"]["risk_focus"]),
+            "revision_suggestion": str(
+                resolved_rule["position_config"]["revision_template"]
+            ),
+        },
+    }
     return ReviewContext(
         context_id=f"{clause_id}:{rule_id}",
         contract_type=contract_type,
@@ -138,7 +151,7 @@ def _make_context(
         related_clauses=related_clauses,
         related_memory=related_memory,
         memory_trace=memory_trace,
-        output_constraints=dict(OUTPUT_CONSTRAINTS),
+        output_constraints=output_constraints,
         evidence_constraints=dict(EVIDENCE_CONSTRAINTS),
         prompt_version=PROMPT_VERSION,
         prompt_security=dict(prompt_security),

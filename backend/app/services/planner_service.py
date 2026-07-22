@@ -196,12 +196,14 @@ def _validate_decision(candidate: dict, planner_input: dict) -> PlannerDecision:
         if retry_count >= planner_input["retry_budget"]:
             raise ValueError("planner retry budget is exhausted")
 
-    query_adjustments = _validated_query_adjustments(
-        candidate.get("query_adjustments"),
-        require_adjustment=action == PlannerAction.RETRIEVE_AGAIN,
+    raw_query_adjustments = candidate.get("query_adjustments")
+    if not isinstance(raw_query_adjustments, dict):
+        raise ValueError("planner query_adjustments must be a dict")
+    query_adjustments = (
+        _validated_query_adjustments(raw_query_adjustments, require_adjustment=True)
+        if action == PlannerAction.RETRIEVE_AGAIN
+        else {}
     )
-    if action != PlannerAction.RETRIEVE_AGAIN and query_adjustments:
-        raise ValueError("planner query adjustments require RETRIEVE_AGAIN")
 
     confidence = candidate.get("confidence")
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):

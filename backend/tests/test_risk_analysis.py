@@ -12,6 +12,7 @@ sys.path.insert(0, str(TEST_DIR))
 from models.risk import VALID_RISK_TYPES, validate_risk_finding
 from providers.llm_provider import LLMOutputInvalidError
 from services.evidence_service import verify_evidence
+from services.prompt_service import PROMPT_VERSION
 from services.risk_analyzer import analyze_risk, generate_revision
 from test_retrieval_context import build_clause_payloads
 
@@ -82,8 +83,9 @@ class RiskAnalysisTest(unittest.TestCase):
 
         provider_call.assert_called_once()
 
-    def test_analyze_risk_rejects_position_basis_mismatch_without_retry(self):
+    def test_analyze_risk_canonicalizes_playbook_risk_focus(self):
         context = build_review_context()
+        context["output_constraints"].pop("authoritative_fields", None)
         mismatched_output = {
             "risk_type": "保密信息范围过宽",
             "severity": "中",
@@ -97,17 +99,29 @@ class RiskAnalysisTest(unittest.TestCase):
             "revision_suggestion": "限定保密信息范围。",
             "review_status": "CONFIRMED_RISK",
         }
+        mismatched_output["review_position"] = context["review_position"]
+        mismatched_output["revision_suggestion"] = ""
         with patch(
             "services.risk_analyzer.generate_structured_risk",
             return_value=mismatched_output,
         ) as provider_call:
-            with self.assertRaisesRegex(
-                LLMOutputInvalidError,
-                "review_position does not match",
-            ):
-                analyze_risk({"review_context": context})
+            finding = analyze_risk({"review_context": context})
 
         provider_call.assert_called_once()
+        provider_context = provider_call.call_args.args[0]
+        self.assertEqual(
+            provider_context["output_constraints"]["authoritative_fields"]["risk_focus"],
+            context["matched_rule"]["position_config"]["risk_focus"],
+        )
+        self.assertEqual(provider_context["prompt_version"], PROMPT_VERSION)
+        self.assertEqual(
+            finding["risk_focus"],
+            context["matched_rule"]["position_config"]["risk_focus"],
+        )
+        self.assertEqual(
+            finding["revision_suggestion"],
+            context["matched_rule"]["position_config"]["revision_template"],
+        )
 
     def test_risk_model_rejects_weakly_typed_llm_output(self):
         context = build_review_context()

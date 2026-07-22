@@ -86,6 +86,19 @@ class PromptSecurityTest(unittest.TestCase):
             analyzer_system["task"]["allowed_values"]["target_clause_ids"],
             ["CL-001"],
         )
+        authoritative = analyzer_system["task"]["output_constraints"][
+            "authoritative_fields"
+        ]
+        self.assertEqual(authoritative["clause_id"], "CL-001")
+        self.assertEqual(authoritative["matched_rule_ids"], ["NDA-R001"])
+        self.assertEqual(
+            authoritative["risk_focus"],
+            polluted_input["matched_rule"]["position_config"]["risk_focus"],
+        )
+        self.assertEqual(
+            authoritative["revision_suggestion"],
+            polluted_input["matched_rule"]["position_config"]["revision_template"],
+        )
 
     def test_instruction_like_contract_and_memory_are_blocked_before_llm(self):
         cases = _prompt_injection_cases()

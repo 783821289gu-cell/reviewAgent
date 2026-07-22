@@ -46,6 +46,24 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(decision["action"], "REQUEST_HUMAN_REVIEW")
         self.assertEqual(decision["query_adjustments"], {})
 
+    def test_human_review_discards_unused_model_query_adjustments(self):
+        candidate = {
+            **valid_decision(),
+            "action": "REQUEST_HUMAN_REVIEW",
+            "query_adjustments": {
+                "additional_keywords": ["unused"],
+                "top_k": 5,
+            },
+        }
+        with patch(
+            "services.planner_service.generate_structured_planner",
+            return_value=candidate,
+        ):
+            decision = plan_review_action(planner_input())
+
+        self.assertEqual(decision["action"], "REQUEST_HUMAN_REVIEW")
+        self.assertEqual(decision["query_adjustments"], {})
+
     def test_analyzer_verifier_conflict_uses_fixed_reason_code(self):
         decision = plan_review_action(
             planner_input(trigger_reason="ANALYZER_VERIFIER_CONFLICT")

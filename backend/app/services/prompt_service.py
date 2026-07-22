@@ -8,7 +8,7 @@ from pathlib import Path
 from tokenizers import Tokenizer
 
 
-PROMPT_VERSION = "contract-review-agent.prompt.v1"
+PROMPT_VERSION = "contract-review-agent.prompt.v2"
 DEEPSEEK_TOKENIZER_MODEL = "deepseek-ai/DeepSeek-V4-Pro"
 DEEPSEEK_TOKENIZER_REVISION = "b5968e9190ef611bbf34a7229255be88a0e937c1"
 DEEPSEEK_TOKENIZER_SHA256 = (
