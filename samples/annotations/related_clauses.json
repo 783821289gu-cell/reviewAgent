@@ -1,5 +1,5 @@
 {
-  "annotation_version": "effect-v2",
+  "annotation_version": "effect-v3",
   "benchmark_type": "manually_annotated_related_clause_recall",
   "scope": "deterministic offline provider regression only; not a real external embedding model benchmark",
   "source": {

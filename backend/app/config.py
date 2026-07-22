@@ -99,7 +99,7 @@ class Settings:
     llm_completion_cost_per_million: float | None = field(
         default_factory=lambda: _optional_non_negative_float("REVIEW_AGENT_LLM_COMPLETION_COST_PER_1M")
     )
-    embedding_mode: str = os.getenv("REVIEW_AGENT_EMBEDDING_MODE", "local_sparse")
+    embedding_mode: str = os.getenv("REVIEW_AGENT_EMBEDDING_MODE", "openai_compatible")
     embedding_base_url: str = os.getenv("REVIEW_AGENT_EMBEDDING_BASE_URL", "").strip()
     embedding_api_key: str = os.getenv("REVIEW_AGENT_EMBEDDING_API_KEY", "").strip()
     embedding_model: str = os.getenv("REVIEW_AGENT_EMBEDDING_MODEL", "").strip()

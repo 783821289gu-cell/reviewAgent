@@ -178,6 +178,19 @@ def initialize(connection: sqlite3.Connection) -> None:
             UNIQUE (contract_type, clause_type, risk_type, review_position)
         );
 
+        CREATE TABLE IF NOT EXISTS semantic_preference_embeddings (
+            preference_id TEXT NOT NULL,
+            embedding_mode TEXT NOT NULL,
+            embedding_model TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            vector_dimension INTEGER NOT NULL,
+            vector_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (preference_id, embedding_mode, embedding_model),
+            FOREIGN KEY (preference_id) REFERENCES semantic_preferences(preference_id)
+                ON DELETE CASCADE
+        );
+
         CREATE INDEX IF NOT EXISTS idx_review_tasks_status
         ON review_tasks (status, updated_at);
 
@@ -196,6 +209,11 @@ def initialize(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_semantic_preferences_lookup
         ON semantic_preferences (
             contract_type, clause_type, risk_type, review_position, confidence
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_semantic_preference_embeddings_model
+        ON semantic_preference_embeddings (
+            embedding_mode, embedding_model, vector_dimension
         );
         """
     )

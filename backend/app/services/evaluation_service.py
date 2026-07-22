@@ -26,14 +26,16 @@ from models.evaluation import (
     FailureSample,
 )
 from models.log import StepLog
+from models.memory import build_semantic_preference
 from models.review import ReviewPosition, ReviewStatus
 from providers.embedding_provider import create_embedding_provider
 from services.event_service import ReviewEventStore
 from services.feedback_service import apply_feedback_to_task
 from services.context_builder import ContextBudgetExceededError, build_review_context
 from services.log_service import invoke_tool
-from services.memory_service import evaluate_memory_comparison
+from services.memory_service import evaluate_memory_comparison, write_memory
 from services.review_service import ReviewOrchestratorAgent
+from tools.contracts import tool_contracts
 from tools.registry import tool_registry
 
 
@@ -42,7 +44,7 @@ DEFAULT_SAMPLES_DIR = PROJECT_ROOT / "samples"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "evaluation"
 NO_PRODUCTION_CLAIM = "基础评测仅验证流程跑通，不代表生产级准确率。"
 EFFECT_NO_PRODUCTION_CLAIM = "效果评测仅报告当前人工标注集上的实际指标和失败样本，不代表生产级准确率。"
-ANNOTATION_SCHEMA_VERSION = "effect-v2"
+ANNOTATION_SCHEMA_VERSION = "effect-v3"
 MODEL_FAILURE_STATUSES = {"LLM_OUTPUT_INVALID"}
 EFFECT_METRIC_NAMES = {
     "nda_classification_accuracy",
@@ -67,6 +69,10 @@ EFFECT_METRIC_NAMES = {
     "retry_recovery_rate",
     "unsupported_finding_rate",
     "memory_preference_consistency",
+    "memory_retrieval_recall_at_k",
+    "memory_retrieval_mrr",
+    "memory_embedding_coverage",
+    "embedding_call_success_rate",
     "prompt_injection_block_rate",
 }
 ALLOWED_PLANNER_ACTIONS = {
@@ -219,7 +225,7 @@ def run_effect_evaluation(tool_input: dict | None = None) -> dict:
         memory_comparison,
     )
     report_dir = output_dir / "reports" / evaluation_id
-    memory_db_path = str(output_dir / "effect_evaluation_memory.sqlite3")
+    memory_db_path = str(output_dir / f"{evaluation_id}_memory.sqlite3")
     runs = [
         _run_effect_contract(annotation, samples_dir)
         for annotation in annotations.contracts
@@ -250,6 +256,12 @@ def run_effect_evaluation(tool_input: dict | None = None) -> dict:
             annotations,
             runs,
             memory_comparison,
+            dict(effect_config["parameters"]["thresholds"]),
+        )
+    )
+    metrics.append(
+        _embedding_call_success_metric(
+            additional_logs,
             dict(effect_config["parameters"]["thresholds"]),
         )
     )
@@ -319,7 +331,11 @@ def _load_effect_config(samples_dir: Path) -> dict:
     parameters = config.get("parameters")
     if not isinstance(parameters, dict) or not isinstance(parameters.get("thresholds"), dict):
         raise AnnotationLoadError("invalid_annotation", "manifest.json", "effect evaluation parameters are invalid")
-    for name in ("playbook_recall_k", "related_clause_recall_k"):
+    for name in (
+        "playbook_recall_k",
+        "related_clause_recall_k",
+        "memory_retrieval_k",
+    ):
         value = parameters.get(name)
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise AnnotationLoadError("invalid_annotation", "manifest.json", f"{name} must be a positive integer")
@@ -750,6 +766,13 @@ def _calculate_effect_metrics(
         thresholds,
     )
     metrics.append(related_metric)
+    memory_metrics, memory_logs = _memory_retrieval_metrics(
+        annotations,
+        int(parameters["memory_retrieval_k"]),
+        thresholds,
+        f"{memory_db_path}.vectors",
+    )
+    metrics.extend(memory_metrics)
     metrics.extend(_risk_metrics(annotations, runs, thresholds))
     metrics.append(_evidence_metric(annotations, runs, thresholds))
     metrics.append(_manual_review_metric(annotations, runs, thresholds))
@@ -761,7 +784,7 @@ def _calculate_effect_metrics(
         memory_db_path,
     )
     metrics.append(report_metric)
-    return metrics, [*related_logs, *report_logs]
+    return metrics, [*related_logs, *memory_logs, *report_logs]
 
 
 def _classification_metric(
@@ -997,6 +1020,187 @@ def _related_clause_metric(
             thresholds,
         ),
         all_logs,
+    )
+
+
+def _memory_retrieval_metrics(
+    annotations: AnnotationBundle,
+    k: int,
+    thresholds: dict,
+    db_path: str,
+) -> tuple[list[EvaluationMetric], list[dict]]:
+    expected_ids: dict[str, str] = {}
+    for annotation in annotations.memory:
+        case = annotation.model_dump(mode="json")
+        episodes = []
+        for episode in case["episodes"]:
+            memory_item = {
+                "memory_id": episode["memory_id"],
+                "contract_type": case["contract_type"],
+                "clause_type": case["clause_type"],
+                "risk_type": case["risk_type"],
+                "review_position": case["review_position"],
+                "user_action": episode["user_action"],
+                "original_severity": episode["final_severity"],
+                "final_severity": episode["final_severity"],
+                "original_suggestion": case["baseline_suggestion"],
+                "final_suggestion": episode["final_suggestion"],
+                "ignore_reason": (
+                    "Annotated evaluation opposition."
+                    if episode["user_action"] == "ignore"
+                    else ""
+                ),
+                "source_finding_id": f"EVAL-{case['case_id']}",
+                "source_clause_id": f"EVAL-CLAUSE-{case['case_id']}",
+                "include_in_report": episode["user_action"] != "ignore",
+                "created_at": episode["created_at"],
+            }
+            episodes.append(memory_item)
+            write_memory(
+                {
+                    "db_path": db_path,
+                    "idempotency_key": f"effect-memory:{episode['memory_id']}",
+                    "human_feedback": memory_item,
+                }
+            )
+        expected_ids[case["case_id"]] = build_semantic_preference(
+            episodes
+        ).preference_id
+
+    recall_checks = []
+    reciprocal_rank_scores = []
+    coverage_checks = []
+    logs: list[StepLog] = []
+    for annotation in annotations.memory:
+        case = annotation.model_dump(mode="json")
+        expected_id = expected_ids[case["case_id"]]
+        execution_failed = False
+        try:
+            results = invoke_tool(
+                f"effect_memory_{case['case_id']}",
+                tool_registry,
+                "retrieve_memory",
+                {
+                    "db_path": db_path,
+                    "contract_type": case["contract_type"],
+                    "clause": {
+                        "clause_id": f"EVAL-QUERY-{case['case_id']}",
+                        "clause_type": case["clause_type"],
+                        "title": case["clause_type"].replace("_", " "),
+                        "text": case["query_text"],
+                        "key_fields": {},
+                    },
+                    "risk_type": case["risk_type"],
+                    "review_position": case["review_position"],
+                    "memory_items": [],
+                    "embedding_cache": {},
+                    "limit": k,
+                    "now": case["evaluation_time"],
+                    "stale_after_days": case["stale_after_days"],
+                },
+                logs,
+                step_name="effect_memory_vector_retrieval",
+            )
+            actual_ids = [str(item.get("memory_id", "")) for item in results[:k]]
+            rank = actual_ids.index(expected_id) + 1 if expected_id in actual_ids else None
+            expected_item = next(
+                (item for item in results[:k] if item.get("memory_id") == expected_id),
+                None,
+            )
+            failure_reason = f"annotated Memory was not found in top {k}"
+        except Exception as exc:
+            execution_failed = True
+            actual_ids = []
+            rank = None
+            expected_item = None
+            failure_reason = str(exc) or exc.__class__.__name__
+
+        recall_checks.append(
+            (
+                rank is not None,
+                FailureSample(
+                    sample_id=case["case_id"],
+                    failure_type=(
+                        "memory_retrieval_failed"
+                        if execution_failed
+                        else "memory_not_recalled"
+                    ),
+                    reason=failure_reason,
+                    expected=expected_id,
+                    actual=actual_ids,
+                ),
+            )
+        )
+        reciprocal_rank_scores.append(
+            (
+                1.0 / rank if rank is not None else 0.0,
+                FailureSample(
+                    sample_id=case["case_id"],
+                    failure_type="memory_reciprocal_rank_zero",
+                    reason="annotated Memory has no rank within the retrieval window",
+                    expected=f"rank<={k}",
+                    actual=rank,
+                ),
+            )
+        )
+        coverage_checks.append(
+            (
+                _memory_embedding_is_covered(expected_item),
+                FailureSample(
+                    sample_id=case["case_id"],
+                    failure_type="memory_embedding_metadata_missing",
+                    reason="retrieved Memory lacks complete vector version metadata",
+                    expected="model, dimension, similarity, content hash, strategy",
+                    actual=(
+                        sorted(expected_item.keys())
+                        if isinstance(expected_item, dict)
+                        else "memory_not_retrieved"
+                    ),
+                ),
+            )
+        )
+
+    return (
+        [
+            _checks_metric(
+                "memory_retrieval_recall_at_k",
+                f"Memory Recall@{k}",
+                recall_checks,
+                thresholds,
+            ),
+            _mean_score_metric(
+                "memory_retrieval_mrr",
+                "Memory MRR",
+                reciprocal_rank_scores,
+                thresholds,
+            ),
+            _checks_metric(
+                "memory_embedding_coverage",
+                "Memory 向量覆盖率",
+                coverage_checks,
+                thresholds,
+            ),
+        ],
+        [log.to_dict() for log in logs],
+    )
+
+
+def _memory_embedding_is_covered(item) -> bool:
+    if not isinstance(item, dict):
+        return False
+    dimension = item.get("vector_dimension")
+    similarity = item.get("vector_similarity")
+    return bool(
+        str(item.get("embedding_mode") or "")
+        and str(item.get("embedding_model") or "")
+        and isinstance(dimension, int)
+        and not isinstance(dimension, bool)
+        and dimension > 0
+        and isinstance(similarity, (int, float))
+        and not isinstance(similarity, bool)
+        and len(str(item.get("embedding_content_hash") or "")) == 64
+        and item.get("retrieval_strategy")
+        == "vector_with_structured_safety_filters"
     )
 
 
@@ -1374,6 +1578,9 @@ def _agent_metrics(
     provider_groups = []
     json_checks = []
     for contract_id, log_index, log in task_logs:
+        contract = tool_contracts.get(str(log.get("tool_name") or ""))
+        if contract is None or not contract.calls_llm:
+            continue
         provider = (log.get("trace_summary") or {}).get("provider") or {}
         if provider.get("mode") != "openai_compatible":
             continue
@@ -1532,6 +1739,40 @@ def _agent_metrics(
             thresholds,
         ),
     ]
+
+
+def _embedding_call_success_metric(
+    logs: list[dict],
+    thresholds: dict,
+) -> EvaluationMetric:
+    checks = []
+    embedding_tools = {"retrieve_related_clauses", "retrieve_memory"}
+    for log_index, log in enumerate(logs):
+        if log.get("tool_name") not in embedding_tools:
+            continue
+        provider = (log.get("trace_summary") or {}).get("provider") or {}
+        for call_index, call in enumerate(provider.get("calls") or []):
+            if not isinstance(call, dict):
+                continue
+            error_type = str(call.get("error_type") or "")
+            checks.append(
+                (
+                    not error_type,
+                    FailureSample(
+                        sample_id=f"embedding:{log_index + 1}:{call_index + 1}",
+                        failure_type="embedding_call_failed",
+                        reason="Embedding Provider call did not complete successfully",
+                        expected="success",
+                        actual=error_type or "success",
+                    ),
+                )
+            )
+    return _checks_metric(
+        "embedding_call_success_rate",
+        "Embedding 调用成功率",
+        checks,
+        thresholds,
+    )
 
 
 def _retrieval_repair_checks(
@@ -1751,6 +1992,30 @@ def _checks_metric(
         threshold=threshold,
         threshold_met=sample_count > 0 and score >= threshold,
         failure_samples=[failure for passed, failure in checks if not passed],
+    )
+
+
+def _mean_score_metric(
+    metric: str,
+    label: str,
+    scores: list[tuple[float, FailureSample]],
+    thresholds: dict,
+) -> EvaluationMetric:
+    sample_count = len(scores)
+    passed_count = sum(1 for score, _failure in scores if score > 0)
+    failed_count = sample_count - passed_count
+    mean_score = sum(score for score, _failure in scores) / sample_count if sample_count else 0.0
+    threshold = float(thresholds[metric])
+    return EvaluationMetric(
+        metric=metric,
+        label=label,
+        sample_count=sample_count,
+        passed_count=passed_count,
+        failed_count=failed_count,
+        score=round(mean_score, 4),
+        threshold=threshold,
+        threshold_met=sample_count > 0 and mean_score >= threshold,
+        failure_samples=[failure for score, failure in scores if score <= 0],
     )
 
 

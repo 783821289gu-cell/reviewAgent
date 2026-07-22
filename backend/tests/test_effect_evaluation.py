@@ -488,6 +488,10 @@ class EffectEvaluationTest(unittest.TestCase):
             "retry_recovery_rate",
             "unsupported_finding_rate",
             "memory_preference_consistency",
+            "memory_retrieval_recall_at_k",
+            "memory_retrieval_mrr",
+            "memory_embedding_coverage",
+            "embedding_call_success_rate",
             "prompt_injection_block_rate",
         }
         self.assertEqual(set(metrics), expected_metrics)
@@ -505,6 +509,19 @@ class EffectEvaluationTest(unittest.TestCase):
         self.assertTrue(metrics["related_clause_recall_at_k"]["threshold_met"])
         self.assertEqual(metrics["related_clause_recall_at_k"]["failure_samples"], [])
         for metric_name in [
+            "memory_retrieval_recall_at_k",
+            "memory_retrieval_mrr",
+            "memory_embedding_coverage",
+        ]:
+            self.assertEqual(metrics[metric_name]["sample_count"], 20)
+            self.assertTrue(metrics[metric_name]["threshold_met"], metric_name)
+        self.assertGreaterEqual(
+            metrics["embedding_call_success_rate"]["sample_count"],
+            40,
+        )
+        self.assertEqual(metrics["embedding_call_success_rate"]["score"], 1.0)
+        self.assertTrue(metrics["embedding_call_success_rate"]["threshold_met"])
+        for metric_name in [
             "playbook_recall_at_k",
             "prompt_injection_block_rate",
         ]:
@@ -520,7 +537,7 @@ class EffectEvaluationTest(unittest.TestCase):
                 for metric in summary["metrics"]
             )
         )
-        self.assertEqual(summary["versions"]["annotation_version"], "effect-v2")
+        self.assertEqual(summary["versions"]["annotation_version"], "effect-v3")
         self.assertEqual(summary["versions"]["playbook_version"], "nda-v1")
         self.assertTrue(summary["versions"]["code_version"])
         self.assertIn("llm_mode", summary["versions"])
@@ -537,7 +554,7 @@ class EffectEvaluationTest(unittest.TestCase):
         self.assertEqual(summary_path.stem, summary["evaluation_id"])
         self.assertEqual(markdown_path.stem, summary["evaluation_id"])
         self.assertEqual(persisted, summary)
-        self.assertIn("- 标注版本：effect-v2", markdown)
+        self.assertIn("- 标注版本：effect-v3", markdown)
         self.assertIn("- Playbook Recall@K：3", markdown)
         self.assertIn("- 相关条款 Recall@K：1", markdown)
         self.assertIn('"risk_f1": 0.8', markdown)

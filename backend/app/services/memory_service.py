@@ -1,4 +1,7 @@
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+import json
+from math import isfinite
 from uuid import uuid4
 
 from config import settings
@@ -9,10 +12,16 @@ from models.memory import (
     build_semantic_preference,
     semantic_preference_from_row,
 )
+from providers.embedding_provider import (
+    create_embedding_provider,
+    embedding_call_records_from_tool_input,
+)
+from services.embedding_service import cosine_similarity, embed_texts
 
 
 DEFAULT_MEMORY_STALE_AFTER_DAYS = 365
 EXPIRED_CONFIDENCE_FACTOR = 0.5
+MIN_MEMORY_VECTOR_SIMILARITY = 0.55
 
 
 def retrieve_memory(tool_input: dict) -> list[dict]:
@@ -59,13 +68,15 @@ def retrieve_memory(tool_input: dict) -> list[dict]:
 
     return _query_sqlite_preferences(
         contract_type=contract_type,
-        clause_type=clause_type,
+        clause=clause,
         risk_type=risk_type,
         review_position=review_position,
         limit=limit,
         db_path=tool_input.get("db_path"),
         now=now,
         stale_after_days=stale_after_days,
+        embedding_cache=tool_input.get("embedding_cache"),
+        embedding_call_records=embedding_call_records_from_tool_input(tool_input),
     )
 
 
@@ -208,32 +219,81 @@ def _aggregate_provided_memory_items(
 
 def _query_sqlite_preferences(
     contract_type: str,
-    clause_type: str,
+    clause: dict,
     risk_type: str,
     review_position: str,
     limit: int,
     db_path: str | None,
     now: datetime,
     stale_after_days: int,
+    embedding_cache: dict | None,
+    embedding_call_records: list | None,
 ) -> list[dict]:
+    if embedding_cache is None:
+        embedding_cache = {}
+    if not isinstance(embedding_cache, dict):
+        raise ValueError("embedding_cache must be a dict")
+
     repository = MemoryRepository(str(db_path or settings.memory_db_path))
-    rows = repository.find_preferences(
+    rows = repository.find_candidate_preferences(
         contract_type=contract_type,
-        clause_type=clause_type,
+        review_position=review_position,
+    )
+    if not rows:
+        return []
+
+    preferences = [semantic_preference_from_row(row).to_dict() for row in rows]
+    ranked_preferences = _rank_preferences_by_embedding(
+        repository=repository,
+        preferences=preferences,
+        contract_type=contract_type,
+        clause=clause,
         risk_type=risk_type,
         review_position=review_position,
+        embedding_cache=embedding_cache,
+        embedding_call_records=embedding_call_records,
+        now=now,
     )
     payloads = []
     now_text = now.isoformat()
-    for row in rows[:limit]:
-        preference = semantic_preference_from_row(row).to_dict()
-        match_score = 8 if preference["review_position"] == review_position else 7
+    for ranked in ranked_preferences[:limit]:
+        preference = ranked["preference"]
         payload = _preference_payload(
             preference,
-            source="sqlite_semantic_preference",
-            match_score=match_score,
+            source="sqlite_vector_memory",
+            match_score=ranked["match_score"],
             now=now,
             stale_after_days=stale_after_days,
+        )
+        exact_semantic_match = bool(
+            ranked["retrieval_factors"]["exact_clause_type"]
+            and ranked["retrieval_factors"]["exact_risk_type"]
+        )
+        retrieval_eligible = bool(
+            exact_semantic_match
+            or ranked["vector_similarity"] >= MIN_MEMORY_VECTOR_SIMILARITY
+        )
+        if not retrieval_eligible:
+            payload["can_influence_suggestion"] = False
+            payload["influence_reason"] = "blocked_low_vector_relevance"
+        payload.update(
+            {
+                "vector_similarity": ranked["vector_similarity"],
+                "embedding_mode": ranked["embedding_mode"],
+                "embedding_model": ranked["embedding_model"],
+                "vector_dimension": ranked["vector_dimension"],
+                "embedding_content_hash": ranked["content_hash"],
+                "retrieval_strategy": "vector_with_structured_safety_filters",
+                "retrieval_eligible": retrieval_eligible,
+                "retrieval_factors": ranked["retrieval_factors"],
+            }
+        )
+        payload["memory_injection"].update(
+            {
+                "vector_similarity": ranked["vector_similarity"],
+                "retrieval_eligible": retrieval_eligible,
+                "retrieval_strategy": "vector_with_structured_safety_filters",
+            }
         )
         repository.update_preference_lifecycle(
             preference["preference_id"],
@@ -246,6 +306,218 @@ def _query_sqlite_preferences(
             payload["last_used_at"] = now_text
         payloads.append(payload)
     return payloads
+
+
+def _rank_preferences_by_embedding(
+    *,
+    repository: MemoryRepository,
+    preferences: list[dict],
+    contract_type: str,
+    clause: dict,
+    risk_type: str,
+    review_position: str,
+    embedding_cache: dict,
+    embedding_call_records: list | None,
+    now: datetime,
+) -> list[dict]:
+    provider = create_embedding_provider()
+    documents = {
+        preference["preference_id"]: build_preference_embedding_text(preference)
+        for preference in preferences
+    }
+    content_hashes = {
+        preference_id: sha256(text.encode("utf-8")).hexdigest()
+        for preference_id, text in documents.items()
+    }
+    stored = repository.find_preference_embeddings(
+        [preference["preference_id"] for preference in preferences],
+        embedding_mode=provider.mode,
+        embedding_model=provider.model,
+    )
+    candidate_vectors: dict[str, list[float]] = {}
+    missing_preferences = []
+    for preference in preferences:
+        preference_id = preference["preference_id"]
+        row = stored.get(preference_id)
+        vector = _stored_vector(row, content_hashes[preference_id])
+        if vector is None:
+            missing_preferences.append(preference)
+        else:
+            candidate_vectors[preference_id] = vector
+
+    query_text = build_memory_query_text(
+        contract_type,
+        clause,
+        risk_type,
+        review_position,
+    )
+    embedding_batch = embed_texts(
+        [query_text, *[documents[item["preference_id"]] for item in missing_preferences]],
+        cache=embedding_cache,
+        call_records=embedding_call_records,
+        provider=provider,
+    )
+    query_vector = embedding_batch.vectors[0]
+    new_vectors = embedding_batch.vectors[1:]
+    upserts = []
+    for preference, vector in zip(missing_preferences, new_vectors):
+        preference_id = preference["preference_id"]
+        candidate_vectors[preference_id] = vector
+        upserts.append(
+            {
+                "preference_id": preference_id,
+                "embedding_mode": embedding_batch.mode,
+                "embedding_model": embedding_batch.model,
+                "content_hash": content_hashes[preference_id],
+                "vector_dimension": embedding_batch.vector_dimension,
+                "vector": vector,
+                "updated_at": now.isoformat(),
+            }
+        )
+
+    mismatched = [
+        preference
+        for preference in preferences
+        if len(candidate_vectors[preference["preference_id"]])
+        != embedding_batch.vector_dimension
+    ]
+    if mismatched:
+        refreshed = embed_texts(
+            [documents[item["preference_id"]] for item in mismatched],
+            cache=embedding_cache,
+            call_records=embedding_call_records,
+            provider=provider,
+        )
+        for preference, vector in zip(mismatched, refreshed.vectors):
+            preference_id = preference["preference_id"]
+            candidate_vectors[preference_id] = vector
+            upserts.append(
+                {
+                    "preference_id": preference_id,
+                    "embedding_mode": refreshed.mode,
+                    "embedding_model": refreshed.model,
+                    "content_hash": content_hashes[preference_id],
+                    "vector_dimension": refreshed.vector_dimension,
+                    "vector": vector,
+                    "updated_at": now.isoformat(),
+                }
+            )
+    repository.upsert_preference_embeddings(upserts)
+
+    ranked = []
+    clause_type = str(clause.get("clause_type", ""))
+    for preference in preferences:
+        preference_id = preference["preference_id"]
+        similarity = round(
+            cosine_similarity(query_vector, candidate_vectors[preference_id]),
+            4,
+        )
+        exact_clause_type = preference["clause_type"] == clause_type
+        exact_risk_type = preference["risk_type"] == risk_type
+        exact_position = preference["review_position"] == review_position
+        score = round(
+            max(0.0, similarity) * 0.7
+            + (0.15 if exact_clause_type else 0.0)
+            + (0.15 if exact_risk_type else 0.0),
+            4,
+        )
+        ranked.append(
+            {
+                "preference": preference,
+                "match_score": round(score * 10, 4),
+                "vector_similarity": similarity,
+                "embedding_mode": embedding_batch.mode,
+                "embedding_model": embedding_batch.model,
+                "vector_dimension": len(candidate_vectors[preference_id]),
+                "content_hash": content_hashes[preference_id],
+                "retrieval_factors": {
+                    "vector_weight": 0.7,
+                    "exact_clause_type": exact_clause_type,
+                    "exact_clause_type_weight": 0.15,
+                    "exact_risk_type": exact_risk_type,
+                    "exact_risk_type_weight": 0.15,
+                    "exact_review_position": exact_position,
+                    "hard_filters": ["contract_type", "review_position"],
+                },
+            }
+        )
+    return sorted(
+        ranked,
+        key=lambda item: (
+            item["match_score"],
+            item["preference"]["confidence"],
+            item["preference"]["last_feedback_at"],
+            item["preference"]["preference_id"],
+        ),
+        reverse=True,
+    )
+
+
+def build_memory_query_text(
+    contract_type: str,
+    clause: dict,
+    risk_type: str,
+    review_position: str,
+) -> str:
+    key_fields = clause.get("key_fields") or {}
+    return " ".join(
+        part
+        for part in (
+            contract_type,
+            review_position,
+            risk_type,
+            str(clause.get("clause_type", "")),
+            str(clause.get("title", "")),
+            str(clause.get("text", "")),
+            json.dumps(key_fields, ensure_ascii=False, sort_keys=True),
+        )
+        if part
+    )
+
+
+def build_preference_embedding_text(preference: dict) -> str:
+    variants = []
+    for variant in preference.get("variants") or []:
+        variants.extend(
+            [
+                str(variant.get("stance", "")),
+                str(variant.get("final_severity", "")),
+                str(variant.get("final_suggestion", "")),
+            ]
+        )
+    return " ".join(
+        part
+        for part in (
+            str(preference.get("contract_type", "")),
+            str(preference.get("review_position", "")),
+            str(preference.get("clause_type", "")),
+            str(preference.get("risk_type", "")),
+            str(preference.get("conflict_status", "")),
+            *variants,
+        )
+        if part
+    )
+
+
+def _stored_vector(row, expected_content_hash: str) -> list[float] | None:
+    if row is None or str(row["content_hash"]) != expected_content_hash:
+        return None
+    try:
+        vector = json.loads(str(row["vector_json"]))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(vector, list) or not vector:
+        return None
+    if len(vector) != int(row["vector_dimension"]):
+        return None
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not isfinite(float(value))
+        for value in vector
+    ):
+        return None
+    return [float(value) for value in vector]
 
 
 def _preference_payload(

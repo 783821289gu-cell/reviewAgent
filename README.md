@@ -24,7 +24,7 @@
 16. `retrieve_playbook_rules` 已通过显式 `tool_registry` 调用，并按合同类型、条款类型、关键字段和审查立场检索规则。
 17. 前端展示命中的 Playbook 规则；未命中规则时不会生成正式风险。
 18. `retrieve_related_clauses` 已通过显式 `tool_registry` 调用；支持 `local_sparse` 离线测试模式和 `openai_compatible` 真实 Embedding 模式，在当前合同条款内合并关键词与 Embedding 候选、去重，并执行动态 Top-K 和可解释 rerank。
-19. `retrieve_memory` 已通过显式 `tool_registry` 调用；支持从调用方提供的 `memory_items` 中过滤召回，也支持从 SQLite Memory 中按合同类型、条款类型、风险类型和审查立场检索历史反馈。
+19. `retrieve_memory` 已通过显式 `tool_registry` 调用；SQLite Memory 先按合同类型和审查立场硬过滤，再使用与 RAG 相同的 Embedding Provider、余弦相似度和精确字段因子排序。语义偏好向量按模型、维度和内容哈希持久化，内容变化后惰性刷新，不跨立场注入。
 20. 后端构建风险分析上下文，包含当前条款、命中规则、相关条款、相关 Memory 字段、输出约束和证据约束。
 21. `analyze_risk` 已通过显式 `tool_registry` 调用；新建审查可按任务选择 `local_structured` 或 `openai_compatible`，本地模式不会记录为真实外部 LLM 调用。
 22. `verify_evidence` 已通过显式 `tool_registry` 调用，校验 `clause_id`、`evidence_text`、风险原因与证据文本相关性，以及命中规则一致性。
@@ -58,9 +58,9 @@
 50. 相关条款结果包含 Embedding 模式、模型、向量维度、余弦相似度、rerank 因子和最终分数；前端 Context Trace 展示模型、相似度和最终分数。
 51. 外部 Embedding 调用日志记录模型、供应商请求 ID、输入数量、向量维度、耗时和错误类型，不记录 API Key 或完整合同文本；失败时进入 `RETRIEVAL_FAILED`，未启用静默词频降级。
 52. `samples/annotations/related_clauses.json` 提供 20 组人工相关条款标注，覆盖 8 类 NDA 风险；离线测试直接运行本地混合检索并计算 Recall@1，不使用语义命中 Stub 代替实际检索结果。
-53. `samples/annotations/` 提供 `effect-v2` 人工标注 schema，覆盖 23 份合同、174 条条款、65 条唯一风险条款、20 组 Memory 对照和 10 组 Prompt Injection；当前数据全部为项目内合成夹具。
+53. `samples/annotations/` 提供 `effect-v3` 人工标注 schema，覆盖 23 份合同、174 条条款、65 条唯一风险条款、20 组相关条款、20 组带检索查询的 Memory 对照和 10 组 Prompt Injection；当前数据全部为项目内合成夹具。
 54. `POST /api/evaluation/effect/run` 独立运行效果评测，不改写现有 `POST /api/evaluation/run` 流程评测响应。
-55. 效果评测计算 23 项指标，包括 NDA 分类、非 NDA 拒绝、条款、Playbook/相关条款、风险、证据、人工复核、报告、工具、端到端、Planner、结构化输出、修复、恢复、无证据风险、Memory 和 Injection；token、成本状态和 P95 延迟作为运行测量单独记录。
+55. 效果评测计算 27 项指标，包括 NDA 分类、非 NDA 拒绝、条款、Playbook/相关条款、风险、证据、人工复核、报告、工具、端到端、Planner、结构化输出、修复、恢复、无证据风险、Memory 偏好一致性、Memory Recall@K、Memory MRR、Memory 向量覆盖率、Embedding 调用成功率和 Injection；token、成本状态和 P95 延迟作为运行测量单独记录。
 56. 每个效果指标记录样本数、通过数、失败数、阈值和失败样本；版本化 JSON/Markdown 摘要记录 Git、Playbook、标注、LLM、Embedding 和关键参数。
 57. Web 评测面板使用“流程摘要”和“效果摘要”两个独立视图；未达阈值指标按实际失败状态展示。
 58. 扫描件、空文本、加密、复杂字体映射失败和损坏 PDF 会进入真实 `PARSE_FAILED` 状态，不生成伪造正文或正式风险。
@@ -94,14 +94,14 @@
 1. 未使用 DeepSeek 对 23 份完整标注集完成两轮外部模型稳定性评测；当前真实运行只覆盖固定的 2 份合成 NDA 子集。
 2. 真实 DeepSeek 两轮的 Evidence span、Memory 一致性和结构化修复指标未全部达标，且两轮波动明显；不能声明 Agent 效果验收通过。
 3. 任务 9 Code Review 后的代码没有再次消耗 DeepSeek 复跑；现有外部结果对应 Review 前的未提交工作区，限制详见 `evaluation/release/agent-evolution-verification.md`。
-4. 尚未使用真实外部 Embedding 在完整标注集上复测，默认仍为 `local_sparse`。
+4. 尚未配置并使用独立的真实外部 Embedding Provider 对完整标注集复测；现有真实 DeepSeek Key 不能作为 Embedding 能力证明。
 5. OCR 尚未实现；扫描件会进入明确的 `PARSE_FAILED`，是否引入 OCR 必须另立迭代计划。
 
 迭代技术方案、实施顺序和验收口径见 `NEXT_PLAN.md`、`TASKS_2.md`、`UI_REDESIGN_PLAN.md`、`AGENT_EVOLUTION_PLAN.md`、`TASKS_AGENT.md` 和 `DEEPSEEK_TIMEOUT_PLAN.md`；这些文件保留计划形成过程，当前完成状态以代码、测试和本 README 为准。
 
-当前基础评测只验证流程跑通，不声明生产级准确率。人工相关条款集直接运行本地混合检索，不使用语义命中 Stub 代替结果，但仍不代表实际外部 Embedding 模型质量；因此默认正式配置仍为 `local_sparse`。真实 DeepSeek 子集运行验证了外部调用链，不等于证明模型效果稳定或达到生产要求。
+当前基础评测只验证流程跑通，不声明生产级准确率。生产默认 Embedding 路径为 `openai_compatible`；`local_sparse` 仅用于显式离线回归。人工相关条款集和 Memory 检索均运行真实工具路径，但离线结果仍不代表外部 Embedding 模型质量。真实 DeepSeek 子集运行验证了外部 LLM 调用链，不等于证明模型效果稳定或达到生产要求。
 
-当前 `effect-v2` 包含 23 份合同、174 条条款、65 条唯一风险条款、20 组相关条款、20 组 Memory 对照和 10 组 Prompt Injection。默认本地模式完整评测中相关条款 Recall@1 为 `20/20`，但风险 Recall 和 Evidence span 均为 `0.5231`、Memory 一致性为 `0.55`，摘要为 `completed_with_failures`；这些合成样本结果不能外推为生产准确率或真实外部模型效果。
+当前 `effect-v3` 包含 23 份合同、174 条条款、65 条唯一风险条款、20 组相关条款、20 组 Memory 检索/偏好对照和 10 组 Prompt Injection。量化结果以 `evaluation/release/model-embedding-memory-verification.md` 的实际运行记录为准；这些合成样本结果不能外推为生产准确率或真实外部模型效果。
 
 当前 14 个工具均已在 `tool_registry` 中注册契约。`classify_contract_type`、`extract_key_fields`、`analyze_risk`、`criticize_risk`、`plan_review_action` 和 `generate_revision` 具备 LLM Provider 调用边界；默认 `local_structured` 模式下 Critic 和 Planner 使用确定性策略，不记录为真实外部 LLM 调用。
 
@@ -185,6 +185,16 @@ REVIEW_AGENT_DEEPSEEK_TASK_TIMEOUT_SECONDS=3600
 REVIEW_AGENT_LLM_MAX_CONCURRENCY=2
 ```
 
+Embedding 使用独立 Provider，配置在同一个项目根目录 `.env`，不要复用或猜测 DeepSeek 聊天模型的 Embedding 能力：
+
+```dotenv
+REVIEW_AGENT_EMBEDDING_MODE=openai_compatible
+REVIEW_AGENT_EMBEDDING_BASE_URL=<your-embedding-provider-v1-base-url>
+REVIEW_AGENT_EMBEDDING_API_KEY=<your-embedding-provider-key>
+REVIEW_AGENT_EMBEDDING_MODEL=<your-embedding-model>
+REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS=60
+```
+
 配置完成后直接启动：
 
 ```powershell
@@ -249,10 +259,10 @@ http://127.0.0.1:8000/health
 24. 上传不支持或不可解析文件时，确认状态进入错误提示，不显示伪造解析结果。
 25. 服务重启后使用原任务 ID 查询，确认任务、条款、风险、日志、事件和反馈仍然存在。
 26. 对非终态任务执行重启验证时，确认事件中出现 `recovery_started`，恢复记录包含恢复次数和起点，已完成工具没有重复日志。
-27. 在默认 `local_sparse` 模式下完成审查，确认相关条款结果包含 `local_sparse_hash_v1`、固定 256 维向量、余弦相似度、rerank 因子和最终分数，且执行日志标记 `local_sparse_no_external_embedding`。
+27. 显式设置 `REVIEW_AGENT_EMBEDDING_MODE=local_sparse` 完成离线审查，确认相关条款和 Memory 结果包含本地模型标识、固定维度、余弦相似度和排序因子，且执行日志标记 `local_sparse_no_external_embedding`；该验证不得写成真实模型结果。
 28. 配置 `openai_compatible` Embedding 后，确认日志显示实际模型、供应商请求 ID、输入数量、向量维度和耗时；让供应商返回错误时，确认任务进入 `RETRIEVAL_FAILED` 且没有 `lexical_fallback`。
 29. 在评测面板切换“流程摘要”和“效果摘要”，确认两者结果和加载/失败状态彼此独立。
-30. 运行效果评测，确认返回 23 个指标，且每项包含样本数、通过数、失败数、阈值、达标状态和失败样本；样本数为 0 时必须显示“无样本”且不得视为达标。当前默认本地模式下相关条款 Recall@1 应显示 `20/20` 且达到 `0.8` 阈值，但完整摘要仍为 `completed_with_failures`。
+30. 运行效果评测，确认返回 27 个指标，且每项包含样本数、通过数、失败数、阈值、达标状态和失败样本；样本数为 0 时必须显示“无样本”且不得视为达标。相关条款与 Memory 检索分别显示 Recall@K，Memory 同时显示 MRR 和向量覆盖率，Embedding 显示调用成功率。
 31. 确认效果摘要显示 Git、Playbook、标注、LLM 和 Embedding 版本，并在 `evaluation/effect/` 生成以评测 ID 命名的 JSON 和 Markdown 文件。
 32. 上传 `samples/pdf/nda_text_zh.pdf` 和 `samples/pdf/nda_text_en.pdf`，确认正文按页解析，条款 `source_location` 包含页码、块 ID 和 `bbox`；正式风险的 `evidence_location` 精确到证据命中的 PDF 块和块内字符范围。
 33. 上传 `backend/tests/fixtures/pdf/scanned_image.pdf`，确认任务进入 `PARSE_FAILED`、提示“需要 OCR”，且不生成文档、条款和风险。
@@ -269,7 +279,7 @@ http://127.0.0.1:8000/health
 新建审查默认选择 `local_structured`；界面打开 DeepSeek 开关后，该任务固定使用 `openai_compatible`。外部 Provider 的连接与凭据通过 `REVIEW_AGENT_LLM_BASE_URL`、`REVIEW_AGENT_LLM_API_KEY`、`REVIEW_AGENT_LLM_MODEL` 和 `REVIEW_AGENT_LLM_TIMEOUT_SECONDS` 配置，任务选择会随完整任务状态写入 SQLite。
 默认 LLM 上下文预算为 6000 tokens，可通过 `REVIEW_AGENT_LLM_CONTEXT_BUDGET_TOKENS` 调整；值必须是正整数。
 可通过 `REVIEW_AGENT_LLM_PROMPT_COST_PER_1M` 和 `REVIEW_AGENT_LLM_COMPLETION_COST_PER_1M` 配置每百万 token 单价；未配置时日志显示“未配置”。
-默认 Embedding 模式为 `local_sparse`；外部模式通过 `REVIEW_AGENT_EMBEDDING_MODE=openai_compatible`、`REVIEW_AGENT_EMBEDDING_BASE_URL`、`REVIEW_AGENT_EMBEDDING_API_KEY`、`REVIEW_AGENT_EMBEDDING_MODEL` 和 `REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS` 配置。
+生产默认 Embedding 模式为 `openai_compatible`，通过 `REVIEW_AGENT_EMBEDDING_BASE_URL`、`REVIEW_AGENT_EMBEDDING_API_KEY`、`REVIEW_AGENT_EMBEDDING_MODEL` 和 `REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS` 配置。`local_sparse` 只允许作为显式离线测试模式使用。
 Orchestrator 默认单节点超时为 90 秒、本地任务总时限为 900 秒、DeepSeek 任务安全上限为 3600 秒，可分别通过 `REVIEW_AGENT_NODE_TIMEOUT_SECONDS`、`REVIEW_AGENT_TASK_TIMEOUT_SECONDS` 和 `REVIEW_AGENT_DEEPSEEK_TASK_TIMEOUT_SECONDS` 调整。`REVIEW_AGENT_LLM_MAX_CONCURRENCY` 控制彼此独立的关键字段和首次风险分析调用，默认 2、最大 4；同一风险内部的 Planner、Critic、修订和 Evidence 依赖链仍保持串行。解析、检索、LLM 输出、Evidence、节点超时、任务超时和通用任务错误的人工恢复预算各为 2 次，服务重启不会重置。
 服务运行日志默认写入 `backend/app/logs/review_agent.log`，可通过 `REVIEW_AGENT_RUNTIME_LOG_FILE` 和 `REVIEW_AGENT_RUNTIME_LOG_LEVEL` 调整。日志只记录脱敏任务、阶段、工具、耗时与错误摘要；SQLite Trace 仍是产品内审计数据。
 
@@ -277,8 +287,12 @@ Orchestrator 默认单节点超时为 90 秒、本地任务总时限为 900 秒�
 
 ```powershell
 $env:REVIEW_AGENT_LOAD_DOTENV = "0"
+$env:REVIEW_AGENT_LLM_MODE = "local_structured"
+$env:REVIEW_AGENT_EMBEDDING_MODE = "local_sparse"
 python -m unittest discover -s backend\tests -p "test_*.py"
 pnpm test:e2e
+Remove-Item Env:REVIEW_AGENT_EMBEDDING_MODE
+Remove-Item Env:REVIEW_AGENT_LLM_MODE
 Remove-Item Env:REVIEW_AGENT_LOAD_DOTENV
 ```
 

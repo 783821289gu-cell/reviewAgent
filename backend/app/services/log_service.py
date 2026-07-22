@@ -142,11 +142,12 @@ def invoke_tool(
     embedding_calls: list[EmbeddingCallMetadata] = []
     runtime_tool_input = tool_input
     contract = tool_contracts.get(tool_name)
-    if (contract is not None and contract.calls_llm) or tool_name == "retrieve_related_clauses":
+    embedding_tools = {"retrieve_related_clauses", "retrieve_memory"}
+    if (contract is not None and contract.calls_llm) or tool_name in embedding_tools:
         runtime_tool_input = dict(tool_input)
     if contract is not None and contract.calls_llm:
         runtime_tool_input[LLM_CALL_RECORDS_INPUT_KEY] = llm_calls
-    if tool_name == "retrieve_related_clauses":
+    if tool_name in embedding_tools:
         runtime_tool_input[EMBEDDING_CALL_RECORDS_INPUT_KEY] = embedding_calls
     write_runtime_log(
         "tool_started",
@@ -201,6 +202,7 @@ def invoke_tool(
                     None,
                     token_summary,
                     status,
+                    embedding_calls=embedding_calls,
                 ),
             )
         logs.append(failed_log)
@@ -239,6 +241,7 @@ def invoke_tool(
                 output,
                 token_summary,
                 "success",
+                embedding_calls=embedding_calls,
             ),
         )
     logs.append(success_log)
@@ -372,15 +375,37 @@ def _trace_summary(
     output,
     token_summary: str,
     status: str,
+    *,
+    embedding_calls: list[EmbeddingCallMetadata] | None = None,
 ) -> dict:
+    provider_trace = _provider_trace(token_summary)
+    if embedding_calls:
+        provider_trace = _provider_trace(
+            json.dumps(
+                {
+                    "mode": embedding_calls[-1].mode,
+                    "embedding_calls": [call.to_dict() for call in embedding_calls],
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+    versions = _runtime_versions(tool_input)
+    if tool_name in {"retrieve_related_clauses", "retrieve_memory"}:
+        provider_calls = provider_trace.get("calls") or []
+        if provider_calls:
+            versions["embedding_mode"] = provider_trace.get("mode") or "unavailable"
+            versions["embedding_model"] = (
+                provider_calls[-1].get("model") or "unavailable"
+            )
     summary = {
         "input_sources": sorted(
             str(key)
             for key in tool_input
             if key not in {LLM_CALL_RECORDS_INPUT_KEY, EMBEDDING_CALL_RECORDS_INPUT_KEY}
         ),
-        "versions": _runtime_versions(tool_input),
-        "provider": _provider_trace(token_summary),
+        "versions": versions,
+        "provider": provider_trace,
         "decision": _decision_trace(tool_name, output),
         "token_allocation": _token_allocation(tool_input),
         "final_step_status": status,
@@ -481,6 +506,24 @@ def _decision_trace(tool_name: str, output) -> dict:
                 if isinstance(item, dict)
             ],
         }
+    if tool_name == "retrieve_memory" and isinstance(output, list):
+        return {
+            "type": "memory_retrieval",
+            "candidate_count": len(output),
+            "candidates": [
+                {
+                    "memory_id": str(item.get("memory_id", "")),
+                    "vector_similarity": item.get("vector_similarity"),
+                    "match_score": item.get("match_score"),
+                    "retrieval_eligible": item.get("retrieval_eligible"),
+                    "embedding_mode": item.get("embedding_mode"),
+                    "embedding_model": item.get("embedding_model"),
+                    "vector_dimension": item.get("vector_dimension"),
+                }
+                for item in output[:5]
+                if isinstance(item, dict)
+            ],
+        }
     if tool_name == "criticize_risk" and isinstance(output, dict):
         return {
             "type": "critic",
@@ -518,21 +561,25 @@ def _provider_trace(token_summary: str) -> dict:
     calls = payload.get("calls") or payload.get("embedding_calls") or []
     return {
         "mode": payload.get("mode"),
-        "calls": [
-            {
-                "provider_request_id": call.get("provider_request_id"),
-                "model": call.get("model"),
-                "prompt_tokens": call.get("prompt_tokens"),
-                "completion_tokens": call.get("completion_tokens"),
-                "latency_ms": call.get("latency_ms"),
-                "estimated_cost": call.get("estimated_cost"),
-                "cost_status": call.get("cost_status"),
-                "error_type": call.get("error_type"),
-            }
-            for call in calls
-            if isinstance(call, dict)
-        ],
+        "calls": [_provider_call_trace(call) for call in calls if isinstance(call, dict)],
     }
+
+
+def _provider_call_trace(call: dict) -> dict:
+    trace = {
+        "provider_request_id": call.get("provider_request_id"),
+        "model": call.get("model"),
+        "prompt_tokens": call.get("prompt_tokens"),
+        "completion_tokens": call.get("completion_tokens"),
+        "latency_ms": call.get("latency_ms"),
+        "estimated_cost": call.get("estimated_cost"),
+        "cost_status": call.get("cost_status"),
+        "error_type": call.get("error_type"),
+    }
+    for field in ("input_count", "vector_dimension"):
+        if field in call:
+            trace[field] = call.get(field)
+    return trace
 
 
 @lru_cache(maxsize=1)
@@ -763,7 +810,7 @@ def _token_cost_summary(
     *,
     result_not_adopted: bool = False,
 ) -> str:
-    if tool_name == "retrieve_related_clauses":
+    if tool_name in {"retrieve_related_clauses", "retrieve_memory"}:
         if embedding_calls:
             if all(
                 call.mode == "local_sparse" and not call.error_type

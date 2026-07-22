@@ -97,10 +97,11 @@ tool_contracts = {
             "review_position": "str",
             "memory_items": "list optional",
             "limit": "int",
+            "embedding_cache": "dict optional (runtime only)",
         },
         output_schema={"memories": "list"},
         calls_llm=False,
-        description="按合同类型、条款类型、风险类型和审查立场检索相关历史反馈；优先过滤调用方提供的 Memory，否则查询 SQLite Memory。",
+        description="按合同类型和审查立场硬过滤 Memory，再使用模型 Embedding、精确字段因子和生命周期规则检索语义偏好。",
     ),
     "analyze_risk": ToolContract(
         name="analyze_risk",

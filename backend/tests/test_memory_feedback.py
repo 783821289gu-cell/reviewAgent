@@ -47,7 +47,13 @@ class MemoryFeedbackTest(unittest.TestCase):
         self.assertEqual(memory_item["source_finding_id"], "RISK-001")
         self.assertEqual(memories[0]["memory_type"], "semantic_preference")
         self.assertEqual(memories[0]["source_memory_ids"], [memory_item["memory_id"]])
-        self.assertEqual(memories[0]["memory_source"], "sqlite_semantic_preference")
+        self.assertEqual(memories[0]["memory_source"], "sqlite_vector_memory")
+        self.assertEqual(
+            memories[0]["retrieval_strategy"],
+            "vector_with_structured_safety_filters",
+        )
+        self.assertEqual(memories[0]["embedding_mode"], "local_sparse")
+        self.assertGreater(memories[0]["vector_dimension"], 0)
         self.assertEqual(memories[0]["final_suggestion"], "限定使用目的为评估合作。")
         self.assertTrue(memories[0]["can_influence_suggestion"])
 

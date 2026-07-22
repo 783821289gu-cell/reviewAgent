@@ -86,5 +86,5 @@
       "expected_outcome": "PROMPT_INJECTION_DETECTED"
     }
   ],
-  "annotation_version": "effect-v2"
+  "annotation_version": "effect-v3"
 }

@@ -128,6 +128,129 @@ class MemoryRepository:
         finally:
             connection.close()
 
+    def find_candidate_preferences(
+        self,
+        contract_type: str,
+        review_position: str,
+    ) -> list[sqlite3.Row]:
+        connection = connect(self.db_path)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            groups = connection.execute(
+                """
+                SELECT DISTINCT contract_type, clause_type, risk_type, review_position
+                FROM memory_items
+                WHERE contract_type = ?
+                  AND review_position IN ('', ?)
+                """,
+                (contract_type, review_position),
+            ).fetchall()
+            for group in groups:
+                group_values = tuple(
+                    str(group[field])
+                    for field in (
+                        "contract_type",
+                        "clause_type",
+                        "risk_type",
+                        "review_position",
+                    )
+                )
+                exists = connection.execute(
+                    """
+                    SELECT 1 FROM semantic_preferences
+                    WHERE contract_type = ? AND clause_type = ? AND risk_type = ?
+                      AND review_position = ?
+                    """,
+                    group_values,
+                ).fetchone()
+                if exists is None:
+                    self._rebuild_preference(
+                        connection,
+                        {
+                            "contract_type": group_values[0],
+                            "clause_type": group_values[1],
+                            "risk_type": group_values[2],
+                            "review_position": group_values[3],
+                        },
+                    )
+            rows = connection.execute(
+                """
+                SELECT * FROM semantic_preferences
+                WHERE contract_type = ?
+                  AND review_position IN ('', ?)
+                ORDER BY confidence DESC, last_feedback_at DESC, preference_id
+                """,
+                (contract_type, review_position),
+            ).fetchall()
+            connection.commit()
+            return rows
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def find_preference_embeddings(
+        self,
+        preference_ids: list[str],
+        *,
+        embedding_mode: str,
+        embedding_model: str,
+    ) -> dict[str, sqlite3.Row]:
+        if not preference_ids:
+            return {}
+        placeholders = ",".join("?" for _item in preference_ids)
+        connection = connect(self.db_path)
+        try:
+            rows = connection.execute(
+                f"""
+                SELECT * FROM semantic_preference_embeddings
+                WHERE preference_id IN ({placeholders})
+                  AND embedding_mode = ?
+                  AND embedding_model = ?
+                """,
+                (*preference_ids, embedding_mode, embedding_model),
+            ).fetchall()
+            return {str(row["preference_id"]): row for row in rows}
+        finally:
+            connection.close()
+
+    def upsert_preference_embeddings(self, records: list[dict]) -> None:
+        if not records:
+            return
+        connection = connect(self.db_path)
+        try:
+            connection.executemany(
+                """
+                INSERT INTO semantic_preference_embeddings (
+                    preference_id, embedding_mode, embedding_model, content_hash,
+                    vector_dimension, vector_json, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(preference_id, embedding_mode, embedding_model)
+                DO UPDATE SET
+                    content_hash = excluded.content_hash,
+                    vector_dimension = excluded.vector_dimension,
+                    vector_json = excluded.vector_json,
+                    updated_at = excluded.updated_at
+                """,
+                [
+                    (
+                        record["preference_id"],
+                        record["embedding_mode"],
+                        record["embedding_model"],
+                        record["content_hash"],
+                        record["vector_dimension"],
+                        json.dumps(record["vector"], separators=(",", ":")),
+                        record["updated_at"],
+                    )
+                    for record in records
+                ],
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
     def update_preference_lifecycle(
         self,
         preference_id: str,

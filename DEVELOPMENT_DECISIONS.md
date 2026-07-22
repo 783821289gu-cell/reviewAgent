@@ -171,3 +171,25 @@ DeepSeek 任务安全上限独立调整为 3600 秒，本地任务仍为 900 秒
 历史 `EVIDENCE_MISSING` 空列表任务不再重跑模型。应用启动时从 SQLite 已有 `analysis_results` 和 `evidence_results` 物化人工候选。实际任务 `task_726481622f2f` 已从 0 条风险恢复出 22 条候选，迁移前后 Provider 日志计数均为 356，证明迁移没有产生新的 DeepSeek 调用。完整边界和验收结果见 `EVIDENCE_MANUAL_REVIEW_PLAN.md`。
 
 本轮全量测试时还出现过 Windows 日志轮转文件占用告警，原因是旧的 `8000` 常驻服务与测试进程同时写同一日志文件。测试本身通过，但开发流程仍先关闭旧服务，测试结束后只启动一个最新实例；没有用代码吞掉这个环境事实。
+
+## 2026-07-22：DeepSeek 推理模型不能被当成 Embedding 模型
+
+项目已经接入 DeepSeek 结构化推理，也已经有 OpenAI-compatible Embedding Provider，但默认配置和完整评测一直使用 `local_sparse`。继续把本地哈希向量写成“模型 Embedding”会混淆离线回归和生产语义检索；直接调用 DeepSeek 聊天模型生成数字数组则更糟，因为那不是受支持、稳定、定维的 Embedding 接口。
+
+最终把职责继续分开：DeepSeek 只承担 LLM 推理；RAG 和 Memory 共用独立的 OpenAI-compatible `/embeddings` Provider。生产默认模式改为 `openai_compatible`，Base URL、Key 和模型名在项目根目录 `.env` 单独配置。`local_sparse` 仍保留，但只作为显式离线测试基线。外部配置或调用失败时进入真实检索失败，不回退成看似成功的本地结果。
+
+当前本机没有配置独立 Embedding Provider 凭据，因此本轮完成的是实现、Mock 外部契约测试和本地量化基线；没有把这些结果写成真实外部 Embedding 效果。完整方案见 `MODEL_EMBEDDING_MEMORY_EVALUATION_PLAN.md`。
+
+## 2026-07-22：Memory 有聚合不等于有语义检索
+
+原 Memory 会把相同合同类型、条款类型、风险类型和立场的反馈聚合成偏好，但检索仍要求这些字段精确相等。它能处理重复、冲突和过期，却不能召回“用途限制”和“交易评估目的”这类语义相近、标签不同的历史意见。原有 `memory_preference_consistency` 只比较建议结果，也无法证明检索本身是否正确。
+
+最终没有引入向量数据库。当前数据量和单机 SQLite 架构下，新增 `semantic_preference_embeddings` 表保存模型、维度、内容哈希和向量，服务层执行余弦排序更直接。检索先按合同类型和审查立场硬隔离，再组合向量相似度、风险类型命中和条款类型命中；低相关、冲突、过期和纯反对偏好继续被阻止影响建议。偏好变化后不在启动时批量调用外部服务，而是在下次检索时按内容哈希惰性刷新。
+
+评估 Schema 因新增必填检索查询从 `effect-v2` 升为 `effect-v3`，新增 Memory Recall@K、Memory MRR、向量覆盖率和 Embedding 调用成功率。一次显式 `local_structured + local_sparse` 基线覆盖 23 份合同和 27 项指标：相关条款 Recall@1、Memory Recall@3、Memory MRR、向量覆盖率、Embedding 调用成功率均为 `1.0`；风险 Recall 和 Evidence span 均为 `0.5231`，Memory 建议一致性为 `0.55`，所以整体如实记录为 `completed_with_failures`。离线检索满分只说明当前合成标注集，不能外推为真实模型或生产效果。
+
+## 2026-07-22：Provider Trace 扩展不能破坏既有 LLM 契约
+
+为 Embedding Trace 增加输入数量和向量维度时，第一版把这两个字段无条件写进所有 Provider 调用，结果 LLM Trace 也多出了值为 `null` 的字段。业务没有直接报错，但 API 契约和下游展示会发生无意义漂移，属于新增能力影响既有路径。
+
+最终让公共 Trace 继续保留模型、请求 ID、耗时、成本和错误字段，只在实际调用元数据包含 `input_count`、`vector_dimension` 时输出 Embedding 专属字段。全量测试同时不再覆盖默认运行日志环境变量，避免测试命令自己破坏默认配置验收。这样 LLM 与 Embedding 共用 Trace 外壳，但各自只暴露真实存在的元数据。

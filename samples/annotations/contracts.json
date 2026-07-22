@@ -1,5 +1,5 @@
 {
-  "annotation_version": "effect-v2",
+  "annotation_version": "effect-v3",
   "source_policy": "Only synthetic project fixtures are included; no customer contracts or transaction documents are used.",
   "items": [
     {

@@ -124,6 +124,7 @@ class MemoryComparisonAnnotation(StrictModel):
     clause_type: str = Field(min_length=1)
     risk_type: str = Field(min_length=1)
     review_position: str = Field(min_length=1)
+    query_text: str = Field(min_length=1)
     baseline_suggestion: str = Field(min_length=1)
     expected_suggestion: str = Field(min_length=1)
     evaluation_time: datetime
@@ -163,7 +164,7 @@ class PromptInjectionAnnotation(StrictModel):
 class AnnotationBundle(StrictModel):
     model_config = ConfigDict(extra="forbid", title="EffectAnnotationBundle")
 
-    schema_version: Literal["effect-v2"]
+    schema_version: Literal["effect-v3"]
     contracts: list[ContractAnnotation] = Field(min_length=1)
     clauses: list[ClauseAnnotation] = Field(min_length=1)
     risks: list[RiskAnnotation] = Field(min_length=1)

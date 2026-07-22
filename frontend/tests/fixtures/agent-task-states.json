@@ -317,7 +317,7 @@
     "claim": "Fixture only verifies browser rendering of a recorded result.",
     "sample_count": 2,
     "versions": {
-      "annotation_version": "effect-v2",
+      "annotation_version": "effect-v3",
       "code_version": "fixture",
       "git_dirty": false,
       "playbook_version": "nda-v1",

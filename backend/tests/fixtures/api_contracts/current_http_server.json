@@ -109,7 +109,7 @@
         },
         {
           "name": "retrieve_memory",
-          "input_keys": ["contract_type", "clause", "risk_type", "review_position", "memory_items", "limit"],
+          "input_keys": ["contract_type", "clause", "risk_type", "review_position", "memory_items", "limit", "embedding_cache"],
           "output_keys": ["memories"],
           "calls_llm": false,
           "runtime_calls_llm": false,
@@ -427,7 +427,7 @@
       "response_body_summary": {
         "evaluation_type": "effect",
         "sample_count": 23,
-        "metric_count": 23,
+        "metric_count": 27,
         "claim": "效果评测仅报告当前人工标注集上的实际指标和失败样本，不代表生产级准确率。"
       }
     }

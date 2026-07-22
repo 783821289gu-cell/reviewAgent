@@ -166,6 +166,11 @@
           "title": "Review Position",
           "type": "string"
         },
+        "query_text": {
+          "minLength": 1,
+          "title": "Query Text",
+          "type": "string"
+        },
         "baseline_suggestion": {
           "minLength": 1,
           "title": "Baseline Suggestion",
@@ -204,6 +209,7 @@
         "clause_type",
         "risk_type",
         "review_position",
+        "query_text",
         "baseline_suggestion",
         "expected_suggestion",
         "evaluation_time",
@@ -518,7 +524,7 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": "effect-v2",
+      "const": "effect-v3",
       "title": "Schema Version",
       "type": "string"
     },
