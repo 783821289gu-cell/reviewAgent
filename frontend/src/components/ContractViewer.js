@@ -12,7 +12,7 @@ export function ContractViewer(root, props) {
   root.textContent = "";
 
   const clauses = props.clauses || [];
-  const risks = (props.risks || []).filter((risk) => risk.clause_id && risk.evidence_text);
+  const risks = (props.risks || []).filter((risk) => risk.clause_id && risk.risk_id);
   if (props.status === "PARSE_FAILED") {
     const message = document.createElement("p");
     message.className = "empty-state";

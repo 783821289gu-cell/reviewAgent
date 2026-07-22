@@ -9,7 +9,7 @@ from services.event_service import review_event_store
 REPORT_DIR = Path(__file__).resolve().parents[1] / "reports"
 PENDING_REVIEW_STATUSES = {"NEED_MANUAL_REVIEW"}
 NON_RISK_STATUSES = {"NO_RISK"}
-REPORTABLE_TASK_STATUSES = {"EVIDENCE_VERIFIED", "HUMAN_REVIEW_PENDING", "MEMORY_UPDATED", "REPORT_READY"}
+REPORTABLE_TASK_STATUSES = {"MEMORY_UPDATED", "REPORT_READY"}
 
 
 def generate_report(tool_input: dict) -> dict:

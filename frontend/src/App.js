@@ -168,7 +168,7 @@ export function renderApp(root) {
   }
 
   function handleRiskFilter(riskFilter) {
-    const risks = (state.task?.risk_findings || []).filter((risk) => risk.clause_id && risk.evidence_text);
+    const risks = (state.task?.risk_findings || []).filter((risk) => risk.clause_id && risk.risk_id);
     const filteredRisks = riskFilter === "all"
       ? risks
       : risks.filter((risk) => risk.severity === riskFilter);
@@ -289,6 +289,7 @@ export function renderApp(root) {
           action: feedbackPayload.action,
           final_severity: feedbackPayload.finalSeverity,
           final_suggestion: feedbackPayload.finalSuggestion,
+          final_evidence_text: feedbackPayload.finalEvidenceText,
           ignore_reason: feedbackPayload.ignoreReason,
           include_in_report: feedbackPayload.includeInReport,
         }),

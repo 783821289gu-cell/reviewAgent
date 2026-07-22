@@ -2060,21 +2060,29 @@ def _run_sample(sample: dict, samples_dir: Path, report_dir: Path, memory_db_pat
         result["playbook_hit"] = any(group.get("matched_rules") for group in task.get("matched_rules") or [])
         result["risk_has_evidence"] = _risks_have_evidence(task.get("risk_findings") or [])
 
-        risk = _first_risk(task.get("risk_findings") or [])
+        risks = list(task.get("risk_findings") or [])
+        risk = _first_risk(risks)
         if risk is None:
             raise ValueError("no exportable risk candidate found")
 
-        feedback_result = apply_feedback_to_task(
-            task["task_id"],
-            {
-                "risk_id": risk["risk_id"],
-                "action": "accept",
-                "include_in_report": True,
-            },
-            event_store=event_store,
-            db_path=memory_db_path,
+        feedback_result = None
+        for index, candidate in enumerate(risks):
+            action = "accept" if index == 0 else "ignore"
+            feedback_result = apply_feedback_to_task(
+                task["task_id"],
+                {
+                    "risk_id": candidate["risk_id"],
+                    "action": action,
+                    "include_in_report": index == 0,
+                    "ignore_reason": "基础评测仅导出首条风险" if action == "ignore" else "",
+                },
+                event_store=event_store,
+                db_path=memory_db_path,
+            )
+        result["feedback_memory_written"] = bool(
+            feedback_result
+            and feedback_result.get("memory_item", {}).get("memory_id")
         )
-        result["feedback_memory_written"] = bool(feedback_result.get("memory_item", {}).get("memory_id"))
         updated_task = feedback_result["task"]
         logs = [StepLog(**item) for item in updated_task.get("logs") or []]
         report_result = invoke_tool(

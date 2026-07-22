@@ -216,11 +216,29 @@ class FastApiContractTest(unittest.TestCase):
         self.assertEqual(response.status_code, feedback_contract["status"])
         feedback_result = response.json()
         self.assertEqual(set(feedback_contract["required_keys"]), set(feedback_result))
-        self.assertEqual(feedback_result["status"], "MEMORY_UPDATED")
+        self.assertEqual(feedback_result["status"], "HUMAN_REVIEW_PENDING")
         self.assertEqual(feedback_result["risk"]["review_status"], "CONFIRMED_RISK")
         self.assertTrue(feedback_result["risk"]["include_in_report"])
 
         report_contract = self.contract["success"]["report"]
+        response = self.client.post(f"/api/tasks/{task['task_id']}/report")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("尚未完成", response.json()["message"])
+
+        for remaining_risk in task["risk_findings"][1:]:
+            response = self.client.post(
+                f"/api/tasks/{task['task_id']}/feedback",
+                json={
+                    "risk_id": remaining_risk["risk_id"],
+                    "action": "ignore",
+                    "ignore_reason": "API 契约测试完成剩余风险处置。",
+                    "include_in_report": False,
+                },
+            )
+            self.assertEqual(response.status_code, feedback_contract["status"])
+            feedback_result = response.json()
+        self.assertEqual(feedback_result["status"], "MEMORY_UPDATED")
+
         response = self.client.post(f"/api/tasks/{task['task_id']}/report")
         self.assertEqual(response.status_code, report_contract["status"])
         report_result = response.json()

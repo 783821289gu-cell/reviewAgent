@@ -12,6 +12,7 @@ sys.path.insert(0, str(TEST_DIR))
 
 from models.review import ReviewPosition, ReviewStatus
 from services.event_service import ReviewEventStore
+from services.evaluation_service import _docx_bytes_from_text
 from services.log_service import invoke_tool
 from services.review_service import ReviewOrchestratorAgent
 from test_document_pipeline import build_docx_bytes, build_high_risk_docx_bytes
@@ -289,14 +290,19 @@ class ReviewOrchestratorTest(unittest.TestCase):
         planner_logs = [
             log for log in payload["logs"] if log["tool_name"] == "plan_review_action"
         ]
-        self.assertEqual(payload["status"], "EVIDENCE_MISSING")
+        self.assertEqual(payload["status"], "HUMAN_REVIEW_PENDING")
         self.assertEqual(tools.count("retrieve_related_clauses"), 2)
         self.assertEqual(tools.count("analyze_risk"), 2)
         self.assertEqual(tools.count("verify_evidence"), 2)
         self.assertEqual(len(planner_logs), 2)
         self.assertIn("action=RETRIEVE_AGAIN", planner_logs[0]["output_summary"])
         self.assertIn("action=REQUEST_HUMAN_REVIEW", planner_logs[1]["output_summary"])
-        self.assertEqual(payload["risk_findings"], [])
+        self.assertEqual(len(payload["risk_findings"]), 1)
+        self.assertEqual(payload["risk_findings"][0]["review_status"], "NEED_MANUAL_REVIEW")
+        self.assertEqual(
+            payload["risk_findings"][0]["evidence_verification"]["failure_reason"],
+            "evidence_text not found in clause text",
+        )
         self.assertEqual(len(payload["evidence_results"]), 2)
 
     def test_invalid_planner_action_executes_no_repair_tool(self):
@@ -330,12 +336,14 @@ class ReviewOrchestratorTest(unittest.TestCase):
         planner_log = next(
             log for log in payload["logs"] if log["tool_name"] == "plan_review_action"
         )
-        self.assertEqual(payload["status"], "EVIDENCE_MISSING")
+        self.assertEqual(payload["status"], "HUMAN_REVIEW_PENDING")
         self.assertEqual(tools.count("retrieve_related_clauses"), 1)
         self.assertEqual(tools.count("analyze_risk"), 1)
         self.assertEqual(planner_log["status"], "failed")
         self.assertIn("planner action is not allowed", planner_log["error_message"])
         self.assertIn("Planner 决策被拒绝", payload["message"])
+        self.assertEqual(len(payload["risk_findings"]), 1)
+        self.assertEqual(payload["risk_findings"][0]["review_status"], "NEED_MANUAL_REVIEW")
 
     def test_empty_related_recall_is_repaired_before_analysis(self):
         original_retriever = tool_registry["retrieve_related_clauses"]
@@ -436,12 +444,73 @@ class ReviewOrchestratorTest(unittest.TestCase):
 
         payload = state.to_dict()
         tools = [log["tool_name"] for log in payload["logs"]]
-        self.assertEqual(payload["status"], "EVIDENCE_MISSING")
-        self.assertEqual(payload["risk_findings"], [])
+        self.assertEqual(payload["status"], "HUMAN_REVIEW_PENDING")
+        self.assertEqual(len(payload["risk_findings"]), 1)
+        self.assertEqual(payload["risk_findings"][0]["review_status"], "NEED_MANUAL_REVIEW")
         self.assertEqual(tools.count("criticize_risk"), 2)
         self.assertEqual(tools.count("verify_evidence"), 2)
         self.assertEqual(tools.count("generate_revision"), 0)
         self.assertTrue(all(not item["is_valid"] for item in payload["evidence_results"]))
+
+    def test_evidence_failure_keeps_all_candidates_for_manual_review(self):
+        verifier_calls = 0
+
+        def always_fail(tool_input):
+            nonlocal verifier_calls
+            verifier_calls += 1
+            return invalid_evidence_result(tool_input["finding"])
+
+        with patch.dict(tool_registry, {"verify_evidence": always_fail}):
+            state = ReviewOrchestratorAgent(ReviewEventStore()).run_sync(
+                file_name="all-evidence-fails.docx",
+                file_type="docx",
+                content=_docx_bytes_from_text(MULTI_RISK_NDA_TEXT),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        payload = state.to_dict()
+        expected_count = len(
+            [item for item in payload["analysis_results"] if item["review_status"] != "NO_RISK"]
+        )
+        self.assertGreater(expected_count, 1)
+        self.assertEqual(payload["status"], "HUMAN_REVIEW_PENDING")
+        self.assertEqual(len(payload["risk_findings"]), expected_count)
+        self.assertGreaterEqual(verifier_calls, expected_count)
+        self.assertTrue(
+            all(item["review_status"] == "NEED_MANUAL_REVIEW" for item in payload["risk_findings"])
+        )
+
+    def test_legacy_evidence_missing_task_is_materialized_without_tool_calls(self):
+        event_store = ReviewEventStore()
+        agent = ReviewOrchestratorAgent(event_store)
+
+        with patch.dict(
+            tool_registry,
+            {"verify_evidence": lambda tool_input: invalid_evidence_result(tool_input["finding"])},
+        ):
+            state = agent.run_sync(
+                file_name="legacy-evidence-missing.docx",
+                file_type="docx",
+                content=build_docx_bytes(),
+                review_position=ReviewPosition.PARTY_A,
+            )
+
+        legacy = event_store.update_task(
+            state.task_id,
+            ReviewStatus.EVIDENCE_MISSING,
+            "legacy empty evidence state",
+            step_name="legacy_evidence_missing",
+            risk_findings=[],
+        )
+        log_count = len(legacy.logs or [])
+        materialized = agent.materialize_legacy_evidence_failures([legacy])
+        restored = event_store.get_task(state.task_id)
+
+        self.assertEqual(materialized, [state.task_id])
+        self.assertEqual(restored.status, ReviewStatus.HUMAN_REVIEW_PENDING)
+        self.assertEqual(len(restored.risk_findings), 1)
+        self.assertEqual(len(restored.logs or []), log_count)
+        self.assertEqual(restored.progress["stage"], "human_review")
 
     def test_invalid_critic_output_never_reaches_evidence_or_formal_risks(self):
         invalid_output = {
@@ -562,6 +631,20 @@ def invalid_evidence_result(finding: dict) -> dict:
         "verified_clause_id": "",
         "source_location": {},
     }
+
+
+MULTI_RISK_NDA_TEXT = """1. 定义
+保密信息包括披露方提供的任何商业信息、技术资料和合作资料。
+
+2. 使用限制
+接收方可以为内部商业安排使用保密信息。
+
+3. 允许披露
+接收方可以向所有关联方、顾问和代表披露保密信息。
+
+4. 违约责任
+违约方应赔偿守约方全部损失和间接损失。
+"""
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import json
 from models.feedback import FEEDBACK_ACTIONS, VALID_FINAL_SEVERITIES
 from models.log import StepLog
 from models.review import ReviewStatus
+from services.evidence_service import evidence_location_for_text
 from services.event_service import ReviewEventStore, review_event_store
 from services.log_service import invoke_tool
 from tools.registry import tool_registry
@@ -16,6 +17,7 @@ ACTION_LABELS = {
     "ignore": "忽略",
     "update_severity": "修改等级",
     "update_suggestion": "修改建议",
+    "update_evidence": "补充证据",
 }
 
 
@@ -33,7 +35,10 @@ def apply_feedback_to_task(
 
     action = str(feedback_payload.get("action", "")).strip()
     if action not in FEEDBACK_ACTIONS:
-        raise ValueError("feedback action must be accept, ignore, update_severity or update_suggestion")
+        raise ValueError(
+            "feedback action must be accept, ignore, update_severity, "
+            "update_suggestion or update_evidence"
+        )
 
     risks = deepcopy(task.risk_findings or [])
     risk = _find_risk(risks, str(feedback_payload.get("risk_id", "")).strip())
@@ -41,6 +46,11 @@ def apply_feedback_to_task(
     clause = _find_clause(clauses, str(risk.get("clause_id", "")).strip())
     final_severity = _resolve_final_severity(risk, action, feedback_payload)
     final_suggestion = _resolve_final_suggestion(risk, action, feedback_payload)
+    final_evidence_text = _resolve_final_evidence(
+        clause,
+        action,
+        feedback_payload,
+    )
     ignore_reason = str(feedback_payload.get("ignore_reason", "")).strip()
     include_in_report = bool(feedback_payload.get("include_in_report", action != "ignore"))
     updated_at = datetime.now(timezone.utc).isoformat()
@@ -82,24 +92,46 @@ def apply_feedback_to_task(
         action=action,
         final_severity=final_severity,
         final_suggestion=final_suggestion,
+        final_evidence_text=final_evidence_text,
+        clause=clause,
         ignore_reason=ignore_reason,
         include_in_report=include_in_report,
         memory_item=memory_item,
         updated_at=updated_at,
     )
 
+    pending_risks = [
+        item
+        for item in risks
+        if not str((item.get("feedback") or {}).get("user_action", "")).strip()
+    ]
+    next_status = (
+        ReviewStatus.HUMAN_REVIEW_PENDING
+        if pending_risks
+        else ReviewStatus.MEMORY_UPDATED
+    )
+    message = (
+        f"人工反馈已记录：{ACTION_LABELS[action]}，还剩 {len(pending_risks)} 条待处理。"
+        if pending_risks
+        else f"人工反馈已记录：{ACTION_LABELS[action]}，全部风险已处理。"
+    )
     updated_task = event_store.update_task(
         task_id,
-        ReviewStatus.MEMORY_UPDATED,
-        f"人工反馈已记录：{ACTION_LABELS[action]}，Memory 已更新。",
-        step_name="memory_updated",
+        next_status,
+        message,
+        step_name=(
+            "human_review_pending"
+            if pending_risks
+            else "memory_updated"
+        ),
         tool_name="write_memory",
         risk_findings=risks,
         logs=[log.to_dict() for log in logs],
+        progress=_human_review_progress(risks),
     )
     task_payload = event_store.get_task_payload(task_id) or updated_task.to_dict()
     return {
-        "status": ReviewStatus.MEMORY_UPDATED.value,
+        "status": next_status.value,
         "message": updated_task.message,
         "risk": risk,
         "memory_item": memory_item,
@@ -142,11 +174,24 @@ def _resolve_final_suggestion(risk: dict, action: str, payload: dict) -> str:
     return final_suggestion or str(risk.get("revision_suggestion", ""))
 
 
+def _resolve_final_evidence(clause: dict, action: str, payload: dict) -> str:
+    final_evidence = str(payload.get("final_evidence_text", "")).strip()
+    if action != "update_evidence":
+        return ""
+    if not final_evidence:
+        raise ValueError("final_evidence_text is required when updating evidence")
+    if final_evidence not in str(clause.get("text", "")):
+        raise ValueError("人工证据必须来自当前风险对应条款原文。")
+    return final_evidence
+
+
 def _apply_feedback_to_risk(
     risk: dict,
     action: str,
     final_severity: str,
     final_suggestion: str,
+    final_evidence_text: str,
+    clause: dict,
     ignore_reason: str,
     include_in_report: bool,
     memory_item: dict,
@@ -162,7 +207,49 @@ def _apply_feedback_to_risk(
         "memory_id": memory_item["memory_id"],
         "updated_at": updated_at,
     }
+    if action == "update_evidence":
+        risk["evidence_text"] = final_evidence_text
+        source_location = evidence_location_for_text(clause, final_evidence_text)
+        if source_location:
+            risk["evidence_location"] = source_location
+        else:
+            risk.pop("evidence_location", None)
+        risk["evidence_verification"] = {
+            "status": "MANUALLY_VERIFIED",
+            "is_valid": True,
+            "failure_reason": "",
+            "resolution": "HUMAN_SELECTED_SOURCE",
+            "source_location": source_location,
+        }
+    elif action == "accept":
+        verification = dict(risk.get("evidence_verification") or {})
+        if verification and not verification.get("is_valid"):
+            verification["status"] = "HUMAN_CONFIRMED"
+            verification["resolution"] = "HUMAN_OVERRIDE"
+            risk["evidence_verification"] = verification
     if action == "ignore":
         risk["review_status"] = "IGNORED_RISK"
     else:
         risk["review_status"] = "CONFIRMED_RISK"
+
+
+def _human_review_progress(risks: list[dict]) -> dict:
+    handled_ids = [
+        str(risk.get("risk_id", ""))
+        for risk in risks
+        if str((risk.get("feedback") or {}).get("user_action", "")).strip()
+    ]
+    pending = [
+        risk
+        for risk in risks
+        if not str((risk.get("feedback") or {}).get("user_action", "")).strip()
+    ]
+    return {
+        "stage": "human_review",
+        "stage_label": "人工复核证据",
+        "completed": len(handled_ids),
+        "total": len(risks),
+        "current_item": str(pending[0].get("risk_id", "")) if pending else "",
+        "completed_item_ids": handled_ids,
+        "state": "waiting" if pending else "completed",
+    }

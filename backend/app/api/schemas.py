@@ -19,9 +19,16 @@ class ToolsResponse(BaseModel):
 
 class FeedbackRequest(BaseModel):
     risk_id: str
-    action: Literal["accept", "ignore", "update_severity", "update_suggestion"]
+    action: Literal[
+        "accept",
+        "ignore",
+        "update_severity",
+        "update_suggestion",
+        "update_evidence",
+    ]
     final_severity: str | None = None
     final_suggestion: str | None = None
+    final_evidence_text: str | None = None
     ignore_reason: str | None = None
     include_in_report: bool | None = None
 

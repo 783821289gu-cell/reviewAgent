@@ -4,11 +4,11 @@ import { riskFeedbackState } from "./riskFeedback.js";
 export function RiskList(root, props) {
   root.textContent = "";
 
-  const risks = (props.risks || []).filter((risk) => risk.clause_id && risk.evidence_text);
+  const risks = (props.risks || []).filter((risk) => risk.clause_id && risk.risk_id);
   if (risks.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
-    empty.textContent = "暂无已通过证据验证的正式风险。";
+    empty.textContent = "暂无可处理的风险候选。";
     root.appendChild(empty);
     return;
   }
@@ -54,7 +54,7 @@ export function RiskList(root, props) {
     const locate = document.createElement("button");
     locate.className = "icon-button compact-icon-button";
     locate.type = "button";
-    locate.title = "定位合同证据";
+    locate.title = "定位合同原文";
     locate.setAttribute("aria-label", "定位");
     locate.innerHTML = icon("locate-fixed");
     locate.addEventListener("click", (event) => {

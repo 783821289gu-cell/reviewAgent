@@ -2,7 +2,7 @@
 
 开发过程中实际遇到的问题、技术权衡和方案变更持续记录在 [DEVELOPMENT_DECISIONS.md](DEVELOPMENT_DECISIONS.md)。
 
-当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10、`UI_REDESIGN_PLAN.md` 的工作台界面迭代，以及 `TASKS_AGENT.md` 的任务 10。系统支持 AgentState、显式 Tool Registry、DeepSeek OpenAI-compatible Provider、受控 Planner/Router、一次检索修复、受控 Critic、确定性 Evidence 最终准入、Prompt Injection 阻断、真实 token 预算、Memory 生命周期、可恢复执行、流式状态事件和脱敏 Agent Trace。HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端；任务、上传文件、文档、条款、风险、日志和事件接入 SQLite 持久化。浏览器测试覆盖主流程、错误流、Agent 状态展示、三视口布局和基础可访问性。
+当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10、`UI_REDESIGN_PLAN.md` 的工作台界面迭代、`TASKS_AGENT.md` 的任务 10，以及 `EVIDENCE_MANUAL_REVIEW_PLAN.md` 的证据失败人工闭环。系统支持 AgentState、显式 Tool Registry、DeepSeek OpenAI-compatible Provider、受控 Planner/Router、一次检索修复、受控 Critic、确定性 Evidence 最终准入、Prompt Injection 阻断、真实 token 预算、Memory 生命周期、可恢复执行、流式状态事件和脱敏 Agent Trace。HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端；任务、上传文件、文档、条款、风险、日志和事件接入 SQLite 持久化。浏览器测试覆盖主流程、错误流、Agent 状态展示、三视口布局和基础可访问性。
 
 ## 当前已实现
 
@@ -29,17 +29,17 @@
 21. `analyze_risk` 已通过显式 `tool_registry` 调用；新建审查可按任务选择 `local_structured` 或 `openai_compatible`，本地模式不会记录为真实外部 LLM 调用。
 22. `verify_evidence` 已通过显式 `tool_registry` 调用，校验 `clause_id`、`evidence_text`、风险原因与证据文本相关性，以及命中规则一致性。
 23. `generate_revision` 已通过显式 `tool_registry` 调用，并与风险分析共用结构化 LLM Provider 边界。
-24. 前端展示上下文 Trace、已验证风险列表、规则详情、证据文本、风险原因和修改建议。
+24. 前端展示上下文 Trace、自动验证通过或失败的风险候选、证据状态与失败原因、规则详情、证据文本、风险原因和修改建议。
 25. 点击风险可定位到中间合同原文的对应证据；定位只滚动文档区，左右栏保持原位，目标已可见时不重复跳动。
 26. 用户可以在合同原文中框选文本并发起局部审查，局部审查结果与正式风险列表分开展示。
 27. 局部审查只返回当前框选文本的复核结果，不写入正式风险列表，不写入 Memory。
-28. 用户可以对正式风险执行采纳、忽略、修改等级、修改建议，并选择是否加入报告。
+28. 用户可以对风险候选执行采纳、忽略、修改等级、修改建议，或采用当前风险同条款的框选原文作为人工证据，并选择是否加入报告。
 29. 所有采纳、忽略和修改动作通过 `tool_registry["write_memory"]` 写入 SQLite Memory。
 30. 后续相似审查会通过 `retrieve_memory` 召回相关 Memory；当 Memory 影响修改建议时，风险详情展示历史反馈引用。
 31. 用户可以基于正式风险证据触发局部重审，局部结果仍不写入正式风险列表。
 32. 用户可以导出 Markdown 审查报告，报告生成通过 `tool_registry["generate_report"]` 调用。
 33. 报告包含合同名称、审查立场、Playbook 版本、风险等级、风险原因、原文证据、修改建议和人工反馈状态。
-34. 报告只导出用户明确允许进入报告且不处于待人工复核状态的风险，不包含完整执行日志和技术实现细节。
+34. 所有风险候选处理完成前，前端和后端均拒绝报告导出；完成后只导出用户明确允许进入报告的风险，不包含完整执行日志和技术实现细节。
 35. `samples/` 提供 23 份项目内合成合同标注，其中基础流程评测固定使用 10 份 NDA；样本来源已在 `samples/README.md` 说明。
 36. `evaluation/` 支持手动触发基础评测摘要，覆盖任务是否跑通、文档解析、条款结构化、Playbook 命中、风险证据、Memory 写入、报告导出和失败原因。
 37. 全部 HTTP API 已迁移到 FastAPI，请求模型使用 Pydantic 校验，文件上传使用 `UploadFile` 分块读取并校验大小、扩展名、MIME、文件签名、空文件和安全文件名。

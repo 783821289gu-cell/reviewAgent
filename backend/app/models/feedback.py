@@ -2,7 +2,13 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
 
-FEEDBACK_ACTIONS = {"accept", "ignore", "update_severity", "update_suggestion"}
+FEEDBACK_ACTIONS = {
+    "accept",
+    "ignore",
+    "update_severity",
+    "update_suggestion",
+    "update_evidence",
+}
 VALID_FINAL_SEVERITIES = {"高", "中", "低"}
 
 
@@ -30,7 +36,10 @@ class HumanFeedback:
 def build_human_feedback(payload: dict) -> HumanFeedback:
     action = str(payload.get("user_action", "")).strip()
     if action not in FEEDBACK_ACTIONS:
-        raise ValueError("feedback action must be accept, ignore, update_severity or update_suggestion")
+        raise ValueError(
+            "feedback action must be accept, ignore, update_severity, "
+            "update_suggestion or update_evidence"
+        )
 
     final_severity = str(payload.get("final_severity", "")).strip()
     if action == "update_severity" and final_severity not in VALID_FINAL_SEVERITIES:

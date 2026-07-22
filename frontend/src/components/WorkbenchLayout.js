@@ -176,6 +176,8 @@ function renderReviewComponents(root, props, context) {
     activeRiskId,
     feedback: props.feedback,
     localReviewLoading: Boolean(props.localReview?.loading),
+    selectedClauseId: props.localReview?.clauseId || "",
+    selectedEvidenceText: props.localReview?.selectedText || "",
     onLocateRisk: props.onLocateRisk,
     onSubmitFeedback: props.onSubmitFeedback,
     onRequestLocalReview: props.onRequestLocalReview,
@@ -539,7 +541,7 @@ function severityCounts(risks) {
 }
 
 function formalRisks(task) {
-  return (task?.risk_findings || []).filter((risk) => risk.clause_id && risk.evidence_text);
+  return (task?.risk_findings || []).filter((risk) => risk.clause_id && risk.risk_id);
 }
 
 function mobileModeButton(view, label, activeView, count) {

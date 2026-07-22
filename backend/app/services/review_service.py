@@ -185,6 +185,35 @@ class ReviewOrchestratorAgent:
                 self.run(state.task_id, content, execution_owner, True)
         return recovered_task_ids
 
+    def materialize_legacy_evidence_failures(
+        self,
+        states: list[AgentState],
+    ) -> list[str]:
+        materialized_task_ids = []
+        for state in states:
+            if (
+                state.status != ReviewStatus.EVIDENCE_MISSING
+                or list(state.risk_findings or [])
+            ):
+                continue
+            candidates = _materialize_manual_review_candidates(
+                list(state.analysis_results or []),
+                list(state.evidence_results or []),
+            )
+            if not candidates:
+                continue
+            self.event_store.update_task(
+                state.task_id,
+                ReviewStatus.HUMAN_REVIEW_PENDING,
+                f"已恢复 {len(candidates)} 条证据候选，等待人工逐条处理。",
+                step_name="evidence_manual_review_materialized",
+                tool_name="verify_evidence",
+                risk_findings=candidates,
+                progress=_human_review_progress(candidates),
+            )
+            materialized_task_ids.append(state.task_id)
+        return materialized_task_ids
+
     def recover_task(
         self,
         task_id: str,
@@ -1131,19 +1160,12 @@ class ReviewOrchestratorAgent:
                             retrieval_repair_count,
                         )
                         if decision["action"] != PlannerAction.RETRIEVE_AGAIN.value:
-                            self.event_store.update_task(
-                                task_id,
-                                ReviewStatus.EVIDENCE_MISSING,
-                                "证据验证失败且检索修复预算已停止，转入人工处理。",
-                                step_name="evidence_repair_stopped",
-                                tool_name="plan_review_action",
-                                review_contexts=review_contexts,
-                                analysis_results=analysis_results,
-                                evidence_results=evidence_results,
-                                risk_findings=[],
-                                logs=[log.to_dict() for log in logs],
+                            finding = _manual_review_candidate(
+                                finding,
+                                evidence_result,
                             )
-                            return
+                            planner_requested_human = True
+                            break
 
                         retrieval_repair_count += 1
                         repaired_context = _rebuild_review_context(
@@ -1205,6 +1227,10 @@ class ReviewOrchestratorAgent:
                         continue
                     if evidence_result.get("source_location"):
                         finding["evidence_location"] = evidence_result["source_location"]
+                    if "evidence_verification" not in finding:
+                        finding["evidence_verification"] = _evidence_verification_summary(
+                            evidence_result
+                        )
                     if (
                         planner_requested_human
                         or critic_requested_human
@@ -1280,16 +1306,22 @@ class ReviewOrchestratorAgent:
                 )
                 return
             except PlannerOutputInvalidError as exc:
+                risk_findings = _materialize_manual_review_candidates(
+                    analysis_results,
+                    evidence_results,
+                    risk_findings,
+                )
                 self.event_store.update_task(
                     task_id,
-                    ReviewStatus.EVIDENCE_MISSING,
-                    f"Planner 决策被拒绝，未执行任何修复动作：{exc}",
+                    ReviewStatus.HUMAN_REVIEW_PENDING,
+                    f"Planner 决策被拒绝，候选已保留并转入人工处理：{exc}",
                     step_name="planner_decision_rejected",
                     tool_name="plan_review_action",
                     review_contexts=review_contexts,
                     analysis_results=analysis_results,
                     evidence_results=evidence_results,
-                    risk_findings=[],
+                    risk_findings=risk_findings,
+                    progress=_human_review_progress(risk_findings),
                     logs=[log.to_dict() for log in logs],
                 )
                 return
@@ -1331,16 +1363,23 @@ class ReviewOrchestratorAgent:
             except EXECUTION_INTERRUPTS:
                 raise
             except Exception as exc:
+                risk_findings = _materialize_manual_review_candidates(
+                    analysis_results,
+                    evidence_results,
+                    risk_findings,
+                    default_failure_reason=str(exc),
+                )
                 self.event_store.update_task(
                     task_id,
-                    ReviewStatus.EVIDENCE_MISSING,
-                    f"证据验证失败：{exc}",
-                    step_name="evidence_missing",
+                    ReviewStatus.HUMAN_REVIEW_PENDING,
+                    f"证据处理异常，候选已保留并转入人工处理：{exc}",
+                    step_name="evidence_manual_review_pending",
                     tool_name="verify_evidence",
                     review_contexts=review_contexts,
                     analysis_results=analysis_results,
                     evidence_results=evidence_results,
-                    risk_findings=[],
+                    risk_findings=risk_findings,
+                    progress=_human_review_progress(risk_findings),
                     logs=[log.to_dict() for log in logs],
                 )
                 return
@@ -1787,6 +1826,118 @@ def _analysis_result_key(finding: dict) -> str:
     ):
         raise ValueError("risk finding identity is invalid")
     return f"{clause_id}:{rule_ids[0].strip()}"
+
+
+def _evidence_verification_summary(evidence_result: dict) -> dict:
+    is_valid = bool(evidence_result.get("is_valid"))
+    return {
+        "status": "AUTO_VERIFIED" if is_valid else "AUTO_VERIFICATION_FAILED",
+        "is_valid": is_valid,
+        "failure_reason": str(evidence_result.get("failure_reason", "")),
+        "resolution": "AUTOMATIC" if is_valid else "PENDING_HUMAN",
+        "source_location": dict(evidence_result.get("source_location") or {}),
+    }
+
+
+def _manual_review_candidate(
+    finding: dict,
+    evidence_result: dict | None = None,
+    *,
+    failure_reason: str = "",
+) -> dict:
+    candidate = dict(finding)
+    candidate["review_status"] = "NEED_MANUAL_REVIEW"
+    candidate.setdefault("include_in_report", False)
+    if evidence_result is not None:
+        candidate["evidence_verification"] = _evidence_verification_summary(
+            evidence_result
+        )
+    else:
+        candidate["evidence_verification"] = {
+            "status": "NOT_VERIFIED",
+            "is_valid": False,
+            "failure_reason": failure_reason or "尚未完成自动证据校验。",
+            "resolution": "PENDING_HUMAN",
+            "source_location": {},
+        }
+    return candidate
+
+
+def _materialize_manual_review_candidates(
+    analysis_results: list[dict],
+    evidence_results: list[dict],
+    existing_risks: list[dict] | None = None,
+    *,
+    default_failure_reason: str = "",
+) -> list[dict]:
+    latest_evidence = {}
+    for result in evidence_results:
+        if not isinstance(result, dict):
+            continue
+        risk_id = str(result.get("risk_id", "")).strip()
+        if risk_id:
+            latest_evidence[risk_id] = result
+
+    existing_by_id = {
+        str(risk.get("risk_id", "")): dict(risk)
+        for risk in (existing_risks or [])
+        if isinstance(risk, dict) and str(risk.get("risk_id", "")).strip()
+    }
+    candidates = []
+    included_ids = set()
+    for finding in analysis_results:
+        if not isinstance(finding, dict) or finding.get("review_status") == "NO_RISK":
+            continue
+        risk_id = str(finding.get("risk_id", "")).strip()
+        if not risk_id or risk_id in included_ids:
+            continue
+        if risk_id in existing_by_id:
+            candidate = existing_by_id[risk_id]
+        else:
+            evidence_result = latest_evidence.get(risk_id)
+            if evidence_result and evidence_result.get("is_valid"):
+                candidate = dict(finding)
+                candidate["evidence_verification"] = _evidence_verification_summary(
+                    evidence_result
+                )
+                if evidence_result.get("source_location"):
+                    candidate["evidence_location"] = evidence_result["source_location"]
+            else:
+                candidate = _manual_review_candidate(
+                    finding,
+                    evidence_result,
+                    failure_reason=default_failure_reason,
+                )
+        candidates.append(candidate)
+        included_ids.add(risk_id)
+
+    for risk_id, risk in existing_by_id.items():
+        if risk_id not in included_ids:
+            candidates.append(risk)
+    return candidates
+
+
+def _human_review_progress(risks: list[dict]) -> dict:
+    pending = [
+        risk
+        for risk in risks
+        if not str((risk.get("feedback") or {}).get("user_action", "")).strip()
+    ]
+    total = len(risks)
+    completed = total - len(pending)
+    return {
+        "stage": "human_review",
+        "stage_label": "人工复核证据",
+        "completed": completed,
+        "total": total,
+        "current_item": _finding_progress_item(pending[0]) if pending else "",
+        "completed_item_ids": [
+            str(risk.get("risk_id", ""))
+            for risk in risks
+            if str((risk.get("feedback") or {}).get("user_action", "")).strip()
+        ],
+        "state": "waiting" if pending else "completed",
+    }
 
 
 def _restored_evidence_completion_ids(

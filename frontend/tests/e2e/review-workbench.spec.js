@@ -149,6 +149,12 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
     "E2E 更新后的合成修改建议",
   );
 
+  await riskCards.nth(3).click();
+  await page.getByLabel("忽略原因").fill("E2E 完成剩余风险处置");
+  await submitFeedback(page, "忽略风险");
+  await expect(page.locator("[data-pending-risk-count]")).toHaveText("0");
+  await expect(page.locator("[data-review-status]")).toHaveText("MEMORY_UPDATED");
+
   const persistedTaskId = await page.evaluate(() => (
     window.localStorage.getItem("review-agent.active-task-id")
   ));
@@ -157,7 +163,7 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
   await expect(page.locator("[data-review-status]")).toHaveText("MEMORY_UPDATED");
   await expect(page.locator(".live-progress")).toHaveClass(/state-completed/);
   await expect(page.locator(".risk-card")).toHaveCount(4);
-  await expect(page.locator("[data-pending-risk-count]")).toHaveText("1");
+  await expect(page.locator("[data-pending-risk-count]")).toHaveText("0");
   await expect(page.locator(".risk-card").nth(0).locator(".risk-decision")).toHaveText("已采纳");
   await expect(page.locator(".risk-card").nth(1).locator(".risk-decision")).toHaveText("已忽略");
   await expect(page.locator(".risk-card").nth(2).locator(".risk-decision")).toHaveText("建议已修改");
@@ -322,6 +328,83 @@ test("执行记录区分 DeepSeek、本地模式和受控 Agent 决策", async (
   await expect(page.locator("[data-human-review-attention]")).toContainText(
     "Critic 与风险分析存在冲突",
   );
+});
+
+
+test("证据失败候选可见且仅允许采用同条款框选原文", async ({ page }) => {
+  await page.goto("/");
+  const task = {
+    task_id: "task_fixture_evidence_manual",
+    file_name: "manual-evidence.docx",
+    file_type: "docx",
+    review_position: "甲方",
+    status: "HUMAN_REVIEW_PENDING",
+    message: "候选证据自动验证失败，等待人工处理。",
+    clauses: [
+      { clause_id: "CL-001", title: "保密信息", text: "保密信息包括任何商业信息。", clause_type: "定义", key_fields: {} },
+      { clause_id: "CL-002", title: "期限", text: "保密期限为三年。", clause_type: "期限", key_fields: {} },
+    ],
+    risk_findings: [{
+      risk_id: "RISK-001",
+      risk_type: "保密信息范围过宽",
+      severity: "中",
+      confidence: 0.86,
+      risk_reason: "范围缺少客观边界。",
+      clause_id: "CL-001",
+      evidence_text: "模型生成但不在条款中的证据",
+      matched_rule_ids: ["NDA-R001"],
+      risk_focus: "限定保密范围",
+      revision_suggestion: "增加范围限定。",
+      review_status: "NEED_MANUAL_REVIEW",
+      include_in_report: false,
+      evidence_verification: {
+        status: "AUTO_VERIFICATION_FAILED",
+        is_valid: false,
+        failure_reason: "evidence_text not found in clause text",
+        resolution: "PENDING_HUMAN",
+      },
+    }],
+    matched_rules: [],
+    review_contexts: [],
+    logs: [],
+    events: [],
+  };
+  await page.evaluate(async (fixtureTask) => {
+    document.body.innerHTML = '<main id="component-test-root"></main>';
+    const { WorkbenchLayout } = await import("/src/components/WorkbenchLayout.js");
+    window.__manualEvidencePayload = null;
+    window.__renderManualEvidence = (selection) => {
+      WorkbenchLayout(document.querySelector("#component-test-root"), {
+        task: fixtureTask,
+        workspaceView: "review",
+        mobileView: "risk",
+        riskFilter: "all",
+        localReview: selection,
+        feedback: {},
+        report: {},
+        evaluation: {},
+        taskControl: {},
+        onSubmitFeedback: (payload) => { window.__manualEvidencePayload = payload; },
+      });
+    };
+    window.__renderManualEvidence({ clauseId: "CL-002", selectedText: "保密期限为三年" });
+  }, task);
+
+  await expect(page.locator(".risk-card")).toHaveCount(1);
+  await expect(page.locator("[data-risk-detail]")).toContainText("自动验证失败，待人工处理");
+  await expect(page.locator("[data-risk-detail]")).toContainText("候选证据不在对应条款原文中");
+  await expect(page.getByRole("button", { name: "导出报告" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "采用框选证据" })).toBeDisabled();
+  await page.evaluate(() => {
+    window.__renderManualEvidence({ clauseId: "CL-001", selectedText: "任何商业信息" });
+  });
+  await expect(page.getByRole("button", { name: "采用框选证据" })).toBeEnabled();
+  await page.getByRole("button", { name: "采用框选证据" }).click();
+  await expect.poll(() => page.evaluate(() => window.__manualEvidencePayload)).toMatchObject({
+    riskId: "RISK-001",
+    action: "update_evidence",
+    finalEvidenceText: "任何商业信息",
+  });
 });
 
 

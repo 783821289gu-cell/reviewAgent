@@ -1,6 +1,6 @@
 import { icon } from "./Icon.js";
 
-const REPORTABLE_STATUSES = new Set(["EVIDENCE_VERIFIED", "HUMAN_REVIEW_PENDING", "MEMORY_UPDATED", "REPORT_READY"]);
+const REPORTABLE_STATUSES = new Set(["MEMORY_UPDATED", "REPORT_READY"]);
 
 export function ReportExport(root, props) {
   const report = props.report || {};

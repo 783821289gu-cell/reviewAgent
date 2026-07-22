@@ -3,6 +3,7 @@ const ACTION_STATES = {
   ignore: { label: "已忽略", tone: "ignored" },
   update_severity: { label: "等级已修改", tone: "updated" },
   update_suggestion: { label: "建议已修改", tone: "updated" },
+  update_evidence: { label: "证据已补充", tone: "accepted" },
 };
 
 export function riskFeedbackState(risk) {

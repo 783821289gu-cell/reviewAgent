@@ -40,7 +40,7 @@ def verify_evidence(tool_input: dict) -> dict:
         failure_reason = "matched rule id missing from finding"
 
     if not failure_reason:
-        source_location = _pdf_evidence_location(clause, evidence_text)
+        source_location = evidence_location_for_text(clause, evidence_text)
         clause_location = clause.get("source_location") or {}
         if clause_location.get("pdf_blocks") and not source_location:
             failure_reason = "evidence location not found in PDF blocks"
@@ -56,7 +56,7 @@ def verify_evidence(tool_input: dict) -> dict:
     ).to_dict()
 
 
-def _pdf_evidence_location(clause: dict, evidence_text: str) -> dict:
+def evidence_location_for_text(clause: dict, evidence_text: str) -> dict:
     clause_location = clause.get("source_location") or {}
     pdf_blocks = clause_location.get("pdf_blocks") or []
     if not pdf_blocks:

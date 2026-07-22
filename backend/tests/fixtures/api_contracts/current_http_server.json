@@ -377,7 +377,7 @@
       },
       "required_keys": ["status", "message", "risk", "memory_item", "task"],
       "response_body_summary": {
-        "task_status": "MEMORY_UPDATED",
+        "task_status": "HUMAN_REVIEW_PENDING",
         "review_status": "CONFIRMED_RISK",
         "include_in_report": true
       }

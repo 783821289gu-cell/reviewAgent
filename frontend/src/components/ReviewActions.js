@@ -36,6 +36,7 @@ export function ReviewActions(root, props) {
   actions.append(
     actionButton("采纳风险", "accept", "check", props, editor, "button-primary", feedbackState.action),
     actionButton("忽略风险", "ignore", "x", props, editor, "button-secondary", feedbackState.action),
+    evidenceButton(props, editor, feedbackState.action),
     actionButton("保存等级", "update_severity", "pencil", props, editor, "button-secondary", feedbackState.action),
     actionButton("保存建议", "update_suggestion", "pencil", props, editor, "button-secondary", feedbackState.action),
   );
@@ -54,6 +55,33 @@ export function ReviewActions(root, props) {
   panel.appendChild(actions);
 
   root.appendChild(panel);
+}
+
+function evidenceButton(props, editor, currentAction) {
+  const button = document.createElement("button");
+  const selectedText = String(props.selectedEvidenceText || "").trim();
+  const sameClause = Boolean(selectedText) && props.selectedClauseId === props.risk.clause_id;
+  const selected = currentAction === "update_evidence";
+  button.type = "button";
+  button.className = "button button-secondary compact-button";
+  button.innerHTML = `${icon("check")}<span>${props.loading ? "提交中" : (selected ? "证据已补充" : "采用框选证据")}</span>`;
+  button.disabled = Boolean(props.loading) || !sameClause;
+  button.title = sameClause ? "采用当前条款中框选的原文" : "请先在当前风险对应条款中框选原文";
+  button.setAttribute("aria-pressed", String(selected));
+  button.addEventListener("click", () => {
+    if (typeof props.onSubmitFeedback !== "function" || !sameClause) return;
+    const values = editor.readValues();
+    props.onSubmitFeedback({
+      riskId: props.risk.risk_id,
+      action: "update_evidence",
+      finalSeverity: values.finalSeverity,
+      finalSuggestion: values.finalSuggestion,
+      finalEvidenceText: selectedText,
+      ignoreReason: values.ignoreReason,
+      includeInReport: values.includeInReport,
+    });
+  });
+  return button;
 }
 
 function actionButton(label, action, iconName, props, editor, variant, currentAction) {
@@ -87,5 +115,6 @@ function completedActionLabel(action) {
   if (action === "ignore") return "已忽略";
   if (action === "update_severity") return "等级已保存";
   if (action === "update_suggestion") return "建议已保存";
+  if (action === "update_evidence") return "证据已补充";
   return "已保存";
 }

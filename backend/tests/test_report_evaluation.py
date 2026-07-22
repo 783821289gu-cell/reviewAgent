@@ -82,6 +82,34 @@ class ReportEvaluationTest(unittest.TestCase):
                     }
                 )
 
+    def test_generate_report_rejects_pending_human_review(self):
+        task = sample_task()
+        task["status"] = "HUMAN_REVIEW_PENDING"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "尚未完成"):
+                generate_report(
+                    {
+                        "task_id": task["task_id"],
+                        "task": task,
+                        "report_dir": temp_dir,
+                    }
+                )
+
+    def test_generate_report_rejects_unreviewed_verified_risks(self):
+        task = sample_task()
+        task["status"] = "EVIDENCE_VERIFIED"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "尚未完成"):
+                generate_report(
+                    {
+                        "task_id": task["task_id"],
+                        "task": task,
+                        "report_dir": temp_dir,
+                    }
+                )
+
     def test_generate_report_rejects_risk_position_mismatch(self):
         task = sample_task()
         task["risk_findings"][0]["review_position"] = "乙方"
