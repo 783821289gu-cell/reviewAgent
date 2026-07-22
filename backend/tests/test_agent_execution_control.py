@@ -1,6 +1,8 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
+from time import perf_counter
+from types import SimpleNamespace
 from unittest.mock import patch
 import json
 import sys
@@ -20,8 +22,9 @@ from config import Settings
 from main import create_app
 from models.log import StepLog
 from models.review import ReviewPosition, ReviewStatus
+from providers.llm_provider import bind_llm_mode, effective_llm_mode, reset_llm_mode
 from services.event_service import ReviewEventStore
-from services.log_service import invoke_tool
+from services.log_service import ToolExecutionControl, invoke_tool
 from services.review_service import ReviewOrchestratorAgent
 from services.task_service import cancel_review_task
 from test_document_pipeline import build_docx_bytes
@@ -41,6 +44,29 @@ class AgentExecutionControlTest(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_tool_thread_inherits_task_llm_mode_context(self):
+        control = ToolExecutionControl(
+            cancel_check=lambda: None,
+            task_started_at=perf_counter(),
+            task_timeout_seconds=1,
+            node_timeout_seconds=1,
+        )
+        with patch(
+            "providers.llm_provider.settings",
+            SimpleNamespace(llm_mode="openai_compatible"),
+        ):
+            token = bind_llm_mode("local_structured")
+            try:
+                resolved_mode = control.invoke(
+                    "context_propagation",
+                    perf_counter(),
+                    effective_llm_mode,
+                )
+            finally:
+                reset_llm_mode(token)
+
+        self.assertEqual(resolved_mode, "local_structured")
 
     def test_cancel_stops_new_nodes_and_retains_completed_results(self):
         agent = ReviewOrchestratorAgent(self.store)
@@ -477,33 +503,41 @@ class AgentExecutionControlTest(unittest.TestCase):
         }
         first_logs: list[StepLog] = []
         second_logs: list[StepLog] = []
-        invoke_tool(
-            state.task_id,
-            tool_registry,
-            "plan_review_action",
-            planner_input,
-            first_logs,
-            step_name="planner_route",
-        )
-        invoke_tool(
-            state.task_id,
-            tool_registry,
-            "plan_review_action",
-            planner_input,
-            second_logs,
-            step_name="planner_route",
-        )
+        llm_mode_token = bind_llm_mode("local_structured")
+        try:
+            invoke_tool(
+                state.task_id,
+                tool_registry,
+                "plan_review_action",
+                planner_input,
+                first_logs,
+                step_name="planner_route",
+            )
+            invoke_tool(
+                state.task_id,
+                tool_registry,
+                "plan_review_action",
+                planner_input,
+                second_logs,
+                step_name="planner_route",
+            )
+        finally:
+            reset_llm_mode(llm_mode_token)
         self.assertEqual(first_logs[0].idempotency_key, second_logs[0].idempotency_key)
 
         changed_planner_logs: list[StepLog] = []
-        invoke_tool(
-            state.task_id,
-            tool_registry,
-            "plan_review_action",
-            {**planner_input, "failure_reason": "evidence missing"},
-            changed_planner_logs,
-            step_name="planner_route",
-        )
+        llm_mode_token = bind_llm_mode("local_structured")
+        try:
+            invoke_tool(
+                state.task_id,
+                tool_registry,
+                "plan_review_action",
+                {**planner_input, "failure_reason": "evidence missing"},
+                changed_planner_logs,
+                step_name="planner_route",
+            )
+        finally:
+            reset_llm_mode(llm_mode_token)
         self.assertNotEqual(
             first_logs[0].idempotency_key,
             changed_planner_logs[0].idempotency_key,

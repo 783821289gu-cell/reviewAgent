@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 APP_DIR = PROJECT_ROOT / "backend" / "app"
 sys.path.insert(0, str(APP_DIR))
 
-from config import PROJECT_ENV_FILE, _load_project_environment
+from config import PROJECT_ENV_FILE, Settings, _load_project_environment
 
 
 class ConfigTest(unittest.TestCase):
@@ -77,6 +77,14 @@ class ConfigTest(unittest.TestCase):
 
     def test_default_env_file_is_project_root_env(self):
         self.assertEqual(PROJECT_ENV_FILE, PROJECT_ROOT / ".env")
+
+    def test_execution_timeout_and_runtime_log_defaults_are_explicit(self):
+        settings = Settings()
+
+        self.assertEqual(settings.node_timeout_seconds, 90)
+        self.assertEqual(settings.task_timeout_seconds, 900)
+        self.assertTrue(settings.runtime_log_file.endswith("review_agent.log"))
+        self.assertEqual(settings.runtime_log_level, "INFO")
 
 
 if __name__ == "__main__":

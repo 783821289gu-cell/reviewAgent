@@ -87,6 +87,7 @@ class ReviewTask:
     cancel_reason: str = ""
     execution_active: bool = False
     last_timeout: dict | None = None
+    progress: dict | None = None
 
     def to_dict(self) -> dict:
         return _public_task_payload(_serialize_task(self))
@@ -122,6 +123,7 @@ class AgentState:
     cancel_reason: str = ""
     execution_active: bool = False
     last_timeout: dict | None = None
+    progress: dict | None = None
 
     def to_dict(self) -> dict:
         return _public_task_payload(self.to_runtime_dict())
@@ -158,6 +160,7 @@ class AgentState:
             cancel_reason=self.cancel_reason,
             execution_active=self.execution_active,
             last_timeout=self.last_timeout,
+            progress=self.progress,
         )
 
 
@@ -179,6 +182,7 @@ def new_task(
     logs: list[dict] | None = None,
     task_id: str | None = None,
     llm_mode: LLMMode = LLMMode.LOCAL_STRUCTURED,
+    progress: dict | None = None,
 ) -> ReviewTask:
     resolved_task_id = task_id or f"task_{uuid4().hex[:12]}"
     return ReviewTask(
@@ -202,6 +206,7 @@ def new_task(
         trace_id=trace_id_for_task(resolved_task_id),
         retry_counts={},
         recovery_history=[],
+        progress=progress,
     )
 
 

@@ -24,10 +24,15 @@ blob-report/
 
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 backend/app/data/uploads/*
 !backend/app/data/uploads/.gitignore
 
 backend/app/reports/*.md
+backend/app/logs/*.log*
 evaluation/evaluation_summary.json
 evaluation/evaluation_summary.md
 evaluation/reports/

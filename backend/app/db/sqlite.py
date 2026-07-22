@@ -13,6 +13,8 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("PRAGMA busy_timeout = 30000")
+    connection.execute("PRAGMA journal_mode = WAL")
+    connection.execute("PRAGMA synchronous = NORMAL")
     initialize(connection)
     return connection
 
@@ -70,6 +72,7 @@ def initialize(connection: sqlite3.Connection) -> None:
             cancel_reason TEXT NOT NULL DEFAULT '',
             execution_owner TEXT NOT NULL DEFAULT '',
             last_timeout_json TEXT,
+            progress_json TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -217,6 +220,7 @@ def initialize(connection: sqlite3.Connection) -> None:
     _ensure_column(connection, "review_tasks", "cancel_reason", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "review_tasks", "execution_owner", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "review_tasks", "last_timeout_json", "TEXT")
+    _ensure_column(connection, "review_tasks", "progress_json", "TEXT")
     connection.execute(
         """
         UPDATE review_tasks

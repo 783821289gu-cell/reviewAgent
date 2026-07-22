@@ -14,6 +14,16 @@ class ReviewResultRepository:
         self._save_risks(connection, state)
         self._save_logs(connection, state)
 
+    def save_progress(
+        self,
+        connection: sqlite3.Connection,
+        state: AgentState,
+        step_name: str,
+    ) -> None:
+        if step_name == "evidence_verification_progress":
+            self._save_risks(connection, state)
+        self._save_new_logs(connection, state)
+
     def _save_risks(self, connection: sqlite3.Connection, state: AgentState) -> None:
         if state.risk_findings is None:
             return
@@ -56,56 +66,26 @@ class ReviewResultRepository:
             return
         now = _utc_now()
         for index, log in enumerate(state.logs):
-            connection.execute(
-                """
-                INSERT INTO step_logs (
-                    task_id, log_index, trace_id, step_id,
-                    step_name, tool_name, status, latency_ms,
-                    input_summary, output_summary, token_cost_summary, error_message,
-                    parent_step_id, retry_index, idempotency_key, trace_summary_json,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(task_id, log_index) DO UPDATE SET
-                    trace_id = excluded.trace_id,
-                    step_id = excluded.step_id,
-                    step_name = excluded.step_name,
-                    tool_name = excluded.tool_name,
-                    status = excluded.status,
-                    latency_ms = excluded.latency_ms,
-                    input_summary = excluded.input_summary,
-                    output_summary = excluded.output_summary,
-                    token_cost_summary = excluded.token_cost_summary,
-                    error_message = excluded.error_message,
-                    parent_step_id = excluded.parent_step_id,
-                    retry_index = excluded.retry_index,
-                    idempotency_key = excluded.idempotency_key,
-                    trace_summary_json = excluded.trace_summary_json
-                """,
-                (
-                    state.task_id,
-                    index,
-                    str(log.get("trace_id", state.trace_id)),
-                    str(log.get("step_id", "")),
-                    str(log.get("step_name", "")),
-                    str(log.get("tool_name", "")),
-                    str(log.get("status", "")),
-                    int(log.get("latency_ms", 0)),
-                    str(log.get("input_summary", "")),
-                    str(log.get("output_summary", "")),
-                    str(log.get("token_cost_summary", "")),
-                    str(log.get("error_message", "")),
-                    str(log.get("parent_step_id", "")),
-                    int(log.get("retry_index", 0)),
-                    str(log.get("idempotency_key", "")),
-                    _json_dump(log.get("trace_summary")),
-                    now,
-                ),
-            )
+            _save_log(connection, state, index, log, now)
         connection.execute(
             "DELETE FROM step_logs WHERE task_id = ? AND log_index >= ?",
             (state.task_id, len(state.logs)),
         )
+
+    def _save_new_logs(self, connection: sqlite3.Connection, state: AgentState) -> None:
+        if state.logs is None:
+            return
+        existing_count = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM step_logs WHERE task_id = ?",
+                (state.task_id,),
+            ).fetchone()[0]
+        )
+        if existing_count > len(state.logs):
+            raise ValueError("incremental logs cannot remove persisted entries")
+        now = _utc_now()
+        for index in range(existing_count, len(state.logs)):
+            _save_log(connection, state, index, state.logs[index], now)
 
     def get_risks(self, task_id: str) -> list[dict] | None:
         connection = connect(self.db_path)
@@ -211,6 +191,61 @@ def _delete_missing(
     connection.execute(
         f"DELETE FROM {table_name} WHERE task_id = ? AND {id_column} NOT IN ({placeholders})",
         (task_id, *identifiers),
+    )
+
+
+def _save_log(
+    connection: sqlite3.Connection,
+    state: AgentState,
+    index: int,
+    log: dict,
+    now: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO step_logs (
+            task_id, log_index, trace_id, step_id,
+            step_name, tool_name, status, latency_ms,
+            input_summary, output_summary, token_cost_summary, error_message,
+            parent_step_id, retry_index, idempotency_key, trace_summary_json,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(task_id, log_index) DO UPDATE SET
+            trace_id = excluded.trace_id,
+            step_id = excluded.step_id,
+            step_name = excluded.step_name,
+            tool_name = excluded.tool_name,
+            status = excluded.status,
+            latency_ms = excluded.latency_ms,
+            input_summary = excluded.input_summary,
+            output_summary = excluded.output_summary,
+            token_cost_summary = excluded.token_cost_summary,
+            error_message = excluded.error_message,
+            parent_step_id = excluded.parent_step_id,
+            retry_index = excluded.retry_index,
+            idempotency_key = excluded.idempotency_key,
+            trace_summary_json = excluded.trace_summary_json
+        """,
+        (
+            state.task_id,
+            index,
+            str(log.get("trace_id", state.trace_id)),
+            str(log.get("step_id", "")),
+            str(log.get("step_name", "")),
+            str(log.get("tool_name", "")),
+            str(log.get("status", "")),
+            int(log.get("latency_ms", 0)),
+            str(log.get("input_summary", "")),
+            str(log.get("output_summary", "")),
+            str(log.get("token_cost_summary", "")),
+            str(log.get("error_message", "")),
+            str(log.get("parent_step_id", "")),
+            int(log.get("retry_index", 0)),
+            str(log.get("idempotency_key", "")),
+            _json_dump(log.get("trace_summary")),
+            now,
+        ),
     )
 
 

@@ -1,4 +1,4 @@
-from contextvars import ContextVar, Token
+from contextvars import ContextVar, Token, copy_context
 from dataclasses import dataclass
 from functools import lru_cache
 from hashlib import sha256
@@ -27,6 +27,7 @@ from providers.embedding_provider import (
 from providers.llm_provider import LLMCallMetadata, LLM_CALL_RECORDS_INPUT_KEY
 from providers.llm_provider import effective_llm_mode
 from tools.contracts import runtime_calls_llm, runtime_llm_mode, tool_contracts
+from services.runtime_log_service import write_runtime_log
 
 
 IDEMPOTENT_DECISION_TOOLS = {
@@ -74,6 +75,7 @@ class ToolExecutionControl:
 
     def invoke(self, step_name: str, node_started_at: float, operation: Callable):
         result_queue: Queue = Queue(maxsize=1)
+        execution_context = copy_context()
 
         def execute() -> None:
             try:
@@ -82,7 +84,8 @@ class ToolExecutionControl:
                 result_queue.put((False, exc))
 
         Thread(
-            target=execute,
+            target=execution_context.run,
+            args=(execute,),
             name=f"review-tool-{step_name}",
             daemon=True,
         ).start()
@@ -141,6 +144,15 @@ def invoke_tool(
         runtime_tool_input[LLM_CALL_RECORDS_INPUT_KEY] = llm_calls
     if tool_name == "retrieve_related_clauses":
         runtime_tool_input[EMBEDDING_CALL_RECORDS_INPUT_KEY] = embedding_calls
+    write_runtime_log(
+        "tool_started",
+        task_id=task_id,
+        trace_id=trace_id,
+        step_id=step_id,
+        step_name=resolved_step_name,
+        tool_name=tool_name,
+        retry_index=retry_index,
+    )
     try:
         if execution_control is not None:
             execution_control.before_step(resolved_step_name)
@@ -155,8 +167,7 @@ def invoke_tool(
     except Exception as exc:
         status = _exception_status(exc)
         token_summary = _token_cost_summary(tool_name, llm_calls, embedding_calls)
-        logs.append(
-            StepLog(
+        failed_log = StepLog(
                 task_id=task_id,
                 trace_id=trace_id,
                 step_id=step_id,
@@ -179,12 +190,22 @@ def invoke_tool(
                     status,
                 ),
             )
+        logs.append(failed_log)
+        write_runtime_log(
+            "tool_finished",
+            task_id=task_id,
+            trace_id=trace_id,
+            step_id=step_id,
+            step_name=resolved_step_name,
+            tool_name=tool_name,
+            status=status,
+            latency_ms=failed_log.latency_ms,
+            error_message=failed_log.error_message,
         )
         raise
 
     token_summary = _token_cost_summary(tool_name, llm_calls, embedding_calls)
-    logs.append(
-        StepLog(
+    success_log = StepLog(
             task_id=task_id,
             trace_id=trace_id,
             step_id=step_id,
@@ -207,6 +228,16 @@ def invoke_tool(
                 "success",
             ),
         )
+    logs.append(success_log)
+    write_runtime_log(
+        "tool_finished",
+        task_id=task_id,
+        trace_id=trace_id,
+        step_id=step_id,
+        step_name=resolved_step_name,
+        tool_name=tool_name,
+        status="success",
+        latency_ms=success_log.latency_ms,
     )
     return output
 

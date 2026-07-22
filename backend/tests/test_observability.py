@@ -16,6 +16,11 @@ from providers.embedding_provider import EmbeddingRequest, LocalSparseEmbeddingP
 from services.event_service import ReviewEventStore
 from services.log_service import invoke_tool
 from services.review_service import ReviewOrchestratorAgent
+from services.runtime_log_service import (
+    close_runtime_logging,
+    configure_runtime_logging,
+    write_runtime_log,
+)
 from test_document_pipeline import build_docx_bytes
 
 
@@ -151,6 +156,36 @@ class ObservabilityTest(unittest.TestCase):
         self.assertEqual(response.metadata.cost_status, "no_external_embedding")
         serialized = json.dumps(response.metadata.to_dict(), ensure_ascii=False)
         self.assertNotIn("sample", serialized)
+
+    def test_runtime_file_log_records_redacted_tool_lifecycle(self):
+        log_file = self.root / "logs" / "runtime.log"
+        secret = "runtime-secret-token"
+        close_runtime_logging()
+        configure_runtime_logging(str(log_file), "INFO")
+        try:
+            write_runtime_log(
+                "redaction_probe",
+                error_message=f"Authorization: Bearer {secret}",
+            )
+            logs = []
+            with self.assertRaisesRegex(RuntimeError, "Authorization"):
+                invoke_tool(
+                    "task_runtime_log",
+                    {"failing_tool": lambda _payload: self._raise_secret(secret)},
+                    "failing_tool",
+                    {},
+                    logs,
+                    step_name="runtime_log_test",
+                )
+        finally:
+            close_runtime_logging()
+
+        content = log_file.read_text(encoding="utf-8")
+        self.assertIn('"event": "tool_started"', content)
+        self.assertIn('"event": "tool_finished"', content)
+        self.assertIn('"status": "failed"', content)
+        self.assertNotIn(secret, content)
+        self.assertNotIn("Bearer", content)
 
     @staticmethod
     def _raise_secret(secret: str):

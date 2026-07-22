@@ -53,6 +53,7 @@ RUNTIME_TASK_KEYS = {
     "cancel_reason",
     "execution_active",
     "last_timeout",
+    "progress",
 }
 
 
@@ -148,6 +149,7 @@ class FastApiContractTest(unittest.TestCase):
         self.assertFalse(task["execution_active"])
         self.assertEqual(task["retry_counts"], {})
         self.assertEqual(task["retry_limits"]["node_timeout"], 2)
+        self.assertEqual(task["progress"]["state"], "completed")
 
         with self.client.stream("GET", f"/api/tasks/{created['task_id']}/events") as response:
             self.assertEqual(response.status_code, 200)
@@ -159,7 +161,18 @@ class FastApiContractTest(unittest.TestCase):
 
         events = _parse_sse(body)
         event_contract = self.contract["success"]["events"]
-        self.assertEqual([event["data"]["status"] for event in events], event_contract["sequence"])
+        business_events = [
+            event
+            for event in events
+            if not event["data"]["step_name"].endswith("_progress")
+        ]
+        self.assertEqual(
+            [event["data"]["status"] for event in business_events],
+            event_contract["sequence"],
+        )
+        self.assertTrue(
+            any(event["data"]["step_name"].endswith("_progress") for event in events)
+        )
         self.assertEqual(events[0]["event"], event_contract["event_name"])
         self.assertEqual(events[0]["id"], str(event_contract["response_event_example"]["id"]))
         self.assertEqual(set(events[0]["data"]), set(event_contract["event_required_keys"]))
@@ -227,7 +240,11 @@ class FastApiContractTest(unittest.TestCase):
             body = "".join(response.iter_text())
 
         events = _parse_sse(body)
-        statuses = [event["data"]["status"] for event in events]
+        statuses = [
+            event["data"]["status"]
+            for event in events
+            if not event["data"]["step_name"].endswith("_progress")
+        ]
         self.assertEqual(statuses, self.contract["success"]["events"]["sequence"])
         self.assertIn(statuses[-1], TERMINAL_STATUSES)
 

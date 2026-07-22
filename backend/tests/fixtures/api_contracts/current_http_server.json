@@ -208,7 +208,8 @@
         "evidence_results",
         "report_file",
         "logs",
-        "events"
+        "events",
+        "progress"
       ],
       "response_body_summary": {
         "status": "UPLOAD_RECEIVED",
@@ -245,7 +246,8 @@
         "evidence_results",
         "report_file",
         "logs",
-        "events"
+        "events",
+        "progress"
       ],
       "response_body_summary": {
         "status": "HUMAN_REVIEW_PENDING",

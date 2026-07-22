@@ -34,9 +34,9 @@ class TaskRepository:
                 analysis_results_json, evidence_results_json, report_file_json,
                 retry_counts_json, recovery_history_json,
                 cancel_requested_at, cancelled_at, cancel_reason, last_timeout_json,
-                created_at, updated_at
+                progress_json, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(task_id) DO UPDATE SET
                 trace_id = excluded.trace_id,
                 status = excluded.status,
@@ -59,6 +59,7 @@ class TaskRepository:
                 cancelled_at = excluded.cancelled_at,
                 cancel_reason = excluded.cancel_reason,
                 last_timeout_json = excluded.last_timeout_json,
+                progress_json = excluded.progress_json,
                 updated_at = excluded.updated_at
             """,
             (
@@ -84,6 +85,7 @@ class TaskRepository:
                 state.cancelled_at,
                 state.cancel_reason,
                 _json_dump(state.last_timeout),
+                _json_dump(state.progress),
                 now,
                 now,
             ),
@@ -203,6 +205,7 @@ def _task_payload(row: sqlite3.Row) -> dict:
         "cancel_reason": str(row["cancel_reason"]),
         "execution_owner": str(row["execution_owner"]),
         "last_timeout": _json_load(row["last_timeout_json"]),
+        "progress": _json_load(row["progress_json"]),
         "created_at": str(row["created_at"]),
         "updated_at": str(row["updated_at"]),
     }

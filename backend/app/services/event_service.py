@@ -51,6 +51,12 @@ ERROR_RETRY_LIMITS = {
     "task_timeout": 2,
     "task": 2,
 }
+SUCCESS_PROGRESS_STATUSES = {
+    ReviewStatus.EVIDENCE_VERIFIED,
+    ReviewStatus.HUMAN_REVIEW_PENDING,
+    ReviewStatus.MEMORY_UPDATED,
+    ReviewStatus.REPORT_READY,
+}
 _PROCESS_EXECUTION_LOCK = Lock()
 _PROCESS_EXECUTION_OWNERS: dict[tuple[str, str], str] = {}
 
@@ -155,6 +161,7 @@ class ReviewEventStore:
         cancelled_at: str | None = None,
         cancel_reason: str | None = None,
         last_timeout: dict | None = None,
+        progress: dict | None = None,
     ) -> AgentState:
         with self._condition:
             state = deepcopy(self._states[task_id])
@@ -205,6 +212,15 @@ class ReviewEventStore:
                 state.cancel_reason = cancel_reason
             if last_timeout is not None:
                 state.last_timeout = deepcopy(last_timeout)
+            if progress is not None:
+                state.progress = deepcopy(progress)
+            elif status in TERMINAL_STATUSES and state.progress is not None:
+                state.progress = {
+                    **deepcopy(state.progress),
+                    "state": _terminal_progress_state(status),
+                    "message": message,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
             existing_events = self._events[task_id]
             event = self._new_event_locked(
                 state,
@@ -450,9 +466,19 @@ class ReviewEventStore:
         with self._condition:
             if task_id not in self._events:
                 return []
-            if len(self._events[task_id]) <= next_index:
+            available = [
+                event
+                for event in self._events[task_id]
+                if event.event_id >= next_index
+            ]
+            if not available:
                 self._condition.wait(timeout=timeout_seconds)
-            return [event.to_dict(include_task=True) for event in self._events.get(task_id, [])[next_index:]]
+                available = [
+                    event
+                    for event in self._events.get(task_id, [])
+                    if event.event_id >= next_index
+                ]
+            return [event.to_dict(include_task=True) for event in available]
 
     def is_terminal(self, task_id: str) -> bool:
         with self._condition:
@@ -472,7 +498,7 @@ class ReviewEventStore:
         step_name: str,
         tool_name: str,
     ) -> ReviewEvent:
-        event_id = len(existing_events)
+        event_id = existing_events[-1].event_id + 1 if existing_events else 0
         base_event = {
             "event_id": event_id,
             "task_id": state.task_id,
@@ -514,3 +540,11 @@ class ReviewEventStore:
 
 
 review_event_store = ReviewEventStore()
+
+
+def _terminal_progress_state(status: ReviewStatus) -> str:
+    if status in SUCCESS_PROGRESS_STATUSES:
+        return "completed"
+    if status == ReviewStatus.CANCELLED:
+        return "cancelled"
+    return "failed"

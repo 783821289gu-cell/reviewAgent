@@ -45,7 +45,14 @@ const REVIEW_STATUSES = new Set([
 export function ReviewProgress(root, props) {
   root.textContent = "";
 
-  const events = props.events || [];
+  const progress = props.progress || null;
+  if (progress) {
+    root.appendChild(renderLiveProgress(progress));
+  }
+
+  const events = (props.events || []).filter(
+    (event) => !String(event.step_name || "").endsWith("_progress"),
+  );
   if (events.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
@@ -78,6 +85,45 @@ export function ReviewProgress(root, props) {
   });
 
   root.appendChild(list);
+}
+
+function renderLiveProgress(progress) {
+  const total = Math.max(0, Number(progress.total) || 0);
+  const completed = Math.max(0, Math.min(Number(progress.completed) || 0, total));
+  const state = ["running", "completed", "failed", "cancelled"].includes(progress.state)
+    ? progress.state
+    : "running";
+  const section = document.createElement("section");
+  section.className = `live-progress state-${state}`;
+  section.setAttribute("role", "status");
+  section.setAttribute("aria-live", "polite");
+
+  const heading = document.createElement("div");
+  heading.className = "live-progress-heading";
+  const label = document.createElement("strong");
+  label.textContent = progress.stage_label || progress.stage || "任务处理中";
+  const count = document.createElement("span");
+  count.textContent = total > 0 ? `${completed} / ${total}` : progressStateLabel(state);
+  heading.append(label, count);
+
+  const bar = document.createElement("progress");
+  bar.max = total || 1;
+  bar.value = total > 0 ? completed : (state === "completed" ? 1 : 0);
+  bar.setAttribute("aria-label", label.textContent);
+
+  const detail = document.createElement("p");
+  detail.textContent = progress.message
+    || (progress.current_item ? `当前：${progress.current_item}` : progressStateLabel(state));
+
+  section.append(heading, bar, detail);
+  return section;
+}
+
+function progressStateLabel(state) {
+  if (state === "completed") return "已完成";
+  if (state === "failed") return "执行失败";
+  if (state === "cancelled") return "已取消";
+  return "运行中";
 }
 
 function progressClassName(status) {

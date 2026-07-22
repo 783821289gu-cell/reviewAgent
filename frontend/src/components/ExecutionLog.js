@@ -8,6 +8,19 @@ export function ExecutionLog(root, props) {
   appendSummary(summary, "说明", task?.message || "尚未创建审查任务。");
   appendSummary(summary, "任务 Trace", task?.trace_id || "尚未生成");
   appendSummary(summary, "恢复次数", String(task?.recovery_count || 0));
+  if (task?.progress) {
+    const total = Number(task.progress.total || 0);
+    const completed = Number(task.progress.completed || 0);
+    appendSummary(
+      summary,
+      "当前进度",
+      [
+        task.progress.stage_label || task.progress.stage,
+        total > 0 ? `${completed}/${total}` : task.progress.state,
+        task.progress.current_item,
+      ].filter(Boolean).join(" / "),
+    );
+  }
   if (task?.recovery_from_status) {
     appendSummary(summary, "恢复来源", task.recovery_from_status);
   }

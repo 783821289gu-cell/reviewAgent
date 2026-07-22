@@ -32,6 +32,10 @@ def _default_upload_dir() -> str:
     return os.path.join(os.path.dirname(__file__), "data", "uploads")
 
 
+def _default_runtime_log_file() -> str:
+    return os.path.join(os.path.dirname(__file__), "logs", "review_agent.log")
+
+
 def _allowed_origins() -> tuple[str, ...]:
     raw_value = os.getenv("REVIEW_AGENT_ALLOWED_ORIGINS", "")
     origins = tuple(origin.strip().rstrip("/") for origin in raw_value.split(",") if origin.strip())
@@ -95,8 +99,19 @@ class Settings:
     embedding_timeout_seconds: float = field(
         default_factory=lambda: _positive_float("REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS", "60")
     )
+    node_timeout_seconds: float = field(
+        default_factory=lambda: _positive_float("REVIEW_AGENT_NODE_TIMEOUT_SECONDS", "90")
+    )
+    task_timeout_seconds: float = field(
+        default_factory=lambda: _positive_float("REVIEW_AGENT_TASK_TIMEOUT_SECONDS", "900")
+    )
     memory_db_path: str = os.getenv("REVIEW_AGENT_MEMORY_DB_PATH", _default_memory_db_path())
     upload_dir: str = os.getenv("REVIEW_AGENT_UPLOAD_DIR", _default_upload_dir())
+    runtime_log_file: str = os.getenv(
+        "REVIEW_AGENT_RUNTIME_LOG_FILE",
+        _default_runtime_log_file(),
+    )
+    runtime_log_level: str = os.getenv("REVIEW_AGENT_RUNTIME_LOG_LEVEL", "INFO").upper()
     service_name: str = "contract-review-agent"
 
 

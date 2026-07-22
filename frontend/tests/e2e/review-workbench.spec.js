@@ -79,6 +79,15 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
   expect(await sseBody).toMatch(
     /"status":\s*"(?:EVIDENCE_VERIFIED|HUMAN_REVIEW_PENDING)"/,
   );
+  expect(await sseBody).toContain("_progress");
+  await expect(page.locator(".live-progress")).toBeVisible();
+  await expect(page.locator(".live-progress")).toHaveClass(/state-completed/);
+  await expect(page.locator("[data-task-progress-brief]")).toContainText(/\d+\/\d+/);
+  const finalProgress = await page.locator(".live-progress progress").evaluate((element) => ({
+    value: element.value,
+    max: element.max,
+  }));
+  expect(finalProgress.value).toBe(finalProgress.max);
   await expect(page.locator(".progress-list")).toContainText(/证据已验证|等待人工复核/);
   await expect(page.locator("[data-human-review-attention]")).toContainText("人工复核待处理");
 
@@ -146,6 +155,7 @@ test("DOCX 主流程覆盖 SSE、风险定位、局部审查、反馈、Memory�
   await page.reload();
   await expect(page.getByText("后端已连接")).toBeVisible();
   await expect(page.locator("[data-review-status]")).toHaveText("MEMORY_UPDATED");
+  await expect(page.locator(".live-progress")).toHaveClass(/state-completed/);
   await expect(page.locator(".risk-card")).toHaveCount(4);
   await expect(page.locator("[data-pending-risk-count]")).toHaveText("1");
   await expect(page.locator(".risk-card").nth(0).locator(".risk-decision")).toHaveText("已采纳");

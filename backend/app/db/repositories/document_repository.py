@@ -60,36 +60,22 @@ class DocumentRepository:
             if not clause_id:
                 raise ValueError("persisted clause requires clause_id")
             clause_ids.append(clause_id)
-            connection.execute(
-                """
-                INSERT INTO clauses (
-                    task_id, clause_id, clause_type, title, text, key_fields_json,
-                    source_location_json, payload_json, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(task_id, clause_id) DO UPDATE SET
-                    clause_type = excluded.clause_type,
-                    title = excluded.title,
-                    text = excluded.text,
-                    key_fields_json = excluded.key_fields_json,
-                    source_location_json = excluded.source_location_json,
-                    payload_json = excluded.payload_json,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    state.task_id,
-                    clause_id,
-                    str(clause.get("clause_type", "")),
-                    str(clause.get("title", "")),
-                    str(clause.get("text", "")),
-                    _json_dump(clause.get("key_fields") or {}),
-                    _json_dump(clause.get("source_location") or {}),
-                    _json_dump(clause),
-                    now,
-                    now,
-                ),
-            )
+            _save_clause(connection, state.task_id, clause, now)
         _delete_missing(connection, "clauses", state.task_id, "clause_id", clause_ids)
+
+    def save_progress(
+        self,
+        connection: sqlite3.Connection,
+        state: AgentState,
+        step_name: str,
+    ) -> None:
+        if step_name != "key_field_extract_progress":
+            return
+        clauses = list(state.clauses or [])
+        if not clauses:
+            connection.execute("DELETE FROM clauses WHERE task_id = ?", (state.task_id,))
+            return
+        _save_clause(connection, state.task_id, clauses[-1], _utc_now())
 
     def get_upload(self, task_id: str) -> dict | None:
         connection = connect(self.db_path)
@@ -143,6 +129,46 @@ def _delete_missing(
     connection.execute(
         f"DELETE FROM {table_name} WHERE task_id = ? AND {id_column} NOT IN ({placeholders})",
         (task_id, *identifiers),
+    )
+
+
+def _save_clause(
+    connection: sqlite3.Connection,
+    task_id: str,
+    clause: dict,
+    now: str,
+) -> None:
+    clause_id = str(clause.get("clause_id", ""))
+    if not clause_id:
+        raise ValueError("persisted clause requires clause_id")
+    connection.execute(
+        """
+        INSERT INTO clauses (
+            task_id, clause_id, clause_type, title, text, key_fields_json,
+            source_location_json, payload_json, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(task_id, clause_id) DO UPDATE SET
+            clause_type = excluded.clause_type,
+            title = excluded.title,
+            text = excluded.text,
+            key_fields_json = excluded.key_fields_json,
+            source_location_json = excluded.source_location_json,
+            payload_json = excluded.payload_json,
+            updated_at = excluded.updated_at
+        """,
+        (
+            task_id,
+            clause_id,
+            str(clause.get("clause_type", "")),
+            str(clause.get("title", "")),
+            str(clause.get("text", "")),
+            _json_dump(clause.get("key_fields") or {}),
+            _json_dump(clause.get("source_location") or {}),
+            _json_dump(clause),
+            now,
+            now,
+        ),
     )
 
 

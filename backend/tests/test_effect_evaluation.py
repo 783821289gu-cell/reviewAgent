@@ -78,9 +78,18 @@ class EffectEvaluationTest(unittest.TestCase):
         historical_success_fields = baseline["api_contract"]["success_fields"]
         self.assertEqual(set(historical_success_fields), set(expected_success_fields))
         for name, fields in historical_success_fields.items():
-            if name == "effect_evaluation":
+            if name in {"task", "effect_evaluation"}:
                 continue
             self.assertEqual(fields, expected_success_fields[name], name)
+        self.assertEqual(
+            set(expected_success_fields["task"])
+            - set(historical_success_fields["task"]),
+            {"progress"},
+        )
+        self.assertEqual(
+            set(historical_success_fields["task"]),
+            set(expected_success_fields["task"]) - {"progress"},
+        )
         self.assertEqual(
             set(expected_success_fields["effect_evaluation"])
             - set(historical_success_fields["effect_evaluation"]),

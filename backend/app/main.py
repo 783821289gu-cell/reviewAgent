@@ -12,6 +12,7 @@ from config import Settings, settings
 from db.repositories import ReviewPersistence
 from services.event_service import ReviewEventStore
 from services.review_service import ReviewOrchestratorAgent
+from services.runtime_log_service import configure_runtime_logging
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -22,6 +23,10 @@ def create_app(
     app_settings: Settings = settings,
     event_store: ReviewEventStore | None = None,
 ) -> FastAPI:
+    configure_runtime_logging(
+        app_settings.runtime_log_file,
+        app_settings.runtime_log_level,
+    )
     if event_store is None:
         event_store = ReviewEventStore(
             ReviewPersistence(app_settings.memory_db_path, app_settings.upload_dir)
@@ -42,7 +47,11 @@ def create_app(
     application = FastAPI(title="ContractReviewAgent", lifespan=lifespan)
     application.state.settings = app_settings
     application.state.event_store = event_store
-    application.state.review_agent = ReviewOrchestratorAgent(event_store)
+    application.state.review_agent = ReviewOrchestratorAgent(
+        event_store,
+        node_timeout_seconds=app_settings.node_timeout_seconds,
+        task_timeout_seconds=app_settings.task_timeout_seconds,
+    )
     application.state.recovered_task_ids = []
     application.state.accepting_tasks = False
 

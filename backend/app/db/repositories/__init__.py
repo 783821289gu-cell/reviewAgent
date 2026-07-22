@@ -88,9 +88,21 @@ class ReviewPersistence:
                     state.task_id,
                     recovery_from_status,
                 )
-            self.document_repository.save_results(connection, state)
-            self.review_result_repository.save(connection, state)
-            self.event_repository.append(connection, event)
+            if _is_transient_progress_event(event):
+                self.document_repository.save_progress(
+                    connection,
+                    state,
+                    str(event["step_name"]),
+                )
+                self.review_result_repository.save_progress(
+                    connection,
+                    state,
+                    str(event["step_name"]),
+                )
+            else:
+                self.document_repository.save_results(connection, state)
+                self.review_result_repository.save(connection, state)
+                self.event_repository.append(connection, event)
             connection.commit()
         except Exception:
             connection.rollback()
@@ -143,6 +155,7 @@ class ReviewPersistence:
                 cancel_reason=task["cancel_reason"],
                 execution_active=False,
                 last_timeout=task["last_timeout"],
+                progress=task["progress"],
             )
             persisted.append((state, events))
         return persisted
@@ -174,6 +187,10 @@ class ReviewPersistence:
 
 def _event_without_task(event: dict) -> dict:
     return {key: value for key, value in event.items() if key != "task"}
+
+
+def _is_transient_progress_event(event: dict) -> bool:
+    return str(event.get("step_name", "")).endswith("_progress")
 
 
 __all__ = [

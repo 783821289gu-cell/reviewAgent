@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+import os
 import sqlite3
 import sys
 import unittest
@@ -45,6 +46,92 @@ class TaskPersistenceTest(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_incremental_progress_and_partial_results_survive_restart(self):
+        state = self.event_store.create_task(
+            "partial.docx",
+            "docx",
+            ReviewPosition.PARTY_A,
+            content=build_docx_bytes(),
+        )
+        partial_clause = {
+            "clause_id": "CL-001",
+            "clause_type": "定义",
+            "title": "定义",
+            "text": "合成测试条款",
+            "key_fields": {},
+            "source_location": {},
+        }
+        progress = {
+            "stage": "key_field_extract",
+            "stage_label": "提取条款关键字段",
+            "state": "running",
+            "completed": 1,
+            "total": 3,
+            "current_item": "CL-002",
+            "message": "正在处理 CL-002（1/3）。",
+            "updated_at": "2026-07-22T00:00:00+00:00",
+        }
+        self.event_store.update_task(
+            state.task_id,
+            ReviewStatus.CONTRACT_TYPE_CLASSIFIED,
+            progress["message"],
+            step_name="key_field_extract_progress",
+            tool_name="extract_key_fields",
+            clauses=[partial_clause],
+            progress=progress,
+        )
+
+        restarted_store = ReviewEventStore(self.persistence)
+        restarted_store.load_persisted()
+        restored = restarted_store.get_task(state.task_id)
+
+        self.assertEqual(restored.progress, progress)
+        self.assertEqual(restored.clauses, [partial_clause])
+        self.assertEqual(restored.events[-1]["step_name"], "create_task")
+        self.assertTrue(
+            all(not event["step_name"].endswith("_progress") for event in restored.events)
+        )
+
+    def test_sqlite_uses_wal_for_incremental_task_updates(self):
+        connection = connect(self.db_path)
+        try:
+            journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+            synchronous = connection.execute("PRAGMA synchronous").fetchone()[0]
+        finally:
+            connection.close()
+
+        self.assertEqual(str(journal_mode).lower(), "wal")
+        self.assertEqual(int(synchronous), 1)
+
+    def test_event_cursor_continues_after_transient_progress_is_not_replayed(self):
+        state = self.agent.run_sync(
+            file_name="cursor.docx",
+            file_type="docx",
+            content=build_docx_bytes(),
+            review_position=ReviewPosition.PARTY_A,
+        )
+        restarted_store = ReviewEventStore(self.persistence)
+        restarted_store.load_persisted()
+        restored = restarted_store.get_task(state.task_id)
+        last_persisted_id = restored.events[-1]["event_id"]
+
+        restarted_store.update_task(
+            state.task_id,
+            restored.status,
+            "cursor continuity check",
+            step_name="cursor_continuity_checked",
+            tool_name="",
+        )
+        resumed_events = restarted_store.wait_for_events(
+            state.task_id,
+            last_persisted_id + 1,
+            timeout_seconds=0,
+        )
+
+        self.assertEqual(len(resumed_events), 1)
+        self.assertEqual(resumed_events[0]["event_id"], last_persisted_id + 1)
+        self.assertEqual(resumed_events[0]["step_name"], "cursor_continuity_checked")
 
     def test_completed_task_upload_and_normalized_results_survive_restart(self):
         content = build_docx_bytes()
@@ -92,7 +179,11 @@ class TaskPersistenceTest(unittest.TestCase):
         self.assertEqual(counts["clauses"], len(state.clauses))
         self.assertEqual(counts["risk_findings"], len(state.risk_findings))
         self.assertEqual(counts["step_logs"], len(state.logs))
-        self.assertEqual(counts["task_events"], len(state.events))
+        persisted_event_count = sum(
+            not event["step_name"].endswith("_progress")
+            for event in state.events
+        )
+        self.assertEqual(counts["task_events"], persisted_event_count)
         self.assertEqual(task_row["status"], ReviewStatus.EVIDENCE_VERIFIED.value)
         self.assertEqual(task_row["llm_mode"], LLMMode.LOCAL_STRUCTURED.value)
         self.assertEqual(task_row["current_node"], "evidence_verified")
@@ -110,7 +201,15 @@ class TaskPersistenceTest(unittest.TestCase):
         restored = restarted_store.get_task(state.task_id)
 
         self.assertEqual([item.task_id for item in loaded], [state.task_id])
-        self.assertEqual(restored.to_dict(), state.to_dict())
+        restored_payload = restored.to_dict()
+        state_payload = state.to_dict()
+        restored_events = restored_payload.pop("events")
+        state_payload.pop("events")
+        self.assertEqual(restored_payload, state_payload)
+        self.assertTrue(restored_events)
+        self.assertTrue(
+            all(not event["step_name"].endswith("_progress") for event in restored_events)
+        )
         self.assertTrue(all(log["trace_summary"] for log in restored.logs))
         self.assertEqual(restored.logs[0]["parent_step_id"], "")
         self.assertTrue(all("retry_index" in log for log in restored.logs))
@@ -218,7 +317,13 @@ class TaskPersistenceTest(unittest.TestCase):
         self.assertEqual(first_feedback["task"]["retry_counts"], {"task": 1})
         self.assertEqual(len(first_feedback["task"]["recovery_history"]), 1)
 
-        with patch.object(report_service, "REPORT_DIR", self.root / "reports"):
+        with (
+            patch.object(report_service, "REPORT_DIR", self.root / "reports"),
+            patch.dict(
+                os.environ,
+                {"REVIEW_AGENT_REPORT_DIR": str(self.root / "reports")},
+            ),
+        ):
             first_report = generate_task_report(state.task_id, self.event_store)
             second_report = generate_task_report(state.task_id, self.event_store)
 

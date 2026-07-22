@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -69,22 +70,29 @@ class ReviewOrchestratorTest(unittest.TestCase):
             self.assertTrue(contract.input_schema)
             self.assertTrue(contract.output_schema)
         self.assertTrue(tool_contracts["extract_key_fields"].calls_llm)
-        self.assertFalse(runtime_calls_llm("extract_key_fields"))
-        self.assertFalse(runtime_calls_llm("analyze_risk"))
-        self.assertFalse(runtime_calls_llm("criticize_risk"))
-        self.assertFalse(runtime_calls_llm("plan_review_action"))
-        self.assertEqual(runtime_llm_mode("analyze_risk"), "local_structured_no_external_llm")
-        self.assertEqual(
-            runtime_llm_mode("criticize_risk"),
-            "deterministic_support_check_no_external_llm",
-        )
-        self.assertEqual(
-            runtime_llm_mode("plan_review_action"),
-            "deterministic_policy_no_external_llm",
-        )
-        contract_payload = {item["name"]: item for item in tool_contracts_payload()}
-        self.assertFalse(contract_payload["analyze_risk"]["runtime_calls_llm"])
-        self.assertEqual(contract_payload["analyze_risk"]["runtime_llm_mode"], "local_structured_no_external_llm")
+        with patch(
+            "providers.llm_provider.settings",
+            SimpleNamespace(llm_mode="local_structured"),
+        ):
+            self.assertFalse(runtime_calls_llm("extract_key_fields"))
+            self.assertFalse(runtime_calls_llm("analyze_risk"))
+            self.assertFalse(runtime_calls_llm("criticize_risk"))
+            self.assertFalse(runtime_calls_llm("plan_review_action"))
+            self.assertEqual(runtime_llm_mode("analyze_risk"), "local_structured_no_external_llm")
+            self.assertEqual(
+                runtime_llm_mode("criticize_risk"),
+                "deterministic_support_check_no_external_llm",
+            )
+            self.assertEqual(
+                runtime_llm_mode("plan_review_action"),
+                "deterministic_policy_no_external_llm",
+            )
+            contract_payload = {item["name"]: item for item in tool_contracts_payload()}
+            self.assertFalse(contract_payload["analyze_risk"]["runtime_calls_llm"])
+            self.assertEqual(
+                contract_payload["analyze_risk"]["runtime_llm_mode"],
+                "local_structured_no_external_llm",
+            )
 
     def test_orchestrator_records_events_and_logs(self):
         event_store = ReviewEventStore()
@@ -106,8 +114,13 @@ class ReviewOrchestratorTest(unittest.TestCase):
         )
         self.assertTrue(all(log["status"] == "success" for log in payload["logs"]))
         self.assertEqual(payload["events"][-1]["status"], "EVIDENCE_VERIFIED")
+        business_events = [
+            event
+            for event in payload["events"]
+            if not event["step_name"].endswith("_progress")
+        ]
         self.assertEqual(
-            [event["status"] for event in payload["events"]],
+            [event["status"] for event in business_events],
             [
                 "START",
                 "UPLOAD_RECEIVED",
@@ -120,6 +133,14 @@ class ReviewOrchestratorTest(unittest.TestCase):
                 "EVIDENCE_VERIFIED",
             ],
         )
+        progress_events = [
+            event
+            for event in payload["events"]
+            if event["step_name"].endswith("_progress")
+        ]
+        self.assertTrue(progress_events)
+        self.assertEqual(payload["progress"]["state"], "completed")
+        self.assertEqual(payload["progress"]["completed"], payload["progress"]["total"])
         self.assertEqual(payload["matched_rules"][0]["matched_rules"][0]["rule_id"], "NDA-R001")
         log_tools = [log["tool_name"] for log in payload["logs"]]
         self.assertIn("retrieve_playbook_rules", log_tools)

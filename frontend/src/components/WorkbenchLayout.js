@@ -136,7 +136,10 @@ function renderReviewComponents(root, props, context) {
     root.querySelector("[data-contract-classification]"),
     task?.contract_classification || null,
   );
-  ReviewProgress(root.querySelector("[data-review-progress]"), { events: task?.events || [] });
+  ReviewProgress(root.querySelector("[data-review-progress]"), {
+    events: task?.events || [],
+    progress: task?.progress || null,
+  });
   renderClauseNavigation(root.querySelector("[data-clause-navigation]"), {
     clauses: task?.clauses || [],
     risks,
@@ -210,6 +213,7 @@ function renderTaskStrip(task, report, taskControl) {
           <div class="task-title-meta">
             <span>${escapeHtml(task?.contract_classification?.contract_type || "等待合同识别")}</span>
             <span class="task-provider-brief provider-${provider.tone}" data-task-provider-brief title="${escapeHtml(providerDetail)}">${escapeHtml(providerBrief(provider))}</span>
+            ${renderTaskProgressBrief(task?.progress)}
           </div>
         </div>
       </div>
@@ -237,6 +241,14 @@ function renderTaskStrip(task, report, taskControl) {
       </div>
     </header>
   `;
+}
+
+function renderTaskProgressBrief(progress) {
+  if (!progress) return "";
+  const total = Math.max(0, Number(progress.total) || 0);
+  const completed = Math.max(0, Math.min(Number(progress.completed) || 0, total));
+  const count = total > 0 ? ` ${completed}/${total}` : "";
+  return `<span class="task-progress-brief state-${escapeHtml(progress.state || "running")}" data-task-progress-brief>${escapeHtml(progress.stage_label || progress.stage || "任务处理中")}${count}</span>`;
 }
 
 const TASK_TERMINAL_STATUSES = new Set([
