@@ -193,3 +193,9 @@ DeepSeek 任务安全上限独立调整为 3600 秒，本地任务仍为 900 秒
 为 Embedding Trace 增加输入数量和向量维度时，第一版把这两个字段无条件写进所有 Provider 调用，结果 LLM Trace 也多出了值为 `null` 的字段。业务没有直接报错，但 API 契约和下游展示会发生无意义漂移，属于新增能力影响既有路径。
 
 最终让公共 Trace 继续保留模型、请求 ID、耗时、成本和错误字段，只在实际调用元数据包含 `input_count`、`vector_dimension` 时输出 Embedding 专属字段。全量测试同时不再覆盖默认运行日志环境变量，避免测试命令自己破坏默认配置验收。这样 LLM 与 Embedding 共用 Trace 外壳，但各自只暴露真实存在的元数据。
+
+## 2026-07-23：真实 Embedding 检索达标不代表 Agent 整体达标
+
+配置独立 Embedding Provider 后，先用单文本调用确认 `BAAI/bge-m3` 返回 1024 维向量，再固定 `effect-v3` 数据集连续执行两轮。评测时把 LLM 强制设为 `local_structured`，目的是隔离 Embedding 变量，避免把 DeepSeek 的推理波动混入检索模型比较。两轮各有 164 次真实外部 Embedding 调用且全部成功，P95 分别为 390 ms 和 352 ms；相关条款 Recall@1、Memory Recall@3、Memory MRR、向量覆盖率和调用成功率均为 1.0。
+
+最容易误判的地方是“检索指标满分”看起来像系统已经完成效果验收。实际上风险 Recall 和 Evidence span 命中率仍为 0.5231，Memory 偏好一致性仍为 0.55，两轮摘要都只能是 `completed_with_failures`。因此本轮结论限定为“真实 Embedding 路径和合成检索集稳定通过”，不能扩写成“Agent 达到生产级准确率”。供应商也没有返回请求 ID，成本单价未配置，这两项保持不可用，不生成占位证据。

@@ -56,7 +56,7 @@
 48. 外部 LLM 日志记录模型、供应商请求 ID、prompt/completion token、调用耗时、错误类型和成本状态；未知价格显示“未配置”，本地模式显示 `no_external_llm`。
 49. Embedding 查询包含当前条款正文、条款类型、风险类型、Playbook 检查点和关键字段；合同条款向量在单次任务上下文构建期间缓存，恢复时使用相同模型和输入重建。
 50. 相关条款结果包含 Embedding 模式、模型、向量维度、余弦相似度、rerank 因子和最终分数；前端 Context Trace 展示模型、相似度和最终分数。
-51. 外部 Embedding 调用日志记录模型、供应商请求 ID、输入数量、向量维度、耗时和错误类型，不记录 API Key 或完整合同文本；失败时进入 `RETRIEVAL_FAILED`，未启用静默词频降级。
+51. 外部 Embedding 调用日志记录模型、输入数量、向量维度、耗时、错误类型，以及供应商提供时的请求 ID；不记录 API Key 或完整合同文本，失败时进入 `RETRIEVAL_FAILED`，未启用静默词频降级。
 52. `samples/annotations/related_clauses.json` 提供 20 组人工相关条款标注，覆盖 8 类 NDA 风险；离线测试直接运行本地混合检索并计算 Recall@1，不使用语义命中 Stub 代替实际检索结果。
 53. `samples/annotations/` 提供 `effect-v3` 人工标注 schema，覆盖 23 份合同、174 条条款、65 条唯一风险条款、20 组相关条款、20 组带检索查询的 Memory 对照和 10 组 Prompt Injection；当前数据全部为项目内合成夹具。
 54. `POST /api/evaluation/effect/run` 独立运行效果评测，不改写现有 `POST /api/evaluation/run` 流程评测响应。
@@ -66,7 +66,7 @@
 58. 扫描件、空文本、加密、复杂字体映射失败和损坏 PDF 会进入真实 `PARSE_FAILED` 状态，不生成伪造正文或正式风险。
 59. 每个任务持久化 `trace_id`，每次工具调用持久化唯一 `step_id`；旧 SQLite 日志在初始化时生成确定性 Step 标识。
 60. 任务恢复次数和恢复起点进入任务快照、API 响应和 Web 执行记录，服务重启后保留。
-61. LLM/Embedding 执行摘要展示模型、供应商请求 ID、token 或输入量、耗时、成本状态和错误类型；日志摘要屏蔽密钥、Authorization、完整 prompt 和完整任务正文。
+61. LLM/Embedding 执行摘要展示模型、token 或输入量、耗时、成本状态和错误类型，并在供应商提供时展示脱敏请求 ID；日志摘要屏蔽密钥、Authorization、完整 prompt 和完整任务正文。
 62. SSE 在终态关闭但浏览器未消费最后一帧时，前端使用任务查询接口做一次真实状态对账，不自行构造成功状态。
 63. Playwright Chromium E2E 覆盖首页、上传、SSE、风险定位和高亮、框选局部审查、人工反馈、Memory、报告过滤下载、流程评测、非 NDA、超限、解析失败、扫描 PDF 和服务错误提示。
 64. Web 前端提供审查、Memory、评测三个真实数据工作区；风险筛选、条款导航、风险证据和人工操作状态在重渲染后保持一致。
@@ -94,14 +94,13 @@
 1. 未使用 DeepSeek 对 23 份完整标注集完成两轮外部模型稳定性评测；当前真实运行只覆盖固定的 2 份合成 NDA 子集。
 2. 真实 DeepSeek 两轮的 Evidence span、Memory 一致性和结构化修复指标未全部达标，且两轮波动明显；不能声明 Agent 效果验收通过。
 3. 任务 9 Code Review 后的代码没有再次消耗 DeepSeek 复跑；现有外部结果对应 Review 前的未提交工作区，限制详见 `evaluation/release/agent-evolution-verification.md`。
-4. 尚未配置并使用独立的真实外部 Embedding Provider 对完整标注集复测；现有真实 DeepSeek Key 不能作为 Embedding 能力证明。
-5. OCR 尚未实现；扫描件会进入明确的 `PARSE_FAILED`，是否引入 OCR 必须另立迭代计划。
+4. OCR 尚未实现；扫描件会进入明确的 `PARSE_FAILED`，是否引入 OCR 必须另立迭代计划。
 
 迭代技术方案、实施顺序和验收口径见 `NEXT_PLAN.md`、`TASKS_2.md`、`UI_REDESIGN_PLAN.md`、`AGENT_EVOLUTION_PLAN.md`、`TASKS_AGENT.md` 和 `DEEPSEEK_TIMEOUT_PLAN.md`；这些文件保留计划形成过程，当前完成状态以代码、测试和本 README 为准。
 
-当前基础评测只验证流程跑通，不声明生产级准确率。生产默认 Embedding 路径为 `openai_compatible`；`local_sparse` 仅用于显式离线回归。人工相关条款集和 Memory 检索均运行真实工具路径，但离线结果仍不代表外部 Embedding 模型质量。真实 DeepSeek 子集运行验证了外部 LLM 调用链，不等于证明模型效果稳定或达到生产要求。
+当前基础评测只验证流程跑通，不声明生产级准确率。生产默认 Embedding 路径为 `openai_compatible`；`local_sparse` 仅用于显式离线回归。`BAAI/bge-m3` 已在固定 `effect-v3` 数据集上完成两轮真实外部 Embedding 评测，两轮检索指标一致且 Provider 调用全部成功；这仍不等于证明真实合同上的生产效果。真实 DeepSeek 子集运行验证了外部 LLM 调用链，也不等于证明模型效果稳定或达到生产要求。
 
-当前 `effect-v3` 包含 23 份合同、174 条条款、65 条唯一风险条款、20 组相关条款、20 组 Memory 检索/偏好对照和 10 组 Prompt Injection。量化结果以 `evaluation/release/model-embedding-memory-verification.md` 的实际运行记录为准；这些合成样本结果不能外推为生产准确率或真实外部模型效果。
+当前 `effect-v3` 包含 23 份合同、174 条条款、65 条唯一风险条款、20 组相关条款、20 组 Memory 检索/偏好对照和 10 组 Prompt Injection。量化结果以 `evaluation/release/model-embedding-memory-verification.md` 的实际运行记录为准；这些合成样本上的真实模型结果不能外推为真实合同或生产准确率。
 
 当前 14 个工具均已在 `tool_registry` 中注册契约。`classify_contract_type`、`extract_key_fields`、`analyze_risk`、`criticize_risk`、`plan_review_action` 和 `generate_revision` 具备 LLM Provider 调用边界；默认 `local_structured` 模式下 Critic 和 Planner 使用确定性策略，不记录为真实外部 LLM 调用。
 
@@ -141,7 +140,7 @@ Planner 只能选择白名单动作，Orchestrator 才能执行工具；Critic �
 
 可以表述为：已实现显式 Tool Registry、受控 Planner/Critic、确定性 Evidence 准入、混合检索、Memory 生命周期、可恢复执行和脱敏 Trace，并用真实 DeepSeek Key 在 2 份合成 NDA 子集上完成两次稳定性运行。
 
-不得表述为：完整标注集已通过 DeepSeek 效果验收、达到生产级准确率、Memory 已证明提升效果、真实外部 Embedding 已验证，或所有指标均已达标。
+不得表述为：完整标注集已通过 DeepSeek 效果验收、达到生产级准确率、Memory 已证明提升效果、真实外部 Embedding 已达到生产级效果，或所有指标均已达标。
 
 ## PDF 支持边界
 
@@ -260,7 +259,7 @@ http://127.0.0.1:8000/health
 25. 服务重启后使用原任务 ID 查询，确认任务、条款、风险、日志、事件和反馈仍然存在。
 26. 对非终态任务执行重启验证时，确认事件中出现 `recovery_started`，恢复记录包含恢复次数和起点，已完成工具没有重复日志。
 27. 显式设置 `REVIEW_AGENT_EMBEDDING_MODE=local_sparse` 完成离线审查，确认相关条款和 Memory 结果包含本地模型标识、固定维度、余弦相似度和排序因子，且执行日志标记 `local_sparse_no_external_embedding`；该验证不得写成真实模型结果。
-28. 配置 `openai_compatible` Embedding 后，确认日志显示实际模型、供应商请求 ID、输入数量、向量维度和耗时；让供应商返回错误时，确认任务进入 `RETRIEVAL_FAILED` 且没有 `lexical_fallback`。
+28. 配置 `openai_compatible` Embedding 后，确认日志显示实际模型、输入数量、向量维度和耗时，并在供应商提供请求 ID 时保存脱敏摘要；让供应商返回错误时，确认任务进入 `RETRIEVAL_FAILED` 且没有 `lexical_fallback`。
 29. 在评测面板切换“流程摘要”和“效果摘要”，确认两者结果和加载/失败状态彼此独立。
 30. 运行效果评测，确认返回 27 个指标，且每项包含样本数、通过数、失败数、阈值、达标状态和失败样本；样本数为 0 时必须显示“无样本”且不得视为达标。相关条款与 Memory 检索分别显示 Recall@K，Memory 同时显示 MRR 和向量覆盖率，Embedding 显示调用成功率。
 31. 确认效果摘要显示 Git、Playbook、标注、LLM 和 Embedding 版本，并在 `evaluation/effect/` 生成以评测 ID 命名的 JSON 和 Markdown 文件。
@@ -269,7 +268,7 @@ http://127.0.0.1:8000/health
 34. 使用加密、复杂字体映射失败或损坏 PDF 时，确认界面展示具体解析原因，不显示文档解析成功。
 35. 展开 Agent 执行记录，确认任务 Trace、工具 Step、恢复信息和 Provider 摘要可读；本地模式与 DeepSeek 真实调用明确区分，且不出现密钥、完整合同 Prompt 或前端堆栈。
 36. 确认配置错误、Planner 非法动作、一次检索修复、Injection 阻断、取消、超时和恢复均有浏览器验收状态，且没有把夹具状态写入生产任务 API。
-37. 运行 Playwright，确认 14 个 Chromium 主流程、错误流、Agent 状态、三视口和可访问性用例均实际通过；每次运行使用独立的数据库、上传、报告和评测目录，浏览器和测试数据写入本机缓存或已忽略目录，不进入 Git。
+37. 运行 Playwright，确认 15 个 Chromium 主流程、错误流、Agent 状态、三视口和可访问性用例均实际通过；每次运行使用独立的数据库、上传、报告和评测目录，浏览器和测试数据写入本机缓存或已忽略目录，不进入 Git。
 
 默认上传请求大小上限为 10 MB，可通过 `REVIEW_AGENT_MAX_UPLOAD_BYTES` 调整。
 默认 CORS 不允许通配来源；可通过逗号分隔的 `REVIEW_AGENT_ALLOWED_ORIGINS` 配置明确来源。

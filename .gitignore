@@ -38,3 +38,4 @@ evaluation/evaluation_summary.md
 evaluation/reports/
 evaluation/evaluation_memory.sqlite3
 evaluation/effect/
+evaluation/model_embedding_runs/
