@@ -50,6 +50,8 @@ Planner 只能使用现有白名单动作，不能自由执行任意工具。
 
 Docker 相关工作按用户最新指令后置，当前不安装、不维护 Compose，也不作为任务 1 的完成条件。PostgreSQL、Redis 等外部依赖的代码可以按顺序实现和执行不依赖 Docker 的验证；需要真实服务的集成验收必须保留为未验证，直到任务 10 明确选择并准备运行环境后再执行，不得以 Mock 或静态配置代替真实验收。
 
+本机后续项目依赖、模型缓存和运行数据统一使用专用根目录 `D:\demo-runtime`。当前目录划分为 `venv`、`data`、`models`、`cache`、`logs` 和 `temp`；新增工具不得默认安装或下载到 C 盘。代码和公共配置仍使用环境变量表达运行根目录，不把个人用户目录写入 Git。
+
 ## 6. 固定运行参数
 
 - RQ 本地默认 1 个 Worker。
@@ -111,6 +113,14 @@ Docker 相关工作按用户最新指令后置，当前不安装、不维护 Com
 - Docker Desktop 软件包已卸载，未提交的 Dockerfile、Compose 和相关配置说明已移除。
 - Docker 用户数据残留目录受当前命令安全策略限制未能自动递归删除，不能记录为“残留已全部清理”。
 
+### 任务 2：已完成
+
+- 使用 SQLAlchemy 2.0 描述 PostgreSQL `app` schema 的 10 张现有业务表，并使用 Alembic `20260724_01` 创建初始结构。
+- SQLite 迁移器只以 `mode=ro` 打开源库，支持 `dry-run` 和 `apply`；PostgreSQL 写入使用 `ON CONFLICT DO NOTHING`。
+- 迁移校验每表行数、任务 ID、每任务最大事件序号和规范化 JSON SHA-256，任何差异都会回滚当前事务。
+- 在 D 盘便携 PostgreSQL 17.10 上完成两次真实 apply。两次均验证 19 个任务、551 条条款、2058 条 Step Log、137 个持久事件及全部表哈希一致。
+- 现有应用尚未切换 PostgreSQL 运行仓储；一次性切换仍在任务 10，当前不维护双写路径。
+
 ### 下一个任务
 
-任务 2：建立 PostgreSQL 数据模型、Alembic 迁移和 SQLite 幂等迁移工具。真实 PostgreSQL 集成验收依赖后置运行环境；在环境可用前只能记录不依赖服务的验证结果。
+任务 3：接入 Redis、RQ Worker 和基于 PostgreSQL 查询游标的跨进程 SSE 事件流。

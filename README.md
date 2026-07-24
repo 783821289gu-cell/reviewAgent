@@ -302,3 +302,30 @@ Remove-Item Env:REVIEW_AGENT_LOAD_DOTENV
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_backend_tests.ps1 -PerModuleTimeoutSeconds 180
 ```
+
+## PostgreSQL 数据迁移
+
+Agent 框架迁移计划见 `AGENT_FRAMEWORK_MIGRATION_PLAN.md`。当前应用运行仓储仍是 SQLite；PostgreSQL schema 和数据迁移已经建立，但在最终直接切换前不会并行维护两套业务写入。
+
+本机便携 PostgreSQL 使用 `REVIEW_AGENT_RUNTIME_ROOT` 定位，不依赖 Docker。启停和状态检查：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\manage_postgres.ps1 -Action start
+powershell -ExecutionPolicy Bypass -File scripts\manage_postgres.ps1 -Action status
+powershell -ExecutionPolicy Bypass -File scripts\manage_postgres.ps1 -Action stop
+```
+
+数据库连接只通过 `REVIEW_AGENT_DATABASE_URL` 提供。先执行 Alembic，再从只读 SQLite 源运行 dry-run 或 apply：
+
+```powershell
+$env:PYTHONPATH = "backend\app"
+$runtimeRoot = $env:REVIEW_AGENT_RUNTIME_ROOT
+if (-not $runtimeRoot) {
+  $runtimeRoot = [Environment]::GetEnvironmentVariable("REVIEW_AGENT_RUNTIME_ROOT", "User")
+}
+& "$runtimeRoot\venv\Scripts\alembic.exe" -c alembic.ini upgrade head
+& "$runtimeRoot\venv\Scripts\python.exe" -m db.sqlite_migration --source backend\app\data\review_agent_memory.sqlite3 --mode dry-run
+& "$runtimeRoot\venv\Scripts\python.exe" -m db.sqlite_migration --source backend\app\data\review_agent_memory.sqlite3 --mode apply
+```
+
+迁移器校验每张表的行数、任务 ID、每任务最大事件序号和规范化 JSON 哈希。重复 apply 使用 `ON CONFLICT DO NOTHING`，不会覆盖已有不同数据；任何目标差异都会使事务失败，不能写成迁移成功。

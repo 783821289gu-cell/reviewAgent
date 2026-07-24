@@ -1,12 +1,34 @@
 param(
     [int]$PerModuleTimeoutSeconds = 180,
-    [string]$Pattern = "test_*.py"
+    [string]$Pattern = "test_*.py",
+    [string]$PythonPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $testsRoot = Join-Path $projectRoot "backend\tests"
-$pythonCommand = (Get-Command python -ErrorAction Stop).Source
+if (-not $PythonPath) {
+    $runtimeRoot = $env:REVIEW_AGENT_RUNTIME_ROOT
+    if (-not $runtimeRoot) {
+        $runtimeRoot = [Environment]::GetEnvironmentVariable(
+            "REVIEW_AGENT_RUNTIME_ROOT",
+            "User"
+        )
+    }
+    $runtimePython = if ($runtimeRoot) {
+        Join-Path $runtimeRoot "venv\Scripts\python.exe"
+    }
+    else {
+        ""
+    }
+    $PythonPath = if ($runtimePython -and (Test-Path -LiteralPath $runtimePython)) {
+        $runtimePython
+    }
+    else {
+        (Get-Command python -ErrorAction Stop).Source
+    }
+}
+$pythonCommand = (Get-Item -LiteralPath $PythonPath -ErrorAction Stop).FullName
 $originalEnvironment = @{
     REVIEW_AGENT_LOAD_DOTENV = $env:REVIEW_AGENT_LOAD_DOTENV
     REVIEW_AGENT_LLM_MODE = $env:REVIEW_AGENT_LLM_MODE

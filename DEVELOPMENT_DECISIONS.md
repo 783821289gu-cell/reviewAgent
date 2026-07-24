@@ -209,3 +209,11 @@ DeepSeek 任务安全上限独立调整为 3600 秒，本地任务仍为 900 秒
 用户决定把 Docker 工作后置。本轮因此删除尚未提交的 Dockerfile、Compose 和容器说明，卸载 Docker Desktop 软件包，把任务 1 收窄为固定依赖、测试隔离和可重复基线。后续 PostgreSQL、Redis 等实现仍按计划推进，但需要真实外部服务的结果必须标记为未验证，不能用 Mock 代替集成完成。运行环境选择和直接切换统一放到任务 10 前确认。
 
 原来的全量 `unittest discover` 曾运行超过 10 分钟，无法判断具体阻塞模块。新增脚本让 26 个模块分别在独立 Python 进程中运行，并给每个模块 60 秒上限；2026-07-24 的真实运行全部通过，总耗时约 183 秒，没有超时模块。Docker Desktop 已成功卸载，但当前命令安全策略拒绝递归删除 `C:\Program Files\Docker`、`C:\ProgramData\DockerDesktop` 和用户目录中的 Docker 残留，因此这些目录不能写成已清理。
+
+## 2026-07-24：数据迁移不能靠“插入没报错”判断成功
+
+SQLite 到 PostgreSQL 的迁移不仅有字段类型变化，JSON 文本进入 JSONB 后还会丢失原始空格和键顺序。如果直接比较原始字符串，相同数据会被误报不同；如果只看行数，错任务、缺事件或旧数据冲突又可能静默通过。
+
+本轮把迁移验证固定为四层：每张表行数、完整任务 ID、每任务最大事件序号和规范化 JSON SHA-256。SQLite 始终用 `mode=ro` 打开；PostgreSQL 使用 `ON CONFLICT DO NOTHING`，重复运行不覆盖旧值，目标存在不一致时由哈希校验使事务失败。真实源库的 10 张业务表已连续迁移两次，两次都验证 19 个任务、551 条条款、2058 条 Step Log 和 137 个事件一致。
+
+Docker 后置后，原生安装器又被 Windows UAC 阻塞。最终使用 EDB 官方 PostgreSQL 17.10 二进制归档，在 `D:\demo-runtime` 初始化普通用户可管理的本地集群；程序、数据、日志、Python 环境和下载缓存都留在 D 盘。它不是 Windows 服务，机器重启后通过 `scripts/manage_postgres.ps1` 显式启动，这个取舍避免管理员安装和 C 盘默认目录，也保留了可见的生命周期。

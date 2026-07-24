@@ -123,6 +123,7 @@ class Settings:
         )
     )
     memory_db_path: str = os.getenv("REVIEW_AGENT_MEMORY_DB_PATH", _default_memory_db_path())
+    database_url: str = os.getenv("REVIEW_AGENT_DATABASE_URL", "").strip()
     upload_dir: str = os.getenv("REVIEW_AGENT_UPLOAD_DIR", _default_upload_dir())
     runtime_log_file: str = os.getenv(
         "REVIEW_AGENT_RUNTIME_LOG_FILE",
