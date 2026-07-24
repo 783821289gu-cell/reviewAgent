@@ -11,6 +11,7 @@ from sqlalchemy import Connection, create_engine, inspect, select
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.engine import make_url
 
+from db.clause_text import clause_search_text
 from db.postgres_models import APP_SCHEMA, Base
 
 
@@ -52,6 +53,9 @@ JSON_COLUMNS = {
 
 BOOLEAN_COLUMNS = {
     "memory_items": {"include_in_report"},
+}
+TARGET_ONLY_COLUMNS = {
+    "clauses": {"search_text"},
 }
 
 
@@ -100,7 +104,7 @@ def read_sqlite_snapshot(source_path: str | Path) -> MigrationSnapshot:
         rows_by_table: dict[str, list[dict[str, Any]]] = {}
         for table_name in TABLE_ORDER:
             table = Base.metadata.tables[f"{APP_SCHEMA}.{table_name}"]
-            expected_columns = tuple(column.name for column in table.columns)
+            expected_columns = _migration_column_names(table_name, table)
             source_columns = {
                 str(row["name"])
                 for row in connection.execute(
@@ -187,7 +191,19 @@ def build_insert_statement(table_name: str, rows: list[dict[str, Any]]):
     if table_name not in TABLE_ORDER:
         raise ValueError(f"unsupported migration table: {table_name}")
     table = Base.metadata.tables[f"{APP_SCHEMA}.{table_name}"]
-    return postgres_insert(table).values(rows).on_conflict_do_nothing()
+    insert_rows = rows
+    if table_name == "clauses":
+        insert_rows = [
+            {
+                **row,
+                "search_text": clause_search_text(
+                    row,
+                    key_fields_name="key_fields_json",
+                ),
+            }
+            for row in rows
+        ]
+    return postgres_insert(table).values(insert_rows).on_conflict_do_nothing()
 
 
 def apply_sqlite_to_postgres(
@@ -227,7 +243,13 @@ def read_postgres_snapshot(connection: Connection) -> MigrationSnapshot:
     for table_name in TABLE_ORDER:
         table = Base.metadata.tables[f"{APP_SCHEMA}.{table_name}"]
         order_columns = tuple(table.primary_key.columns)
-        rows = connection.execute(select(table).order_by(*order_columns)).mappings()
+        selected_columns = [
+            table.c[column_name]
+            for column_name in _migration_column_names(table_name, table)
+        ]
+        rows = connection.execute(
+            select(*selected_columns).order_by(*order_columns)
+        ).mappings()
         rows_by_table[table_name] = [
             _normalize_row(table_name, dict(row)) for row in rows
         ]
@@ -290,6 +312,13 @@ def _normalize_row(
     for column_name in BOOLEAN_COLUMNS.get(table_name, set()):
         normalized[column_name] = bool(normalized.get(column_name))
     return normalized
+
+
+def _migration_column_names(table_name: str, table) -> tuple[str, ...]:
+    excluded = TARGET_ONLY_COLUMNS.get(table_name, set())
+    return tuple(
+        column.name for column in table.columns if column.name not in excluded
+    )
 
 
 def _canonical_hash(value: Any) -> str:

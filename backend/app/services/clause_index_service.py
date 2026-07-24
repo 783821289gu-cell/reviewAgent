@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from models.retrieval import RelatedClause
 from providers.embedding_provider import embedding_call_records_from_tool_input
 from services.embedding_service import cosine_similarity, embed_texts
@@ -5,6 +7,10 @@ from services.rerank_service import (
     build_keyword_query,
     keyword_candidate_factors,
     rerank_candidates,
+)
+from services.retrieval_runtime import (
+    current_related_clause_retriever,
+    current_retrieval_task_id,
 )
 
 
@@ -16,7 +22,33 @@ MIN_RERANK_SCORE = 0.12
 DYNAMIC_SCORE_BAND = 0.2
 
 
+@dataclass(frozen=True)
+class RelatedClauseRequest:
+    contract_type: str
+    current_clause: dict
+    clauses: list[dict]
+    risk_type: str
+    playbook_check_point: str
+    limit: int
+    query_adjustments: dict
+    embedding_cache: dict
+
+
 def retrieve_related_clauses(tool_input: dict) -> list[dict]:
+    request = _validated_request(tool_input)
+    if request is None:
+        return []
+    call_records = embedding_call_records_from_tool_input(tool_input)
+    retriever = current_related_clause_retriever()
+    if retriever is not None:
+        task_id = current_retrieval_task_id()
+        if not task_id:
+            raise RuntimeError("related clause retrieval task id is missing")
+        return retriever.retrieve(task_id, request, call_records=call_records)
+    return _retrieve_in_memory(request, call_records=call_records)
+
+
+def _validated_request(tool_input: dict) -> RelatedClauseRequest | None:
     contract_type = str(tool_input.get("contract_type", "")).strip()
     current_clause = tool_input.get("current_clause")
     clauses = tool_input.get("clauses")
@@ -30,7 +62,7 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
         limit = query_adjustments["top_k"]
 
     if contract_type != "NDA":
-        return []
+        return None
     if not isinstance(current_clause, dict):
         raise ValueError("current_clause must be a dict")
     if not isinstance(clauses, list):
@@ -40,7 +72,7 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
     if not playbook_check_point:
         raise ValueError("playbook_check_point is required")
     if limit <= 0:
-        return []
+        return None
 
     embedding_cache = tool_input.get("embedding_cache")
     if embedding_cache is None:
@@ -48,28 +80,48 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
     if not isinstance(embedding_cache, dict):
         raise ValueError("embedding_cache must be a dict")
 
-    current_clause_id = str(current_clause.get("clause_id", ""))
-    candidate_clauses = _current_contract_candidates(clauses, current_clause_id)
+    return RelatedClauseRequest(
+        contract_type=contract_type,
+        current_clause=current_clause,
+        clauses=clauses,
+        risk_type=risk_type,
+        playbook_check_point=playbook_check_point,
+        limit=limit,
+        query_adjustments=query_adjustments,
+        embedding_cache=embedding_cache,
+    )
+
+
+def _retrieve_in_memory(
+    request: RelatedClauseRequest,
+    *,
+    call_records=None,
+) -> list[dict]:
+    current_clause_id = str(request.current_clause.get("clause_id", ""))
+    candidate_clauses = _current_contract_candidates(
+        request.clauses,
+        current_clause_id,
+    )
     if not candidate_clauses:
         return []
 
-    additional_keywords = query_adjustments.get("additional_keywords") or []
+    additional_keywords = request.query_adjustments.get("additional_keywords") or []
     adjusted_check_point = " ".join(
-        [playbook_check_point, *additional_keywords]
+        [request.playbook_check_point, *additional_keywords]
     ).strip()
     keyword_query = build_keyword_query(
-        current_clause,
-        risk_type,
+        request.current_clause,
+        request.risk_type,
         adjusted_check_point,
     )
     query_context = {
         "query_version": "hybrid-retrieval-v1",
         "current_clause_id": current_clause_id,
-        "current_clause_type": current_clause.get("clause_type", ""),
-        "risk_type": risk_type,
-        "playbook_check_point": playbook_check_point,
-        "query_adjustments": query_adjustments,
-        "key_fields": current_clause.get("key_fields") or {},
+        "current_clause_type": request.current_clause.get("clause_type", ""),
+        "risk_type": request.risk_type,
+        "playbook_check_point": request.playbook_check_point,
+        "query_adjustments": request.query_adjustments,
+        "key_fields": request.current_clause.get("key_fields") or {},
         "keyword_terms": keyword_query["query_terms"],
         "playbook_keywords": keyword_query["playbook_terms"],
         "playbook_check_point_terms": keyword_query["check_point_terms"],
@@ -82,13 +134,17 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
         ],
     }
     texts = [
-        build_retrieval_query(current_clause, risk_type, adjusted_check_point),
+        build_retrieval_query(
+            request.current_clause,
+            request.risk_type,
+            adjusted_check_point,
+        ),
         *[build_clause_embedding_text(clause) for clause in candidate_clauses],
     ]
     embedding_batch = embed_texts(
         texts,
-        cache=embedding_cache,
-        call_records=embedding_call_records_from_tool_input(tool_input),
+        cache=request.embedding_cache,
+        call_records=call_records,
     )
     query_vector = embedding_batch.vectors[0]
 
@@ -102,19 +158,19 @@ def retrieve_related_clauses(tool_input: dict) -> list[dict]:
             }
         )
 
-    requested_top_k = min(limit, MAX_DYNAMIC_TOP_K)
+    requested_top_k = min(request.limit, MAX_DYNAMIC_TOP_K)
     recalled = _merge_recall_candidates(candidates, requested_top_k)
     reranked = rerank_candidates(
         recalled,
-        current_clause=current_clause,
-        risk_type=risk_type,
+        current_clause=request.current_clause,
+        risk_type=request.risk_type,
     )
     selected, score_cutoff = _dynamic_top_k(reranked, requested_top_k)
     query_context.update(
         {
             "candidate_count": len(candidate_clauses),
             "merged_candidate_count": len(recalled),
-            "requested_top_k": limit,
+            "requested_top_k": request.limit,
             "max_top_k": MAX_DYNAMIC_TOP_K,
             "effective_top_k": len(selected),
             "score_cutoff": score_cutoff,

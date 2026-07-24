@@ -265,18 +265,42 @@ class ReviewWorkerTest(unittest.TestCase):
         )
 
         checkpoint_manager = ReviewCheckpointManager.in_memory()
+        persistence = Mock()
+        persistence.engine.dialect.name = "postgresql"
         with patch.object(
             ReviewCheckpointManager,
             "postgres",
             return_value=checkpoint_manager,
-        ):
-            agent = _build_agent(Mock(), settings)
+        ), patch(
+            "workers.review_worker.PostgresHybridClauseRetriever"
+        ) as retriever_type:
+            agent = _build_agent(Mock(), persistence, settings)
 
         self.assertEqual(agent.node_timeout_seconds, 90)
         self.assertEqual(agent.checkpoint_backend, "memory")
+        retriever_type.assert_called_once()
         self.assertFalse(hasattr(agent, "task_timeout_seconds"))
         self.assertFalse(hasattr(agent, "deepseek_task_timeout_seconds"))
         agent.close()
+
+    def test_retriever_construction_failure_closes_checkpoint_manager(self):
+        settings = Settings(database_url="postgresql+psycopg://local/test")
+        checkpoint_manager = Mock()
+        persistence = Mock()
+        persistence.engine.dialect.name = "postgresql"
+
+        with patch.object(
+            ReviewCheckpointManager,
+            "postgres",
+            return_value=checkpoint_manager,
+        ), patch(
+            "workers.review_worker.PostgresHybridClauseRetriever",
+            side_effect=RuntimeError("retriever unavailable"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "retriever unavailable"):
+                _build_agent(Mock(), persistence, settings)
+
+        checkpoint_manager.close.assert_called_once()
 
     def test_pre_execution_failure_is_persisted_as_task_error(self):
         state = Mock()

@@ -328,6 +328,16 @@ if (-not $runtimeRoot) {
 
 迁移器校验每张表的行数、任务 ID、每任务最大事件序号和规范化 JSON 哈希。重复 apply 使用 `ON CONFLICT DO NOTHING`，不会覆盖已有不同数据；任何目标差异都会使事务失败，不能写成迁移成功。
 
+## pgvector 与本地 BGE 检索
+
+RQ Worker 的 `retrieve_related_clauses` 工具使用 PostgreSQL 混合检索：`BAAI/bge-m3` 1024 维向量召回 Top 20，`pg_trgm` 关键词召回 Top 20，RRF `k=60` 合并后由 `BAAI/bge-reranker-base` 重排 Top 20，最终最多返回 5 条。HNSW 参数固定为 `m=16`、`ef_construction=64`、`ef_search=80`，过滤查询启用 `iterative_scan=strict_order`。
+
+模型名称、精确 revision、设备、批大小和缓存目录通过 `REVIEW_AGENT_BGE_*` 配置；Embedding 与检索 Redis 缓存 TTL 分别由 `REVIEW_AGENT_EMBEDDING_CACHE_TTL_SECONDS`（默认 604800）和 `REVIEW_AGENT_RETRIEVAL_CACHE_TTL_SECONDS`（默认 3600）控制。缓存键包含模型、revision 和内容哈希，Redis 不可用时回源 PostgreSQL/BGE，不承担不可恢复数据。
+
+模型文件不进入仓库。本机通过 `REVIEW_AGENT_BGE_CACHE_DIR` 指向 `D:\demo-runtime\models\huggingface`。数据库必须已安装 `vector` 和 `pg_trgm` 扩展并执行 Alembic 到 head；缺少扩展时迁移应明确失败，不能降级成看似成功的非向量检索。
+
+当前只有 PostgreSQL/RQ 路径使用该检索器；默认 FastAPI 入口仍使用 SQLite 兼容路径，任务 10 一次性切换后才删除旧检索实现。真实 61 条款 CPU 验收完成了向量持久化、混合召回和 BGE 重排，约 25.9 秒；该结果不等于 DeepSeek 效果或真实标注集召回率已达标。
+
 ## Redis、RQ 与跨进程事件流
 
 任务 3 已建立独立的 PostgreSQL/RQ 执行组件，但现有 FastAPI 默认入口仍保持 SQLite + 进程内执行，最终只在任务 10 一次性切换，不维护长期双写。便携 Redis、AOF、Worker 日志和 PID 文件都位于 `REVIEW_AGENT_RUNTIME_ROOT`：

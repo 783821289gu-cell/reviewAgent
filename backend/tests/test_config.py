@@ -87,6 +87,12 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(settings.llm_max_concurrency, 2)
         self.assertTrue(settings.runtime_log_file.endswith("review_agent.log"))
         self.assertEqual(settings.runtime_log_level, "INFO")
+        self.assertEqual(settings.bge_embedding_model, "BAAI/bge-m3")
+        self.assertEqual(settings.bge_embedding_max_length, 1024)
+        self.assertEqual(settings.bge_reranker_model, "BAAI/bge-reranker-base")
+        self.assertEqual(settings.bge_reranker_max_length, 512)
+        self.assertEqual(settings.embedding_cache_ttl_seconds, 604800)
+        self.assertEqual(settings.retrieval_cache_ttl_seconds, 3600)
 
     def test_llm_concurrency_is_bounded(self):
         with patch.dict(

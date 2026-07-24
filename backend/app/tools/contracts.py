@@ -86,7 +86,7 @@ tool_contracts = {
         },
         output_schema={"related_clauses": "list"},
         calls_llm=False,
-        description="在当前合同内合并关键词与 Embedding 候选，去重后执行动态 Top-K 和可解释 rerank。",
+        description="在当前合同内执行向量与 pg_trgm 召回、RRF 合并和 BGE rerank，最多返回 5 条；兼容路径保留进程内检索。",
     ),
     "retrieve_memory": ToolContract(
         name="retrieve_memory",

@@ -2,6 +2,7 @@ from sqlalchemy import (
     Boolean,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     MetaData,
@@ -11,6 +12,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from pgvector.sqlalchemy import Vector
 
 
 APP_SCHEMA = "app"
@@ -94,10 +96,33 @@ class ClauseRow(Base):
     clause_type: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    search_text: Mapped[str] = mapped_column(Text, nullable=False)
     key_fields_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     source_location_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ClauseEmbeddingRow(Base):
+    __tablename__ = "clause_embeddings"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["task_id", "clause_id"],
+            [f"{APP_SCHEMA}.clauses.task_id", f"{APP_SCHEMA}.clauses.clause_id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    task_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    clause_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    embedding_model: Mapped[str] = mapped_column(Text, primary_key=True)
+    model_revision: Mapped[str] = mapped_column(Text, primary_key=True)
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(1024),
+        nullable=False,
+    )
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -249,6 +274,25 @@ Index(
     ReviewTaskRow.updated_at,
 )
 Index("idx_clauses_lookup", ClauseRow.task_id, ClauseRow.clause_id, ClauseRow.clause_type)
+Index(
+    "idx_clauses_search_trgm",
+    ClauseRow.search_text,
+    postgresql_using="gin",
+    postgresql_ops={"search_text": "gin_trgm_ops"},
+)
+Index(
+    "idx_clause_embeddings_lookup",
+    ClauseEmbeddingRow.task_id,
+    ClauseEmbeddingRow.embedding_model,
+    ClauseEmbeddingRow.model_revision,
+)
+Index(
+    "idx_clause_embeddings_hnsw",
+    ClauseEmbeddingRow.embedding,
+    postgresql_using="hnsw",
+    postgresql_ops={"embedding": "vector_cosine_ops"},
+    postgresql_with={"m": 16, "ef_construction": 64},
+)
 Index(
     "idx_risk_findings_lookup",
     RiskFindingRow.task_id,

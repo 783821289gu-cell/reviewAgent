@@ -9,6 +9,7 @@ from services.event_notification import RedisEventNotifier
 from models.review import ReviewStatus
 from services.checkpoint_service import ReviewCheckpointManager
 from services.event_service import ReviewEventStore, TERMINAL_STATUSES
+from services.postgres_clause_retrieval import PostgresHybridClauseRetriever
 from services.review_service import ReviewOrchestratorAgent
 from services.runtime_log_service import configure_runtime_logging, write_runtime_log
 from services.task_queue import WorkerHeartbeat
@@ -36,7 +37,7 @@ def execute_review_job(task_id: str) -> dict:
                 "executed": False,
             }
         content = persistence.load_upload(task_id)
-        agent = _build_agent(event_store, settings)
+        agent = _build_agent(event_store, persistence, settings)
         write_runtime_log(
             "rq_job_started",
             task_id=task_id,
@@ -68,9 +69,11 @@ def execute_review_job(task_id: str) -> dict:
             )
         raise
     finally:
-        if agent is not None:
-            agent.close()
-        persistence.dispose()
+        try:
+            if agent is not None:
+                agent.close()
+        finally:
+            persistence.dispose()
 
 
 def main() -> int:
@@ -109,17 +112,27 @@ def _build_persistence(settings: Settings) -> PostgresReviewPersistence:
 
 def _build_agent(
     event_store: ReviewEventStore,
+    persistence: PostgresReviewPersistence,
     settings: Settings,
 ) -> ReviewOrchestratorAgent:
     checkpoint_manager = ReviewCheckpointManager.postgres(settings.database_url)
+    related_clause_retriever = None
     try:
+        related_clause_retriever = PostgresHybridClauseRetriever(
+            persistence.engine,
+            Redis.from_url(settings.redis_url),
+            settings,
+        )
         return ReviewOrchestratorAgent(
             event_store,
             node_timeout_seconds=settings.node_timeout_seconds,
             llm_max_concurrency=settings.llm_max_concurrency,
             checkpoint_manager=checkpoint_manager,
+            related_clause_retriever=related_clause_retriever,
         )
     except Exception:
+        if related_clause_retriever is not None:
+            related_clause_retriever.close()
         checkpoint_manager.close()
         raise
 

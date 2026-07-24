@@ -156,6 +156,18 @@ Docker 相关工作按用户最新指令后置，当前不安装、不维护 Com
 - 额外完成一次真实 PostgreSQL -> RQ Worker -> LangGraph interrupt -> 新 Agent/新连接 -> `Command(resume)` 验收：任务产生 24 个连续持久事件并到达 `MEMORY_UPDATED`，Checkpoint 仅出现控制通道；测试任务、Checkpoint、RQ Job、上传副本和 Worker 均已清理。
 - 当前 FastAPI 默认业务入口仍使用 SQLite 和进程内 Checkpointer；PostgreSQL/RQ/PostgresSaver 的一次性默认切换仍保留到任务 10，不维护双写路径。
 
+### 任务 6：已完成
+
+- 固定 `pgvector==0.4.2` 与 `sentence-transformers==5.1.2`。Embedding 使用 `BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181`，输出 1024 维归一化向量；rerank 使用 `BAAI/bge-reranker-base@2cfc18c9415c912f9d8155881c133215df768a70`，最大长度 512。
+- PostgreSQL 增加 `vector`、`pg_trgm`、条款检索文本和版本化 `clause_embeddings`。向量与关键词各召回 Top 20，使用 RRF `k=60` 合并，BGE 重排 Top 20，最终最多返回 5 条；HNSW 固定 `m=16`、`ef_construction=64`、`ef_search=80`。
+- RQ Worker 通过现有显式 `retrieve_related_clauses` 工具绑定 PostgreSQL 检索器；默认 FastAPI 兼容路径仍使用原进程内检索，直到任务 10 一次性切换，不维护业务双写。
+- Redis Embedding 缓存固定 7 天，检索缓存固定 1 小时；缓存键包含模型、精确 revision、内容或查询哈希。Redis 异常或缓存负载不合法时记录日志并回源，不把缓存作为业务真相。
+- SQLite 迁移把 `search_text` 作为 PostgreSQL 派生列，不改变源库快照哈希。Alembic 已在带 pgvector 0.8.3 的 PostgreSQL 16 实例完成空库升级、降级后重升和漂移检查；GIN `gin_trgm_ops` 与 HNSW `vector_cosine_ops` 索引参数已从真实数据库确认。
+- Code Review 修复了 Core Connection 查询实体导致的行形状错误、全局 HNSW 先近邻后按任务过滤造成召回不足、损坏缓存被直接返回、缓存向量未校验、构造失败资源泄漏和关闭顺序问题。过滤式 HNSW 查询现在使用 `iterative_scan=strict_order`。
+- 两个模型权重保存在 `D:\demo-runtime\models\huggingface` 并按固定 revision 校验。真实 CPU 测试中，首次 BGE Embedding 模型加载并编码 2 条文本约 56.9 秒；61 条款完整建索引、混合召回和重排约 25.9 秒，写入 61 条向量，未触发 90 秒节点超时。
+- 任务 6 相关测试、配置/迁移/队列/Checkpoint 外部测试均通过；31 个后端测试模块在每模块 180 秒限制下全部通过，总耗时 250.9 秒。真实 PostgreSQL Alembic 漂移检查返回 `No new upgrade operations detected`。
+- 以上真实模型结果验证本地 BGE 与检索基础设施，不代表 DeepSeek 风险分析效果或真实标注集召回率已经达标。默认应用入口和旧检索清理仍属于任务 10。
+
 ### 下一个任务
 
-任务 6：实现 pgvector 混合检索与 BGE rerank。
+任务 7：实现 LangGraph Postgres Store Memory。

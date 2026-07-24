@@ -45,6 +45,13 @@ def _default_runtime_log_file() -> str:
     return os.path.join(os.path.dirname(__file__), "logs", "review_agent.log")
 
 
+def _default_bge_cache_dir() -> str:
+    runtime_root = os.getenv("REVIEW_AGENT_RUNTIME_ROOT", "").strip()
+    if runtime_root:
+        return str(Path(runtime_root) / "models" / "huggingface")
+    return str(PROJECT_ROOT / ".cache" / "huggingface")
+
+
 def _allowed_origins() -> tuple[str, ...]:
     raw_value = os.getenv("REVIEW_AGENT_ALLOWED_ORIGINS", "")
     origins = tuple(origin.strip().rstrip("/") for origin in raw_value.split(",") if origin.strip())
@@ -114,6 +121,63 @@ class Settings:
     embedding_model: str = os.getenv("REVIEW_AGENT_EMBEDDING_MODEL", "").strip()
     embedding_timeout_seconds: float = field(
         default_factory=lambda: _positive_float("REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS", "60")
+    )
+    bge_cache_dir: str = os.getenv(
+        "REVIEW_AGENT_BGE_CACHE_DIR",
+        _default_bge_cache_dir(),
+    )
+    bge_device: str = os.getenv("REVIEW_AGENT_BGE_DEVICE", "cpu").strip() or "cpu"
+    bge_embedding_model: str = os.getenv(
+        "REVIEW_AGENT_BGE_EMBEDDING_MODEL",
+        "BAAI/bge-m3",
+    ).strip()
+    bge_embedding_revision: str = os.getenv(
+        "REVIEW_AGENT_BGE_EMBEDDING_REVISION",
+        "5617a9f61b028005a4858fdac845db406aefb181",
+    ).strip()
+    bge_embedding_max_length: int = field(
+        default_factory=lambda: _positive_int(
+            "REVIEW_AGENT_BGE_EMBEDDING_MAX_LENGTH",
+            "1024",
+        )
+    )
+    bge_embedding_batch_size: int = field(
+        default_factory=lambda: _positive_int(
+            "REVIEW_AGENT_BGE_EMBEDDING_BATCH_SIZE",
+            "8",
+        )
+    )
+    bge_reranker_model: str = os.getenv(
+        "REVIEW_AGENT_BGE_RERANKER_MODEL",
+        "BAAI/bge-reranker-base",
+    ).strip()
+    bge_reranker_revision: str = os.getenv(
+        "REVIEW_AGENT_BGE_RERANKER_REVISION",
+        "2cfc18c9415c912f9d8155881c133215df768a70",
+    ).strip()
+    bge_reranker_max_length: int = field(
+        default_factory=lambda: _positive_int(
+            "REVIEW_AGENT_BGE_RERANKER_MAX_LENGTH",
+            "512",
+        )
+    )
+    bge_reranker_batch_size: int = field(
+        default_factory=lambda: _positive_int(
+            "REVIEW_AGENT_BGE_RERANKER_BATCH_SIZE",
+            "8",
+        )
+    )
+    embedding_cache_ttl_seconds: int = field(
+        default_factory=lambda: _positive_int(
+            "REVIEW_AGENT_EMBEDDING_CACHE_TTL_SECONDS",
+            "604800",
+        )
+    )
+    retrieval_cache_ttl_seconds: int = field(
+        default_factory=lambda: _positive_int(
+            "REVIEW_AGENT_RETRIEVAL_CACHE_TTL_SECONDS",
+            "3600",
+        )
     )
     node_timeout_seconds: float = field(
         default_factory=lambda: _positive_float("REVIEW_AGENT_NODE_TIMEOUT_SECONDS", "90")

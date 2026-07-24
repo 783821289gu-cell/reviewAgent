@@ -10,6 +10,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
+from pgvector.sqlalchemy import Vector
 
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
@@ -36,7 +37,10 @@ class SqlitePostgresMigrationTest(unittest.TestCase):
             if table.schema == APP_SCHEMA
         }
 
-        self.assertEqual(table_names, set(TABLE_ORDER))
+        self.assertEqual(
+            table_names,
+            {*TABLE_ORDER, "clause_embeddings"},
+        )
         self.assertTrue(
             isinstance(
                 Base.metadata.tables[f"{APP_SCHEMA}.review_tasks"].c.progress_json.type,
@@ -47,6 +51,12 @@ class SqlitePostgresMigrationTest(unittest.TestCase):
             Base.metadata.tables[
                 f"{APP_SCHEMA}.semantic_preference_embeddings"
             ].c.preference_id.foreign_keys
+        )
+        self.assertIsInstance(
+            Base.metadata.tables[
+                f"{APP_SCHEMA}.clause_embeddings"
+            ].c.embedding.type,
+            Vector,
         )
 
     def test_alembic_offline_sql_creates_schema_and_business_tables(self):
@@ -64,6 +74,11 @@ class SqlitePostgresMigrationTest(unittest.TestCase):
         self.assertIn("CREATE SCHEMA IF NOT EXISTS app", sql)
         for table_name in TABLE_ORDER:
             self.assertIn(f"CREATE TABLE app.{table_name}", sql)
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS vector", sql)
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS pg_trgm", sql)
+        self.assertIn("CREATE TABLE app.clause_embeddings", sql)
+        self.assertIn("USING hnsw", sql)
+        self.assertIn("vector_cosine_ops", sql)
 
     def test_dry_run_is_read_only_and_normalizes_json_before_hashing(self):
         with TemporaryDirectory() as temp_dir:

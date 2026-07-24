@@ -6,6 +6,7 @@ from sqlalchemy import Connection, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.engine import Engine
 
+from db.clause_text import clause_search_text
 from db.postgres_models import (
     ClauseRow,
     DocumentRow,
@@ -278,6 +279,7 @@ class PostgresDocumentRepository:
             clause_type=str(clause.get("clause_type", "")),
             title=str(clause.get("title", "")),
             text=str(clause.get("text", "")),
+            search_text=clause_search_text(clause),
             key_fields_json=clause.get("key_fields") or {},
             source_location_json=clause.get("source_location") or {},
             payload_json=clause,
@@ -291,6 +293,7 @@ class PostgresDocumentRepository:
                     "clause_type": statement.excluded.clause_type,
                     "title": statement.excluded.title,
                     "text": statement.excluded.text,
+                    "search_text": statement.excluded.search_text,
                     "key_fields_json": statement.excluded.key_fields_json,
                     "source_location_json": statement.excluded.source_location_json,
                     "payload_json": statement.excluded.payload_json,

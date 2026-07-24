@@ -261,3 +261,17 @@ Windows 便携 Redis 本身也暴露了两个运行细节。该发行版基于 M
 最后，单条 psycopg 连接在最长 7200 秒任务中可能长时间空闲，业务结束后再写 Checkpoint 时存在连接已失效的风险。既然已经引入 `psycopg-pool`，最终让每个 Agent 使用 1 至 2 条连接的小连接池，并在借出连接时做健康检查。接入后第一次执行 `alembic check` 又发现 Alembic 会把 `langgraph` schema 中的包管理表识别为“模型已删除”，未来自动生成迁移可能误删 Checkpoint。现在 Alembic 显式只比较 `app` schema，PostgresSaver 继续独立维护自己的 schema。真实 PostgreSQL 重启恢复、跨进程 RQ 中断与反馈继续都已通过；这次验收使用本地结构化 LLM，只验证持久控制链路，不代表 DeepSeek 效果。
 
 最终全量测试还暴露了一个关闭顺序竞态。兼容 FastAPI 路径通过共享执行器恢复任务，后台线程先写入终态，再在 `finally` 中释放执行租约和 SQLite 句柄；测试看到终态后立即关闭应用，旧的 `Agent.close()` 只关闭 Checkpointer，临时数据库偶发仍被后台 Future 占用。现在每个 Agent 只跟踪自己提交的兼容 Future，lifespan 关闭时等待这些 Future 完成后再释放 Checkpointer，不关闭全局执行器，也不等待其他 Agent 的任务。该恢复模块连续运行 5 次通过，随后全量测试再次通过。
+
+## 2026-07-24：混合检索不能只把向量查询和关键词查询拼在一起
+
+原进程内检索能组合 Embedding 与关键词，但条款向量和索引都依赖单进程内存，Worker 重启后需要重新计算，也无法让 PostgreSQL 负责过滤和近邻检索。迁移后把条款检索文本和 1024 维向量持久化到 PostgreSQL：`bge-m3` 与 `pg_trgm` 各召回 20 条，RRF 使用 `k=60` 合并，再由 `bge-reranker-base` 重排前 20 条并最多返回 5 条。模型与 revision 都进入向量主键和缓存键，内容哈希变化才重算，避免模型升级后静默复用旧向量。
+
+第一版真实查询使用一个全局 HNSW 索引，再按 `task_id`、模型和 revision 过滤。普通 HNSW 会先取近邻再应用过滤，其他任务的向量可能占满候选，当前合同即使有足够相关条款也只能返回少量结果。最终把 `hnsw.ef_search` 固定为 80，并为过滤查询设置 `hnsw.iterative_scan=strict_order`，让 pgvector 在过滤后候选不足时继续扫描。GIN `gin_trgm_ops` 和 HNSW `vector_cosine_ops` 的参数都从真实 PostgreSQL 索引定义验证，不用 ORM 元数据代替数据库事实。
+
+真实数据库还发现了 Mock 没暴露的行形状问题。`select(ClauseRow, content_hash)` 通过 Core `Engine.connect()` 执行时，实体会展开为所有列，代码却按两个值解包，首次建索引直接失败。查询改为显式选择 `clause_id`、`payload_json` 和 `content_hash`，并增加 Core Connection 回归测试。这个问题说明数据库路径不能只依赖 SQL 编译和 Mock，至少要执行一次真实写入、召回、缓存命中和迁移升降级。
+
+Redis 缓存也没有被当成可信状态。Embedding 缓存命中后会校验 1024 维、有限数值和非零范数并重新归一化；检索缓存会校验模型、revision、维度和查询上下文。损坏或过期负载直接回源，Redis 异常只记录独立运行日志，不阻止 PostgreSQL/BGE 主路径。Embedding TTL 为 7 天，检索 TTL 为 1 小时，这两个缓存只减少计算和延迟，不决定最终业务状态。
+
+本机 PostgreSQL 17 没有可用的 pgvector 扩展，且当前不采用 Docker。为避免改坏已存在的数据集，最终在 `D:\demo-runtime` 建立独立 PostgreSQL 16 + pgvector 0.8.3 验证实例，完成空库 upgrade、downgrade 后重升、`alembic check` 和真实索引检查。模型下载也固定到 D 盘，并按 Hugging Face revision 和文件 SHA-256 校验；网络代理多次中断时只续传官方固定 revision 文件，没有把不完整权重当成可用模型。
+
+CPU 首次加载 `bge-m3` 并编码 2 条文本约 56.9 秒，属于模型冷启动而不是单次条款推理耗时。模型加载后，61 条款完整建索引、混合召回和 BGE 重排约 25.9 秒，写入 61 条向量，未触发 90 秒节点边界。这个结果只证明当前机器上的 BGE 基础路径可运行；没有真实标注集对照，因此不能写成 Recall 已达标，也不能替代 DeepSeek 风险分析验收。
