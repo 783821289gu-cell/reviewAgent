@@ -296,3 +296,9 @@ Remove-Item Env:REVIEW_AGENT_LOAD_DOTENV
 ```
 
 后端测试和 Playwright 测试服务显式设置 `REVIEW_AGENT_LOAD_DOTENV=0`，避免本机 `.env` 中的真实 Provider、数据库和输出目录污染隔离测试；应用正常启动时不设置该变量，会自动加载 `.env`。
+
+当全量 `unittest discover` 无法在合理时间内结束时，使用逐模块超时入口定位具体模块；该脚本不会把超时当作通过：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_backend_tests.ps1 -PerModuleTimeoutSeconds 180
+```

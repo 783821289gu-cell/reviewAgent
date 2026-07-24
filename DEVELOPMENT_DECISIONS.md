@@ -201,3 +201,11 @@ DeepSeek 任务安全上限独立调整为 3600 秒，本地任务仍为 900 秒
 配置独立 Embedding Provider 后，先用单文本调用确认 `BAAI/bge-m3` 返回 1024 维向量，再固定 `effect-v3` 数据集连续执行两轮。评测时把 LLM 强制设为 `local_structured`，目的是隔离 Embedding 变量，避免把 DeepSeek 的推理波动混入检索模型比较。两轮各有 164 次真实外部 Embedding 调用且全部成功，P95 分别为 390 ms 和 352 ms；相关条款 Recall@1、Memory Recall@3、Memory MRR、向量覆盖率和调用成功率均为 1.0。
 
 最容易误判的地方是“检索指标满分”看起来像系统已经完成效果验收。实际上风险 Recall 和 Evidence span 命中率仍为 0.5231，Memory 偏好一致性仍为 0.55，两轮摘要都只能是 `completed_with_failures`。因此本轮结论限定为“真实 Embedding 路径和合成检索集稳定通过”，不能扩写成“Agent 达到生产级准确率”。供应商也没有返回请求 ID，成本单价未配置，这两项保持不可用，不生成占位证据。
+
+## 2026-07-24：Docker 前置阻塞了迁移，但不是当前最有价值的工作
+
+迁移最初把 Docker Desktop、PostgreSQL/pgvector、Redis 和 API Compose 健康检查放在任务 1。实际执行时 Docker Desktop 软件包能够安装，但 Windows 尚未启用 WSL 2，Docker Engine 无法启动。继续把 Docker 作为第一个完成条件，只会反复停在系统管理员权限和重启，不会验证任何 Agent 业务迁移。
+
+用户决定把 Docker 工作后置。本轮因此删除尚未提交的 Dockerfile、Compose 和容器说明，卸载 Docker Desktop 软件包，把任务 1 收窄为固定依赖、测试隔离和可重复基线。后续 PostgreSQL、Redis 等实现仍按计划推进，但需要真实外部服务的结果必须标记为未验证，不能用 Mock 代替集成完成。运行环境选择和直接切换统一放到任务 10 前确认。
+
+原来的全量 `unittest discover` 曾运行超过 10 分钟，无法判断具体阻塞模块。新增脚本让 26 个模块分别在独立 Python 进程中运行，并给每个模块 60 秒上限；2026-07-24 的真实运行全部通过，总耗时约 183 秒，没有超时模块。Docker Desktop 已成功卸载，但当前命令安全策略拒绝递归删除 `C:\Program Files\Docker`、`C:\ProgramData\DockerDesktop` 和用户目录中的 Docker 残留，因此这些目录不能写成已清理。
