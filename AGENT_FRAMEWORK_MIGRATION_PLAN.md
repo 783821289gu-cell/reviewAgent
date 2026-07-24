@@ -143,6 +143,19 @@ Docker 相关工作按用户最新指令后置，当前不安装、不维护 Com
 - 29 个后端测试模块在每模块 180 秒限制下全部通过，总耗时 203.2 秒；真实 PostgreSQL/Redis 事件集成测试单独通过。使用用户 PDF 走 PostgreSQL -> RQ -> LangGraph -> PostgreSQL 本地模式全链路，约 105.6 秒到达 `EVIDENCE_VERIFIED`，解析 61 条条款、形成 6 条风险并持久化 205 个严格递增事件。
 - 真实 PDF 本轮只验证本地结构化 LLM 的编排和持久化链路，不冒充 DeepSeek 效果验收；测试任务、RQ Job、上传副本和 Worker 均已清理。
 
+### 任务 5：已完成
+
+- 固定 `langgraph-checkpoint-postgres==3.1.0` 与 `psycopg-pool==3.3.1`。Postgres Checkpointer 使用独立 `langgraph` schema；每个 Agent 使用最小 1、最大 2 条连接的连接池，并在借出连接时执行健康检查。Alembic 只管理 `app` schema，不会把包管理的 Checkpoint 表识别为待删除对象。
+- `thread_id` 固定等于 `task_id`。持久控制图只保存任务 ID、执行阶段、业务状态、待处理风险 ID 和恢复次数；合同正文、条款、风险详情和工具结果仍只由 PostgreSQL `app` schema 保存。
+- 业务图与持久控制图分开执行，避免 LangGraph 运行上下文将完整业务状态带入 Checkpoint。业务执行前后记录紧凑游标，人工复核节点使用 `interrupt()` 暂停。
+- 人工反馈继续沿用已有采纳、忽略、修改等级、修改建议和证据补充接口。业务反馈先幂等写入 PostgreSQL/Memory，再使用 `Command(resume=...)` 推进同一线程；仍有风险时再次中断，全部处理后进入 `MEMORY_UPDATED`。
+- 人工反馈的控制图继续不再依赖原始上传文件。Checkpoint 恢复失败会保留已经成功提交的业务反馈并显式报错，重试可以继续推进游标，不会把业务状态覆盖成伪造的 `TASK_ERROR`。
+- 取消仍由活动图的执行控制在节点和工具边界停止，人工恢复从 PostgreSQL 业务检查点启动新的受控执行阶段；两者均保留现有 REST 契约、恢复预算和稳定幂等键。
+- Code Review 实际发现并修复了六类问题：完整业务通道意外进入 Checkpoint、在单节点内循环调用动态 `interrupt()` 导致重放位置不稳定、反馈继续错误依赖上传文件、控制恢复异常覆盖已提交反馈、长任务使用单条空闲 PostgreSQL 连接，以及 Alembic 误识别包管理表。最终采用业务/控制图分离、条件自环、业务真相优先、健康检查连接池和 schema 管理边界。
+- 最终全量验证还复现了兼容线程 Future 晚于终态释放 SQLite 的竞态；Agent 关闭现在等待自身后台执行结束。对应恢复测试连续运行 5 次通过，随后 30 个后端测试模块在每模块 180 秒限制下全部通过，总耗时 203.6 秒。真实 PostgreSQL Checkpointer 重启恢复和 PostgreSQL/Redis 事件测试分别通过。
+- 额外完成一次真实 PostgreSQL -> RQ Worker -> LangGraph interrupt -> 新 Agent/新连接 -> `Command(resume)` 验收：任务产生 24 个连续持久事件并到达 `MEMORY_UPDATED`，Checkpoint 仅出现控制通道；测试任务、Checkpoint、RQ Job、上传副本和 Worker 均已清理。
+- 当前 FastAPI 默认业务入口仍使用 SQLite 和进程内 Checkpointer；PostgreSQL/RQ/PostgresSaver 的一次性默认切换仍保留到任务 10，不维护双写路径。
+
 ### 下一个任务
 
-任务 5：接入 Postgres Checkpointer，并将恢复、取消和人工复核改为 LangGraph 持久中断与恢复。
+任务 6：实现 pgvector 混合检索与 BGE rerank。

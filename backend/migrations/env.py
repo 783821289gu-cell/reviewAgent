@@ -24,6 +24,7 @@ if database_url:
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
+MANAGED_SCHEMAS = {None, "app"}
 
 
 def _configured_url() -> str:
@@ -35,6 +36,12 @@ def _configured_url() -> str:
     return value
 
 
+def _include_name(name, type_, parent_names) -> bool:
+    if type_ == "schema":
+        return name in MANAGED_SCHEMAS
+    return True
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=_configured_url(),
@@ -42,6 +49,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         include_schemas=True,
+        include_name=_include_name,
         compare_type=True,
     )
     with context.begin_transaction():
@@ -60,6 +68,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             include_schemas=True,
+            include_name=_include_name,
             compare_type=True,
         )
         with context.begin_transaction():

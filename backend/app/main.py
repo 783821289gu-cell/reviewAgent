@@ -37,17 +37,22 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.accepting_tasks = False
-        loaded_states = event_store.load_persisted()
-        app.state.materialized_evidence_task_ids = (
-            app.state.review_agent.materialize_legacy_evidence_failures(loaded_states)
-        )
-        app.state.recovered_task_ids = app.state.review_agent.recover_pending_tasks()
-        app.state.accepting_tasks = True
         try:
+            loaded_states = event_store.load_persisted()
+            app.state.materialized_evidence_task_ids = (
+                app.state.review_agent.materialize_legacy_evidence_failures(
+                    loaded_states
+                )
+            )
+            app.state.recovered_task_ids = (
+                app.state.review_agent.recover_pending_tasks()
+            )
+            app.state.accepting_tasks = True
             yield
         finally:
             app.state.accepting_tasks = False
             event_store.notify_waiters()
+            app.state.review_agent.close()
 
     application = FastAPI(title="ContractReviewAgent", lifespan=lifespan)
     application.state.settings = app_settings

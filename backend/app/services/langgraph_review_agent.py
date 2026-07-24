@@ -1,7 +1,10 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
+from threading import Lock
 from time import perf_counter
 from uuid import uuid4
+
+from langgraph.types import Command, interrupt
 
 from db.repositories import RecoveryError
 from models.contract import clause_from_dict, contract_document_from_dict
@@ -23,6 +26,7 @@ from providers.llm_provider import (
     reset_llm_mode,
 )
 from services.context_builder import build_review_context
+from services.checkpoint_service import ReviewCheckpointManager
 from services.log_service import (
     ToolExecutionControl,
     bind_execution_control,
@@ -30,7 +34,12 @@ from services.log_service import (
     reset_execution_control,
 )
 from services.planner_service import PlannerOutputInvalidError
-from services.review_workflow import ReviewGraphState, build_review_graph
+from services.review_workflow import (
+    ReviewControlState,
+    ReviewGraphState,
+    build_review_control_graph,
+    build_review_graph,
+)
 from services.risk_critic import CriticOutputInvalidError
 from services.runtime_log_service import write_runtime_log
 from tools.registry import tool_registry
@@ -69,6 +78,7 @@ _COMPATIBILITY_EXECUTOR = ThreadPoolExecutor(
     max_workers=4,
     thread_name_prefix="review-langgraph",
 )
+_INITIAL_CONTROL_INPUT = object()
 
 
 @dataclass
@@ -98,6 +108,7 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
         *,
         node_timeout_seconds: float = 90.0,
         llm_max_concurrency: int = 2,
+        checkpoint_manager: ReviewCheckpointManager | None = None,
     ):
         init_kwargs = {
             "node_timeout_seconds": node_timeout_seconds,
@@ -109,11 +120,36 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
             super().__init__(event_store, **init_kwargs)
         del self.task_timeout_seconds
         del self.deepseek_task_timeout_seconds
+        self._checkpoint_manager = (
+            checkpoint_manager or ReviewCheckpointManager.in_memory()
+        )
         self._graph = build_review_graph(self, _ReviewRuntime)
+        self._control_graph = build_review_control_graph(
+            self,
+            _ReviewRuntime,
+            self._checkpoint_manager.saver,
+        )
+        self._execution_futures: set[Future] = set()
+        self._execution_futures_lock = Lock()
 
     @property
     def graph(self):
         return self._graph
+
+    @property
+    def control_graph(self):
+        return self._control_graph
+
+    @property
+    def checkpoint_backend(self) -> str:
+        return self._checkpoint_manager.backend
+
+    def close(self) -> None:
+        with self._execution_futures_lock:
+            active_futures = tuple(self._execution_futures)
+        if active_futures:
+            wait(active_futures)
+        self._checkpoint_manager.close()
 
     def start(
         self,
@@ -185,6 +221,7 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
                     state.task_id,
                     content,
                     execution_owner,
+                    control_input=None,
                 )
             else:
                 self.run(
@@ -192,6 +229,7 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
                     content,
                     execution_owner,
                     True,
+                    None,
                 )
         return recovered_task_ids
 
@@ -225,8 +263,47 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
                 operator_action=operator_action,
                 reason=reason,
             )
-            self._submit_execution(task_id, content, execution_owner)
+            self._submit_execution(
+                task_id,
+                content,
+                execution_owner,
+                control_input=None,
+            )
             return state
+        except Exception:
+            self.event_store.release_execution(task_id, execution_owner)
+            raise
+
+    def resume_human_review(
+        self,
+        task_id: str,
+        resume_payload: dict,
+    ) -> AgentState:
+        current = self.event_store.get_task(task_id)
+        if current is None:
+            raise ValueError(f"task not found: {task_id}")
+        config = self._control_config(task_id, current)
+        snapshot = self._control_graph.get_state(config)
+        interrupts = [
+            item
+            for task in snapshot.tasks
+            for item in task.interrupts
+        ]
+        if not interrupts:
+            return current
+        execution_owner = self._acquire_execution(task_id)
+        try:
+            self.run(
+                task_id,
+                b"",
+                execution_owner,
+                True,
+                Command(resume=dict(resume_payload)),
+            )
+            resumed = self.event_store.get_task(task_id)
+            if resumed is None:
+                raise ValueError(f"task not found after resume: {task_id}")
+            return resumed
         except Exception:
             self.event_store.release_execution(task_id, execution_owner)
             raise
@@ -237,6 +314,7 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
         content: bytes,
         execution_owner: str = "",
         execution_acquired: bool = False,
+        control_input=_INITIAL_CONTROL_INPUT,
     ) -> None:
         resolved_owner = execution_owner or f"exec_{uuid4().hex}"
         if not execution_acquired and not self.event_store.try_acquire_execution(
@@ -279,22 +357,30 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
             workflow="langgraph",
         )
         try:
-            initial_state: ReviewGraphState = {
-                "task_id": task_id,
-                "terminal": False,
-                "risk_results": [],
-            }
-            for update in self._graph.stream(
-                initial_state,
-                context=runtime,
-                config={"max_concurrency": self._batch_width(state)},
-                stream_mode="updates",
-            ):
-                risk_update = update.get("risk_subgraph")
-                if not isinstance(risk_update, dict):
-                    continue
-                for result in risk_update.get("risk_results") or []:
-                    self._record_branch_progress(runtime, result)
+            if isinstance(control_input, Command):
+                self._stream_control(runtime, control_input)
+            else:
+                self._stream_control(
+                    runtime,
+                    self._control_state(runtime.state, "execute"),
+                )
+                self._execute_business_graph(runtime)
+                current = self.event_store.get_task(task_id)
+                if current is None:
+                    raise ValueError(
+                        f"task not found after graph execution: {task_id}"
+                    )
+                pending_risk_ids = self._pending_risk_ids(current)
+                phase = (
+                    "human_review"
+                    if current.status == ReviewStatus.HUMAN_REVIEW_PENDING
+                    and pending_risk_ids
+                    else "complete"
+                )
+                self._stream_control(
+                    runtime,
+                    self._control_state(current, phase),
+                )
         except TaskCancelledError:
             self.event_store.finalize_cancel(
                 task_id,
@@ -346,6 +432,8 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
                 error_type=exc.__class__.__name__,
                 error_message=str(exc)[:500],
             )
+            if isinstance(control_input, Command):
+                raise
             self._record_unexpected_failure(task_id, self._all_logs(runtime))
         finally:
             final_state = self.event_store.get_task(task_id)
@@ -371,6 +459,63 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
             reset_execution_control(control_token)
             reset_llm_mode(llm_mode_token)
             self.event_store.release_execution(task_id, resolved_owner)
+
+    def checkpoint_phase(
+        self,
+        graph_state: ReviewControlState,
+        runtime,
+    ) -> dict:
+        return {}
+
+    def _execute_business_graph(self, context: _ReviewRuntime) -> None:
+        initial_state: ReviewGraphState = {
+            "task_id": context.task_id,
+            "terminal": False,
+            "risk_results": [],
+        }
+        for update in self._graph.stream(
+            initial_state,
+            context=context,
+            config={"max_concurrency": self._batch_width(context.state)},
+            stream_mode="updates",
+        ):
+            risk_update = update.get("risk_subgraph")
+            if not isinstance(risk_update, dict):
+                continue
+            for result in risk_update.get("risk_results") or []:
+                self._record_branch_progress(context, result)
+
+    def await_human_review(
+        self,
+        graph_state: ReviewControlState,
+        runtime,
+    ) -> dict:
+        context = runtime.context
+        current = self.event_store.get_task(context.task_id)
+        if current is None:
+            raise ValueError(f"task not found during human review: {context.task_id}")
+        pending_risk_ids = self._pending_risk_ids(current)
+        if pending_risk_ids:
+            interrupt(
+                {
+                    "task_id": context.task_id,
+                    "phase": "human_review",
+                    "pending_risk_ids": pending_risk_ids,
+                    "recovery_count": current.recovery_count,
+                }
+            )
+            current = self.event_store.get_task(context.task_id)
+            if current is None:
+                raise ValueError(
+                    f"task not found after human review resume: {context.task_id}"
+                )
+            pending_risk_ids = self._pending_risk_ids(current)
+        return {
+            "phase": "human_review" if pending_risk_ids else "complete",
+            "status": current.status.value,
+            "pending_risk_ids": pending_risk_ids,
+            "recovery_count": current.recovery_count,
+        }
 
     def bootstrap(self, graph_state: ReviewGraphState, runtime) -> dict:
         context = runtime.context
@@ -1564,18 +1709,71 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
         task_id: str,
         content: bytes,
         execution_owner: str,
+        *,
+        control_input=_INITIAL_CONTROL_INPUT,
     ) -> None:
         try:
-            _COMPATIBILITY_EXECUTOR.submit(
+            future = _COMPATIBILITY_EXECUTOR.submit(
                 self.run,
                 task_id,
                 content,
                 execution_owner,
                 True,
+                control_input,
             )
+            with self._execution_futures_lock:
+                self._execution_futures.add(future)
+            future.add_done_callback(self._forget_execution_future)
         except Exception:
             self.event_store.release_execution(task_id, execution_owner)
             raise
+
+    def _forget_execution_future(self, future: Future) -> None:
+        with self._execution_futures_lock:
+            self._execution_futures.discard(future)
+
+    def _control_config(self, task_id: str, state: AgentState) -> dict:
+        return {
+            "configurable": {"thread_id": task_id},
+            "max_concurrency": self._batch_width(state),
+        }
+
+    def _stream_control(
+        self,
+        context: _ReviewRuntime,
+        control_input,
+    ) -> None:
+        for _update in self._control_graph.stream(
+            control_input,
+            context=context,
+            config=self._control_config(context.task_id, context.state),
+            stream_mode="updates",
+        ):
+            pass
+
+    def _control_state(
+        self,
+        state: AgentState,
+        phase: str,
+    ) -> ReviewControlState:
+        return {
+            "task_id": state.task_id,
+            "phase": phase,
+            "status": state.status.value,
+            "pending_risk_ids": self._pending_risk_ids(state),
+            "recovery_count": state.recovery_count,
+        }
+
+    @staticmethod
+    def _pending_risk_ids(state: AgentState) -> list[str]:
+        return [
+            str(risk.get("risk_id", ""))
+            for risk in state.risk_findings or []
+            if str(risk.get("risk_id", "")).strip()
+            and not str(
+                (risk.get("feedback") or {}).get("user_action", "")
+            ).strip()
+        ]
 
     @staticmethod
     def _set_branch_terminal(

@@ -351,3 +351,18 @@ python -m unittest discover -v -s backend/tests -p test_postgres_rq_events.py
 ```
 
 2026-07-24 已使用用户提供的 `Confidentiality Agreement.pdf` 完成一次本地模式真实队列验收：RQ Worker 用时 76.8 秒，PostgreSQL 持久化 212 个递增事件，最终状态为 `EVIDENCE_VERIFIED`。该结果验证任务基础设施，不代表 DeepSeek 或检索效果验收。
+
+## LangGraph Checkpoint 与人工复核
+
+RQ Worker 使用 PostgresSaver 将执行控制状态写入独立 `langgraph` schema，`thread_id` 固定等于 `task_id`。Checkpoint 只保存执行阶段、待处理风险 ID 和恢复次数；完整合同、条款、风险、事件和审计数据仍以 PostgreSQL `app` schema 为唯一业务真相源。Alembic 只管理 `app` schema，`langgraph` 中的包管理表不参与业务迁移差异比较。
+
+人工复核节点通过 `interrupt()` 暂停。采纳、忽略、修改等级、修改建议或补充证据后，接口先幂等提交业务反馈，再使用 `Command(resume=...)` 推进同一线程。仍有待处理风险时再次暂停，全部处理后进入 `MEMORY_UPDATED`。控制图恢复不重新读取合同上传文件，也不会在 Checkpoint 异常时覆盖已经成功提交的反馈。
+
+PostgreSQL Checkpointer 集成测试默认跳过，显式验收命令如下：
+
+```powershell
+$env:REVIEW_AGENT_RUN_EXTERNAL_TESTS = "1"
+python -m unittest backend.tests.test_langgraph_checkpoint.PostgresCheckpointIntegrationTest -v
+```
+
+当前默认 FastAPI 入口仍是 SQLite 和进程内 Checkpointer；PostgreSQL、RQ 和 PostgresSaver 的默认切换在迁移任务 10 一次性完成，当前不双写业务数据。

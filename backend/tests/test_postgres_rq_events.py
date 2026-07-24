@@ -21,6 +21,7 @@ from db.postgres_persistence import PostgresReviewPersistence
 from config import Settings
 from main import create_app
 from models.review import LLMMode, ReviewPosition, ReviewStatus
+from services.checkpoint_service import ReviewCheckpointManager
 from services.event_notification import PersistentEventStream, RedisEventNotifier
 from services.event_service import ReviewEventStore
 from services.task_queue import (
@@ -260,13 +261,22 @@ class ReviewWorkerTest(unittest.TestCase):
             node_timeout_seconds=90,
             rq_job_timeout_seconds=7200,
             rq_status_reserve_seconds=120,
+            database_url="postgresql+psycopg://unused",
         )
 
-        agent = _build_agent(Mock(), settings)
+        checkpoint_manager = ReviewCheckpointManager.in_memory()
+        with patch.object(
+            ReviewCheckpointManager,
+            "postgres",
+            return_value=checkpoint_manager,
+        ):
+            agent = _build_agent(Mock(), settings)
 
         self.assertEqual(agent.node_timeout_seconds, 90)
+        self.assertEqual(agent.checkpoint_backend, "memory")
         self.assertFalse(hasattr(agent, "task_timeout_seconds"))
         self.assertFalse(hasattr(agent, "deepseek_task_timeout_seconds"))
+        agent.close()
 
     def test_pre_execution_failure_is_persisted_as_task_error(self):
         state = Mock()

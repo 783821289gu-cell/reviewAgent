@@ -247,3 +247,17 @@ Windows 便携 Redis 本身也暴露了两个运行细节。该发行版基于 M
 真实 PDF 验收还暴露了一个跨进程配置问题：项目 `.env` 仍把上传目录指向仓库内相对路径，而 Worker 管理脚本按新约束使用 `D:\demo-runtime\data\uploads`。创建进程写入成功后，Worker 在另一个目录读取，最终如实进入 `TASK_ERROR`。本机 `.env` 的 Memory、上传、报告和评测输出随后统一迁到 D 盘专用目录；密钥和 Provider 配置未改。修复后同一 PDF 经 PostgreSQL、RQ、LangGraph 和 PostgreSQL 在约 105.6 秒内到达 `EVIDENCE_VERIFIED`，解析 61 条条款、形成 6 条正式风险并写入 205 个严格递增事件。该结果使用本地结构化 LLM，只证明图编排、队列和持久化链路，不代表 DeepSeek 效果验收。
 
 为了控制迁移范围，旧编排类暂时隔离在 `legacy_review_service.py`，新入口只导出 LangGraph Agent，并复用其已经验证的领域辅助方法。RQ Worker 直接执行图；当前 SQLite FastAPI 兼容入口使用共享执行器提交图任务，不再为每个任务创建裸线程。Postgres Checkpointer、`interrupt()`/`Command(resume=...)` 和旧编排删除分别属于后续任务 5 和任务 10，本轮没有提前伪造完成。
+
+## 2026-07-24：Checkpoint 不能成为第二份合同数据库
+
+接入 PostgresSaver 的第一版把业务图放在持久控制图内部调用。代码表面上只给控制图声明了 `task_id`、阶段和待处理风险 ID，但真实 PostgreSQL 测试发现 `risk_items`、`risk_results` 等业务通道仍进入了 Checkpoint。原因是子图继承了外层 LangGraph 执行上下文，类型声明并不能自动阻止运行期通道扩散。这样做会让 `app` schema 和 Checkpoint 同时描述风险状态，恢复时无法明确哪份数据才是真相。
+
+最终把两类状态拆开。业务图继续从 PostgreSQL `app` schema 读取和提交合同、条款、风险、事件与审计数据；持久控制图只在业务执行前后记录紧凑阶段，在人工复核时保存待处理风险 ID。真实检查 `checkpoint_blobs` 后只出现控制通道，没有正文、条款或风险详情。这个取舍意味着业务节点级恢复仍以已有 PostgreSQL 状态和幂等键为基础，PostgresSaver 负责执行游标与人工中断，不重新保存完整业务快照。
+
+人工复核的第一版又在同一个节点内用循环连续调用 `interrupt()`。处理第一条风险后，LangGraph 会从节点开头重放；动态中断序号和循环位置组合后，第二次暂停没有形成稳定 Checkpoint。最终改成每次节点只执行一个 `interrupt()`，恢复后重新读取 PostgreSQL 中的待处理风险，再通过条件自环进入下一次中断。这样每次反馈对应一个明确的图推进，仍有风险时继续暂停，全部处理后结束。
+
+审查还发现反馈恢复不需要合同原文件，却沿用了业务恢复路径去读取上传文件。文件丢失会导致已经完成分析的任务无法采纳或忽略风险。现在 `Command(resume=...)` 只携带动作和风险 ID，业务状态直接从 PostgreSQL 读取；原文件只在需要重新分析时加载。若业务反馈已经提交而 Checkpoint 暂时不可用，控制异常会向上返回但不会把 `MEMORY_UPDATED` 覆盖成 `TASK_ERROR`，相同反馈可依靠稳定幂等键重试。
+
+最后，单条 psycopg 连接在最长 7200 秒任务中可能长时间空闲，业务结束后再写 Checkpoint 时存在连接已失效的风险。既然已经引入 `psycopg-pool`，最终让每个 Agent 使用 1 至 2 条连接的小连接池，并在借出连接时做健康检查。接入后第一次执行 `alembic check` 又发现 Alembic 会把 `langgraph` schema 中的包管理表识别为“模型已删除”，未来自动生成迁移可能误删 Checkpoint。现在 Alembic 显式只比较 `app` schema，PostgresSaver 继续独立维护自己的 schema。真实 PostgreSQL 重启恢复、跨进程 RQ 中断与反馈继续都已通过；这次验收使用本地结构化 LLM，只验证持久控制链路，不代表 DeepSeek 效果。
+
+最终全量测试还暴露了一个关闭顺序竞态。兼容 FastAPI 路径通过共享执行器恢复任务，后台线程先写入终态，再在 `finally` 中释放执行租约和 SQLite 句柄；测试看到终态后立即关闭应用，旧的 `Agent.close()` 只关闭 Checkpointer，临时数据库偶发仍被后台 Future 占用。现在每个 Agent 只跟踪自己提交的兼容 Future，lifespan 关闭时等待这些 Future 完成后再释放 Checkpointer，不关闭全局执行器，也不等待其他 Agent 的任务。该恢复模块连续运行 5 次通过，随后全量测试再次通过。

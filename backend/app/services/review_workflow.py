@@ -15,6 +15,17 @@ class ReviewGraphState(TypedDict, total=False):
     branch_payload: dict
 
 
+class ReviewControlState(TypedDict, total=False):
+    task_id: str
+    phase: str
+    status: str
+    pending_risk_ids: list[str]
+    recovery_count: int
+
+
+CONTROL_STATE_KEYS = frozenset(ReviewControlState.__annotations__)
+
+
 class ReviewWorkflowHandlers(Protocol):
     def bootstrap(self, state: ReviewGraphState, runtime) -> dict: ...
 
@@ -41,6 +52,12 @@ class ReviewWorkflowHandlers(Protocol):
     def finalize_risk(self, state: ReviewGraphState, runtime) -> dict: ...
 
     def aggregate_risks(self, state: ReviewGraphState, runtime) -> dict: ...
+
+
+class ReviewControlHandlers(Protocol):
+    def checkpoint_phase(self, state: ReviewControlState, runtime) -> dict: ...
+
+    def await_human_review(self, state: ReviewControlState, runtime) -> dict: ...
 
 
 MAIN_NODE_ORDER = (
@@ -95,6 +112,36 @@ def build_review_graph(handlers: ReviewWorkflowHandlers, context_schema: type):
     graph.add_edge("risk_subgraph", "aggregate_risks")
     graph.add_edge("aggregate_risks", END)
     return graph.compile()
+
+
+def build_review_control_graph(
+    handlers: ReviewControlHandlers,
+    context_schema: type,
+    checkpointer,
+):
+    graph = StateGraph(ReviewControlState, context_schema=context_schema)
+    graph.add_node("checkpoint_phase", handlers.checkpoint_phase)
+    graph.add_node("await_human_review", handlers.await_human_review)
+    graph.add_edge(START, "checkpoint_phase")
+    graph.add_conditional_edges(
+        "checkpoint_phase",
+        lambda state: (
+            "await_human_review"
+            if state.get("phase") == "human_review"
+            else END
+        ),
+        ["await_human_review", END],
+    )
+    graph.add_conditional_edges(
+        "await_human_review",
+        lambda state: (
+            "await_human_review"
+            if state.get("phase") == "human_review"
+            else END
+        ),
+        ["await_human_review", END],
+    )
+    return graph.compile(checkpointer=checkpointer)
 
 
 def _build_risk_graph(handlers: ReviewWorkflowHandlers, context_schema: type):

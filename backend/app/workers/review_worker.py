@@ -7,6 +7,7 @@ from config import Settings
 from db.postgres_persistence import PostgresReviewPersistence
 from services.event_notification import RedisEventNotifier
 from models.review import ReviewStatus
+from services.checkpoint_service import ReviewCheckpointManager
 from services.event_service import ReviewEventStore, TERMINAL_STATUSES
 from services.review_service import ReviewOrchestratorAgent
 from services.runtime_log_service import configure_runtime_logging, write_runtime_log
@@ -21,6 +22,7 @@ def execute_review_job(task_id: str) -> dict:
     )
     persistence = _build_persistence(settings)
     event_store = None
+    agent = None
     try:
         event_store = ReviewEventStore(persistence)
         event_store.load_persisted(clear_execution_leases=False)
@@ -66,6 +68,8 @@ def execute_review_job(task_id: str) -> dict:
             )
         raise
     finally:
+        if agent is not None:
+            agent.close()
         persistence.dispose()
 
 
@@ -107,11 +111,17 @@ def _build_agent(
     event_store: ReviewEventStore,
     settings: Settings,
 ) -> ReviewOrchestratorAgent:
-    return ReviewOrchestratorAgent(
-        event_store,
-        node_timeout_seconds=settings.node_timeout_seconds,
-        llm_max_concurrency=settings.llm_max_concurrency,
-    )
+    checkpoint_manager = ReviewCheckpointManager.postgres(settings.database_url)
+    try:
+        return ReviewOrchestratorAgent(
+            event_store,
+            node_timeout_seconds=settings.node_timeout_seconds,
+            llm_max_concurrency=settings.llm_max_concurrency,
+            checkpoint_manager=checkpoint_manager,
+        )
+    except Exception:
+        checkpoint_manager.close()
+        raise
 
 
 def _record_worker_failure(
