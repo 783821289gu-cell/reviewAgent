@@ -125,7 +125,19 @@ async def stream_task_events(
     after_event_id: int = -1,
     event_store: ReviewEventStore = Depends(get_event_store),
 ) -> StreamingResponse:
-    if event_store.get_task(task_id) is None:
+    persistent_stream = getattr(
+        request.app.state,
+        "persistent_event_stream",
+        None,
+    )
+    if persistent_stream is not None:
+        task_exists = await asyncio.to_thread(
+            persistent_stream.task_exists,
+            task_id,
+        )
+    else:
+        task_exists = event_store.get_task(task_id) is not None
+    if not task_exists:
         raise ApiError(status_code=404, payload={"error": "Task not found"})
 
     async def event_stream():
@@ -135,12 +147,20 @@ async def stream_task_events(
             if await request.is_disconnected():
                 break
 
-            events = await asyncio.to_thread(
-                event_store.wait_for_events,
-                task_id,
-                next_index,
-                SSE_WAIT_SECONDS,
-            )
+            if persistent_stream is not None:
+                events = await asyncio.to_thread(
+                    persistent_stream.wait_for_events,
+                    task_id,
+                    next_index,
+                    SSE_WAIT_SECONDS,
+                )
+            else:
+                events = await asyncio.to_thread(
+                    event_store.wait_for_events,
+                    task_id,
+                    next_index,
+                    SSE_WAIT_SECONDS,
+                )
             for event in events:
                 yield _sse_event(event)
                 next_index = event["event_id"] + 1

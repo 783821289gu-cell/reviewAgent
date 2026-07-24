@@ -5,6 +5,8 @@ pdfplumber==0.11.10
 psycopg[binary]==3.2.9
 python-multipart==0.0.32
 python-dotenv==1.1.0
+redis==7.4.1
+rq==2.10.0
 SQLAlchemy==2.0.41
 tokenizers==0.22.1
 uvicorn==0.51.0

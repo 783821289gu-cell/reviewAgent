@@ -11,6 +11,7 @@ from api.routes import evaluation, feedback, health, local_review, reports, task
 from config import Settings, settings
 from db.repositories import ReviewPersistence
 from services.event_service import ReviewEventStore
+from services.event_notification import PersistentEventStream
 from services.review_service import ReviewOrchestratorAgent
 from services.runtime_log_service import configure_runtime_logging
 
@@ -22,6 +23,7 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend"
 def create_app(
     app_settings: Settings = settings,
     event_store: ReviewEventStore | None = None,
+    persistent_event_stream: PersistentEventStream | None = None,
 ) -> FastAPI:
     configure_runtime_logging(
         app_settings.runtime_log_file,
@@ -50,6 +52,7 @@ def create_app(
     application = FastAPI(title="ContractReviewAgent", lifespan=lifespan)
     application.state.settings = app_settings
     application.state.event_store = event_store
+    application.state.persistent_event_stream = persistent_event_stream
     application.state.review_agent = ReviewOrchestratorAgent(
         event_store,
         node_timeout_seconds=app_settings.node_timeout_seconds,

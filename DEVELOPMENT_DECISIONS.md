@@ -217,3 +217,19 @@ SQLite 到 PostgreSQL 的迁移不仅有字段类型变化，JSON 文本进入 J
 本轮把迁移验证固定为四层：每张表行数、完整任务 ID、每任务最大事件序号和规范化 JSON SHA-256。SQLite 始终用 `mode=ro` 打开；PostgreSQL 使用 `ON CONFLICT DO NOTHING`，重复运行不覆盖旧值，目标存在不一致时由哈希校验使事务失败。真实源库的 10 张业务表已连续迁移两次，两次都验证 19 个任务、551 条条款、2058 条 Step Log 和 137 个事件一致。
 
 Docker 后置后，原生安装器又被 Windows UAC 阻塞。最终使用 EDB 官方 PostgreSQL 17.10 二进制归档，在 `D:\demo-runtime` 初始化普通用户可管理的本地集群；程序、数据、日志、Python 环境和下载缓存都留在 D 盘。它不是 Windows 服务，机器重启后通过 `scripts/manage_postgres.ps1` 显式启动，这个取舍避免管理员安装和 C 盘默认目录，也保留了可见的生命周期。
+
+## 2026-07-24：Redis 通知不能代替持久事件，订阅也有竞态
+
+最初的跨进程事件方案是 Worker 写 PostgreSQL 后发布 Redis Pub/Sub，API 收到通知再查询数据。第一次真实集成测试中，读线程先调用 `SUBSCRIBE`，但没有等待 Redis 返回订阅确认；Worker 恰好在确认前提交并发布，结果数据库已有事件，读线程却空返回。这个问题在 Mock 中不会出现，因为 Mock 没有网络协议状态。
+
+最终顺序调整为“建立订阅并确认 -> 查询 PostgreSQL -> 等待通知 -> 再查 PostgreSQL”。如果 Redis 断开，SSE 按短间隔轮询 PostgreSQL直到本次等待截止。Redis 因此只负责降低查询延迟，不再承担正确性；事件是否存在只由 PostgreSQL 决定。真实 PostgreSQL/Redis 测试已复现修复前失败并验证修复后通过。
+
+Windows 便携 Redis 本身也暴露了两个运行细节。该发行版基于 MSYS2，Windows 绝对路径不能直接作为配置路径，必须转换为 `/cygdrive/d/...`；Windows PowerShell 5 的 `Set-Content -Encoding utf8` 又会写入 BOM，使第一条 `bind` 被 Redis 识别成未知配置。管理脚本因此显式使用无 BOM UTF-8，并统一转换路径。这个选择比把 Redis 装回 C 盘或要求管理员安装更符合本机 D 盘运行约束。
+
+## 2026-07-24：RQ 的“已注册 Worker”不等于新 Worker 一定能启动
+
+第一次完整队列验收时，任务成功写入 PostgreSQL 并进入 RQ，但 300 秒内一直停在 `UPLOAD_RECEIVED`。日志显示上一次强制停止后，Redis 还保留固定名称 `review-agent-worker-1` 的注册，新 Worker 因同名冲突立即退出；API 进程没有问题，真正缺失的是消费者。
+
+最终让 Worker 名称包含进程 PID，管理脚本仍通过单一 PID 文件限制本机只启动一个实例。进一步验证又发现，进程停止后 `Worker.all()` 仍会短期返回陈旧注册，因此新增 5 秒续租、15 秒过期的独立 Worker 心跳；管理脚本正常停止时立即删除，异常退出时由 TTL 清理。任务创建前必须同时通过 Redis Ping、RQ 注册和有效心跳。另一个真实问题是 RQ 2.10 的 Job ID 不允许冒号，原来的 `review:{task_id}` 在写队列时失败；稳定键改为 `review-{task_id}`，失败任务如实写为 `TASK_ERROR`，没有继续包装成已入队。
+
+修复后使用用户提供的 PDF 走 PostgreSQL -> RQ -> Worker -> PostgreSQL 全链路，本地模式在 76.8 秒内完成，持久化 212 个严格递增事件并到达 `EVIDENCE_VERIFIED`。这次结果只证明任务基础设施和事件流可用，不代表 DeepSeek 模型效果通过。默认 FastAPI 入口仍未切换，新旧实现不会在业务请求上双写；一次性切换保留到任务 10。

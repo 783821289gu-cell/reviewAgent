@@ -280,7 +280,7 @@ http://127.0.0.1:8000/health
 可通过 `REVIEW_AGENT_LLM_PROMPT_COST_PER_1M` 和 `REVIEW_AGENT_LLM_COMPLETION_COST_PER_1M` 配置每百万 token 单价；未配置时日志显示“未配置”。
 生产默认 Embedding 模式为 `openai_compatible`，通过 `REVIEW_AGENT_EMBEDDING_BASE_URL`、`REVIEW_AGENT_EMBEDDING_API_KEY`、`REVIEW_AGENT_EMBEDDING_MODEL` 和 `REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS` 配置。`local_sparse` 只允许作为显式离线测试模式使用。
 Orchestrator 默认单节点超时为 90 秒、本地任务总时限为 900 秒、DeepSeek 任务安全上限为 3600 秒，可分别通过 `REVIEW_AGENT_NODE_TIMEOUT_SECONDS`、`REVIEW_AGENT_TASK_TIMEOUT_SECONDS` 和 `REVIEW_AGENT_DEEPSEEK_TASK_TIMEOUT_SECONDS` 调整。`REVIEW_AGENT_LLM_MAX_CONCURRENCY` 控制彼此独立的关键字段和首次风险分析调用，默认 2、最大 4；同一风险内部的 Planner、Critic、修订和 Evidence 依赖链仍保持串行。解析、检索、LLM 输出、Evidence、节点超时、任务超时和通用任务错误的人工恢复预算各为 2 次，服务重启不会重置。
-服务运行日志默认写入 `backend/app/logs/review_agent.log`，可通过 `REVIEW_AGENT_RUNTIME_LOG_FILE` 和 `REVIEW_AGENT_RUNTIME_LOG_LEVEL` 调整。日志只记录脱敏任务、阶段、工具、耗时与错误摘要；SQLite Trace 仍是产品内审计数据。
+设置 `REVIEW_AGENT_RUNTIME_ROOT` 后，服务运行日志默认写入该根目录下的 `logs/review_agent.log`；未设置时才回退到 `backend/app/logs/review_agent.log`。可通过 `REVIEW_AGENT_RUNTIME_LOG_FILE` 和 `REVIEW_AGENT_RUNTIME_LOG_LEVEL` 调整。日志只记录脱敏任务、阶段、工具、耗时与错误摘要；业务 Trace 仍是产品内审计数据。
 
 ## 运行测试
 
@@ -329,3 +329,27 @@ if (-not $runtimeRoot) {
 ```
 
 迁移器校验每张表的行数、任务 ID、每任务最大事件序号和规范化 JSON 哈希。重复 apply 使用 `ON CONFLICT DO NOTHING`，不会覆盖已有不同数据；任何目标差异都会使事务失败，不能写成迁移成功。
+
+## Redis、RQ 与跨进程事件流
+
+任务 3 已建立独立的 PostgreSQL/RQ 执行组件，但现有 FastAPI 默认入口仍保持 SQLite + 进程内执行，最终只在任务 10 一次性切换，不维护长期双写。便携 Redis、AOF、Worker 日志和 PID 文件都位于 `REVIEW_AGENT_RUNTIME_ROOT`：
+
+```powershell
+.\scripts\manage_redis.ps1 -Action start
+.\scripts\manage_redis.ps1 -Action status
+.\scripts\manage_worker.ps1 -Action start
+.\scripts\manage_worker.ps1 -Action status
+```
+
+RQ 队列名默认 `review-agent`，只注册 1 个 Worker；任务硬超时为 7200 秒，旧编排器过渡路径在 7080 秒停止并预留 120 秒写入真实状态。RQ 不配置整任务重试，稳定 Job ID 为 `review-{task_id}`。
+
+Worker 使用 `PostgresReviewPersistence` 保存任务、文档、条款、风险、日志和全部过程事件。事务提交后才发布 Redis 通知；SSE 先确认订阅，再查询 PostgreSQL，收到通知后重新查询。Redis 通知失败时轮询 PostgreSQL，因此 Redis 不承担不可恢复的任务数据。
+
+外部依赖集成测试默认跳过，显式验收命令如下：
+
+```powershell
+$env:REVIEW_AGENT_RUN_EXTERNAL_TESTS = "1"
+python -m unittest discover -v -s backend/tests -p test_postgres_rq_events.py
+```
+
+2026-07-24 已使用用户提供的 `Confidentiality Agreement.pdf` 完成一次本地模式真实队列验收：RQ Worker 用时 76.8 秒，PostgreSQL 持久化 212 个递增事件，最终状态为 `EVIDENCE_VERIFIED`。该结果验证任务基础设施，不代表 DeepSeek 或检索效果验收。

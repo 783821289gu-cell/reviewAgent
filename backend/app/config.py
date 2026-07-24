@@ -25,14 +25,23 @@ _load_project_environment()
 
 
 def _default_memory_db_path() -> str:
+    runtime_root = os.getenv("REVIEW_AGENT_RUNTIME_ROOT", "").strip()
+    if runtime_root:
+        return str(Path(runtime_root) / "data" / "review_agent_memory.sqlite3")
     return os.path.join(os.path.dirname(__file__), "data", "review_agent_memory.sqlite3")
 
 
 def _default_upload_dir() -> str:
+    runtime_root = os.getenv("REVIEW_AGENT_RUNTIME_ROOT", "").strip()
+    if runtime_root:
+        return str(Path(runtime_root) / "data" / "uploads")
     return os.path.join(os.path.dirname(__file__), "data", "uploads")
 
 
 def _default_runtime_log_file() -> str:
+    runtime_root = os.getenv("REVIEW_AGENT_RUNTIME_ROOT", "").strip()
+    if runtime_root:
+        return str(Path(runtime_root) / "logs" / "review_agent.log")
     return os.path.join(os.path.dirname(__file__), "logs", "review_agent.log")
 
 
@@ -124,6 +133,18 @@ class Settings:
     )
     memory_db_path: str = os.getenv("REVIEW_AGENT_MEMORY_DB_PATH", _default_memory_db_path())
     database_url: str = os.getenv("REVIEW_AGENT_DATABASE_URL", "").strip()
+    redis_url: str = os.getenv("REVIEW_AGENT_REDIS_URL", "redis://127.0.0.1:6379/0").strip()
+    rq_queue: str = os.getenv("REVIEW_AGENT_RQ_QUEUE", "review-agent").strip()
+    rq_job_timeout_seconds: int = field(
+        default_factory=lambda: _positive_int(
+            "REVIEW_AGENT_RQ_JOB_TIMEOUT_SECONDS", "7200"
+        )
+    )
+    rq_status_reserve_seconds: int = field(
+        default_factory=lambda: _positive_int(
+            "REVIEW_AGENT_RQ_STATUS_RESERVE_SECONDS", "120"
+        )
+    )
     upload_dir: str = os.getenv("REVIEW_AGENT_UPLOAD_DIR", _default_upload_dir())
     runtime_log_file: str = os.getenv(
         "REVIEW_AGENT_RUNTIME_LOG_FILE",

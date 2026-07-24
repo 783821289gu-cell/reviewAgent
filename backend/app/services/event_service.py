@@ -242,7 +242,11 @@ class ReviewEventStore:
             self._condition.notify_all()
             return self._snapshot_locked(task_id)
 
-    def load_persisted(self) -> list[AgentState]:
+    def load_persisted(
+        self,
+        *,
+        clear_execution_leases: bool = True,
+    ) -> list[AgentState]:
         if self.persistence is None:
             return []
         loaded_states = []
@@ -251,14 +255,14 @@ class ReviewEventStore:
                 raise RuntimeError("cannot reload persisted state while tasks are executing")
             store_key = self._store_key()
             with _PROCESS_EXECUTION_LOCK:
-                clear_execution_leases = not any(
+                should_clear_execution_leases = clear_execution_leases and not any(
                     key[0] == store_key for key in _PROCESS_EXECUTION_OWNERS
                 )
             self._states.clear()
             self._events.clear()
             self._execution_owners.clear()
             for state, event_payloads in self.persistence.load_states(
-                clear_execution_leases=clear_execution_leases,
+                clear_execution_leases=should_clear_execution_leases,
             ):
                 events = [
                     ReviewEvent(
@@ -444,6 +448,9 @@ class ReviewEventStore:
         return self._store_key(), task_id
 
     def _store_key(self) -> str:
+        persistence_key = getattr(self.persistence, "store_key", "")
+        if persistence_key:
+            return str(persistence_key).casefold()
         if self.db_path is None:
             return f"memory:{id(self)}"
         return str(Path(self.db_path).resolve()).casefold()

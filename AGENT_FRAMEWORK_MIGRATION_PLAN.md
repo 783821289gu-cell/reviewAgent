@@ -121,6 +121,17 @@ Docker 相关工作按用户最新指令后置，当前不安装、不维护 Com
 - 在 D 盘便携 PostgreSQL 17.10 上完成两次真实 apply。两次均验证 19 个任务、551 条条款、2058 条 Step Log、137 个持久事件及全部表哈希一致。
 - 现有应用尚未切换 PostgreSQL 运行仓储；一次性切换仍在任务 10，当前不维护双写路径。
 
+### 任务 3：已完成
+
+- 在 D 盘部署便携 Redis 8.8.0，启停脚本已真实执行 `start -> status -> stop -> start -> PONG`；AOF、日志和运行数据均位于 `D:\demo-runtime`。
+- 固定 `redis==7.4.1` 与 `rq==2.10.0`，新增单 Worker 管理脚本；稳定 Job ID 使用 `review-{task_id}`，整任务 RQ 重试为 0，硬超时 7200 秒并预留 120 秒状态落库窗口。
+- 新增 PostgreSQL 运行仓储，当前 RQ Worker 能持久化任务、文档、条款、风险、Step Log 和全部进度事件；上传文件仍使用受控本地目录。
+- Redis 仅在 PostgreSQL 事务提交后发布通知。跨进程 SSE 在查询前等待订阅确认，收到通知后重查 PostgreSQL；通知异常时回退数据库轮询。
+- 新增任务创建前 Redis/RQ 注册/短 TTL Worker 心跳健康检查；Worker 预执行失败会写入真实 `TASK_ERROR`，不会让任务永久停留在等待状态。
+- 真实 PostgreSQL/Redis 集成测试已通过。使用用户 PDF 走本地模式 RQ 完整链路，Worker 用时 76.8 秒，产生 212 个持久事件并到达 `EVIDENCE_VERIFIED`；测试任务和上传副本随后已精确清理。
+- Code Review 修复订阅确认竞态、非法 RQ Job ID、同名 Worker 重启冲突和陈旧 Worker 注册误判后，28 个后端测试模块已在每模块 180 秒限制下全部通过，总耗时约 196 秒。
+- FastAPI 默认业务入口仍使用 SQLite 和进程内编排；任务 3 只提供可验证的新运行组件和可选持久 SSE 源，直接切换仍在任务 10。
+
 ### 下一个任务
 
-任务 3：接入 Redis、RQ Worker 和基于 PostgreSQL 查询游标的跨进程 SSE 事件流。
+任务 4：使用 LangGraph 主工作流替换手写状态机和后台 `Thread`，保持现有节点顺序与接口契约。
