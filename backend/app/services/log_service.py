@@ -45,13 +45,16 @@ _EXECUTION_CONTROL: ContextVar["ToolExecutionControl | None"] = ContextVar(
 class ToolExecutionControl:
     cancel_check: Callable[[], None]
     task_started_at: float
-    task_timeout_seconds: float
+    task_timeout_seconds: float | None
     node_timeout_seconds: float
     execution_retry_index: int = 0
 
     def before_step(self, step_name: str) -> None:
         self.cancel_check()
-        if perf_counter() - self.task_started_at > self.task_timeout_seconds:
+        if (
+            self.task_timeout_seconds is not None
+            and perf_counter() - self.task_started_at > self.task_timeout_seconds
+        ):
             raise TaskExecutionTimeoutError(
                 f"task timeout exceeded before node {step_name}: "
                 f"{self.task_timeout_seconds:.3f}s"
@@ -60,7 +63,10 @@ class ToolExecutionControl:
     def after_step(self, step_name: str, node_started_at: float) -> None:
         self.cancel_check()
         task_elapsed = perf_counter() - self.task_started_at
-        if task_elapsed > self.task_timeout_seconds:
+        if (
+            self.task_timeout_seconds is not None
+            and task_elapsed > self.task_timeout_seconds
+        ):
             raise TaskExecutionTimeoutError(
                 f"task timeout exceeded after node {step_name}: "
                 f"{self.task_timeout_seconds:.3f}s"

@@ -132,6 +132,17 @@ Docker 相关工作按用户最新指令后置，当前不安装、不维护 Com
 - Code Review 修复订阅确认竞态、非法 RQ Job ID、同名 Worker 重启冲突和陈旧 Worker 注册误判后，28 个后端测试模块已在每模块 180 秒限制下全部通过，总耗时约 196 秒。
 - FastAPI 默认业务入口仍使用 SQLite 和进程内编排；任务 3 只提供可验证的新运行组件和可选持久 SSE 源，直接切换仍在任务 10。
 
+### 任务 4：已完成
+
+- 固定 `langgraph==1.2.9`，使用 `StateGraph`、条件边和 `Send` 建立主图与风险子图。主图保持“解析 -> 分类 -> 条款结构化 -> Playbook 检索 -> 上下文构建 -> 风险子图 -> 聚合”的业务顺序。
+- 风险子图保持“相关条款/Memory -> Risk Analyzer -> Critic -> Evidence Verifier -> 必要时仅重新检索一次”的边界；Planner 继续只能使用原白名单动作。
+- DeepSeek 风险分支通过 LangGraph `max_concurrency=2` 限流，本地模式保持串行；并发结果按原 Review Context 序号稳定聚合，Step Log 按实际完成顺序只追加，不重排已持久化日志。
+- 活动 `ReviewOrchestratorAgent` 已切换为 LangGraph。RQ Worker 直接调用图；当前 SQLite FastAPI 兼容入口使用共享执行器提交图任务，不再为每个任务创建裸 `Thread`。旧编排类只作为过渡期领域辅助实现保留，任务 10 切换后删除。
+- 移除活动 Agent 的应用层累计任务计时器及对应配置。单节点超时仍为 90 秒，RQ 7200 秒硬超时和 120 秒状态落库窗口继续作为进程外最终边界。
+- Code Review 修复了并行分支对标量状态的并发写冲突、终止分支误进入正式风险、并行进度覆盖、业务排序破坏 Step Log 追加索引，以及人工复核进度状态与现有 API 契约不一致等问题。
+- 29 个后端测试模块在每模块 180 秒限制下全部通过，总耗时 203.2 秒；真实 PostgreSQL/Redis 事件集成测试单独通过。使用用户 PDF 走 PostgreSQL -> RQ -> LangGraph -> PostgreSQL 本地模式全链路，约 105.6 秒到达 `EVIDENCE_VERIFIED`，解析 61 条条款、形成 6 条风险并持久化 205 个严格递增事件。
+- 真实 PDF 本轮只验证本地结构化 LLM 的编排和持久化链路，不冒充 DeepSeek 效果验收；测试任务、RQ Job、上传副本和 Worker 均已清理。
+
 ### 下一个任务
 
-任务 4：使用 LangGraph 主工作流替换手写状态机和后台 `Thread`，保持现有节点顺序与接口契约。
+任务 5：接入 Postgres Checkpointer，并将恢复、取消和人工复核改为 LangGraph 持久中断与恢复。

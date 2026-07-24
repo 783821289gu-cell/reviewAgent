@@ -134,7 +134,7 @@ class AgentExecutionControlTest(unittest.TestCase):
             )[0]["task"]["execution_active"]
         )
 
-    def test_node_and_task_timeout_are_not_recorded_as_success(self):
+    def test_node_timeout_remains_but_agent_global_timeout_is_removed(self):
         original_parser = tool_registry["parse_document"]
 
         def slow_parser(tool_input):
@@ -145,7 +145,6 @@ class AgentExecutionControlTest(unittest.TestCase):
             node_state = ReviewOrchestratorAgent(
                 self.store,
                 node_timeout_seconds=0.01,
-                task_timeout_seconds=1,
             ).run_sync(
                 "node-timeout.docx",
                 "docx",
@@ -168,7 +167,6 @@ class AgentExecutionControlTest(unittest.TestCase):
             task_state = ReviewOrchestratorAgent(
                 second_store,
                 node_timeout_seconds=1,
-                task_timeout_seconds=0.01,
             ).run_sync(
                 "task-timeout.docx",
                 "docx",
@@ -176,9 +174,11 @@ class AgentExecutionControlTest(unittest.TestCase):
                 ReviewPosition.PARTY_A,
             )
 
-        self.assertEqual(task_state.status, ReviewStatus.TASK_TIMEOUT)
-        self.assertEqual(task_state.logs[-1]["status"], "timeout")
-        self.assertEqual(task_state.retry_counts, {"task_timeout": 1})
+        self.assertEqual(task_state.status, ReviewStatus.EVIDENCE_VERIFIED)
+        self.assertFalse(
+            any(log["status"] == "timeout" for log in task_state.logs)
+        )
+        self.assertEqual(task_state.retry_counts or {}, {})
 
         classification_store = ReviewEventStore(
             ReviewPersistence(
@@ -196,7 +196,6 @@ class AgentExecutionControlTest(unittest.TestCase):
             classification_state = ReviewOrchestratorAgent(
                 classification_store,
                 node_timeout_seconds=0.01,
-                task_timeout_seconds=1,
             ).run_sync(
                 "classification-timeout.docx",
                 "docx",
@@ -229,7 +228,6 @@ class AgentExecutionControlTest(unittest.TestCase):
                 blocked_state = ReviewOrchestratorAgent(
                     blocked_store,
                     node_timeout_seconds=0.02,
-                    task_timeout_seconds=1,
                 ).run_sync(
                     "blocked-timeout.docx",
                     "docx",
@@ -352,7 +350,6 @@ class AgentExecutionControlTest(unittest.TestCase):
             first = ReviewOrchestratorAgent(
                 self.store,
                 node_timeout_seconds=0.01,
-                task_timeout_seconds=1,
             ).run_sync(
                 "recover-timeout.docx",
                 "docx",
@@ -365,7 +362,6 @@ class AgentExecutionControlTest(unittest.TestCase):
         restarted_agent = ReviewOrchestratorAgent(
             restarted_store,
             node_timeout_seconds=0.01,
-            task_timeout_seconds=1,
         )
         with patch.dict(tool_registry, {"parse_document": slow_parser}):
             restarted_agent.recover_task(

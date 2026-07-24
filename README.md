@@ -84,7 +84,7 @@
 76. 完整任务状态继续由 SQLite 保存；浏览器只保存当前任务 ID，刷新后通过任务查询接口恢复文档、条款、风险、反馈、日志和事件，后端重启后仍可读取。
 77. 条款字段、Playbook、上下文、风险分析和证据验证按工作项增量写入进度、部分结果和日志；关键字段、风险分析和证据候选可从 SQLite 已完成项继续，不在超时恢复时从阶段起点重复调用。
 78. 工具超时线程复制任务上下文，本地任务不会因全局 DeepSeek 配置而越界调用外部模型。
-79. 节点超时默认 90 秒，本地任务总时限默认 900 秒，DeepSeek 任务安全上限默认 3600 秒；关键字段和首次风险分析使用默认 2、最大 4 的受控并发，运行日志另写入可轮转的本地文件。
+79. LangGraph 节点超时默认 90 秒，不再使用应用层累计任务时限；RQ 硬超时默认 7200 秒并预留 120 秒状态落库窗口。关键字段和首次风险分析使用默认 2、最大 4 的受控并发，运行日志另写入可轮转的本地文件。
 80. SQLite 使用 WAL 与 `synchronous=NORMAL` 支持高频增量进度事务；细粒度 SSE 进度不重复保存完整历史任务快照，业务节点事件仍完整持久化。
 
 ## 当前未实现
@@ -179,8 +179,6 @@ REVIEW_AGENT_LLM_MODE=openai_compatible
 REVIEW_AGENT_LLM_BASE_URL=https://api.deepseek.com
 REVIEW_AGENT_LLM_API_KEY=<your-deepseek-key>
 REVIEW_AGENT_LLM_MODEL=deepseek-v4-pro
-REVIEW_AGENT_TASK_TIMEOUT_SECONDS=900
-REVIEW_AGENT_DEEPSEEK_TASK_TIMEOUT_SECONDS=3600
 REVIEW_AGENT_LLM_MAX_CONCURRENCY=2
 ```
 
@@ -279,7 +277,7 @@ http://127.0.0.1:8000/health
 默认 LLM 上下文预算为 6000 tokens，可通过 `REVIEW_AGENT_LLM_CONTEXT_BUDGET_TOKENS` 调整；值必须是正整数。
 可通过 `REVIEW_AGENT_LLM_PROMPT_COST_PER_1M` 和 `REVIEW_AGENT_LLM_COMPLETION_COST_PER_1M` 配置每百万 token 单价；未配置时日志显示“未配置”。
 生产默认 Embedding 模式为 `openai_compatible`，通过 `REVIEW_AGENT_EMBEDDING_BASE_URL`、`REVIEW_AGENT_EMBEDDING_API_KEY`、`REVIEW_AGENT_EMBEDDING_MODEL` 和 `REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS` 配置。`local_sparse` 只允许作为显式离线测试模式使用。
-Orchestrator 默认单节点超时为 90 秒、本地任务总时限为 900 秒、DeepSeek 任务安全上限为 3600 秒，可分别通过 `REVIEW_AGENT_NODE_TIMEOUT_SECONDS`、`REVIEW_AGENT_TASK_TIMEOUT_SECONDS` 和 `REVIEW_AGENT_DEEPSEEK_TASK_TIMEOUT_SECONDS` 调整。`REVIEW_AGENT_LLM_MAX_CONCURRENCY` 控制彼此独立的关键字段和首次风险分析调用，默认 2、最大 4；同一风险内部的 Planner、Critic、修订和 Evidence 依赖链仍保持串行。解析、检索、LLM 输出、Evidence、节点超时、任务超时和通用任务错误的人工恢复预算各为 2 次，服务重启不会重置。
+LangGraph Orchestrator 默认单节点超时为 90 秒，可通过 `REVIEW_AGENT_NODE_TIMEOUT_SECONDS` 调整；不再按任务累计运行时长判失败。RQ Worker 使用 `REVIEW_AGENT_RQ_JOB_TIMEOUT_SECONDS`（默认 7200 秒）作为进程外最终硬边界，并通过 `REVIEW_AGENT_RQ_STATUS_RESERVE_SECONDS`（默认 120 秒）预留状态落库窗口。`REVIEW_AGENT_LLM_MAX_CONCURRENCY` 控制彼此独立的关键字段和首次风险分析调用，默认 2、最大 4；同一风险内部的 Planner、Critic、修订和 Evidence 依赖链仍保持串行。解析、检索、LLM 输出、Evidence、节点超时和通用任务错误的人工恢复预算各为 2 次，服务重启不会重置。
 设置 `REVIEW_AGENT_RUNTIME_ROOT` 后，服务运行日志默认写入该根目录下的 `logs/review_agent.log`；未设置时才回退到 `backend/app/logs/review_agent.log`。可通过 `REVIEW_AGENT_RUNTIME_LOG_FILE` 和 `REVIEW_AGENT_RUNTIME_LOG_LEVEL` 调整。日志只记录脱敏任务、阶段、工具、耗时与错误摘要；业务 Trace 仍是产品内审计数据。
 
 ## 运行测试

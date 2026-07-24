@@ -29,7 +29,7 @@ from services.task_queue import (
     ReviewTaskQueue,
     WorkerHeartbeat,
 )
-from workers.review_worker import _execution_timeout, _record_worker_failure
+from workers.review_worker import _build_agent, _record_worker_failure
 
 
 class _Subscription:
@@ -255,13 +255,18 @@ class QueuedReviewServiceTest(unittest.TestCase):
 
 
 class ReviewWorkerTest(unittest.TestCase):
-    def test_execution_timeout_preserves_status_flush_window(self):
+    def test_worker_agent_has_node_timeout_but_no_application_task_timer(self):
         settings = Settings(
+            node_timeout_seconds=90,
             rq_job_timeout_seconds=7200,
             rq_status_reserve_seconds=120,
         )
 
-        self.assertEqual(_execution_timeout(settings), 7080)
+        agent = _build_agent(Mock(), settings)
+
+        self.assertEqual(agent.node_timeout_seconds, 90)
+        self.assertFalse(hasattr(agent, "task_timeout_seconds"))
+        self.assertFalse(hasattr(agent, "deepseek_task_timeout_seconds"))
 
     def test_pre_execution_failure_is_persisted_as_task_error(self):
         state = Mock()

@@ -78,12 +78,12 @@ class ConfigTest(unittest.TestCase):
     def test_default_env_file_is_project_root_env(self):
         self.assertEqual(PROJECT_ENV_FILE, PROJECT_ROOT / ".env")
 
-    def test_execution_timeout_and_runtime_log_defaults_are_explicit(self):
+    def test_execution_control_and_runtime_log_defaults_are_explicit(self):
         settings = Settings()
 
         self.assertEqual(settings.node_timeout_seconds, 90)
-        self.assertEqual(settings.task_timeout_seconds, 900)
-        self.assertEqual(settings.deepseek_task_timeout_seconds, 3600)
+        self.assertFalse(hasattr(settings, "task_timeout_seconds"))
+        self.assertFalse(hasattr(settings, "deepseek_task_timeout_seconds"))
         self.assertEqual(settings.llm_max_concurrency, 2)
         self.assertTrue(settings.runtime_log_file.endswith("review_agent.log"))
         self.assertEqual(settings.runtime_log_level, "INFO")

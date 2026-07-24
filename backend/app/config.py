@@ -118,14 +118,6 @@ class Settings:
     node_timeout_seconds: float = field(
         default_factory=lambda: _positive_float("REVIEW_AGENT_NODE_TIMEOUT_SECONDS", "90")
     )
-    task_timeout_seconds: float = field(
-        default_factory=lambda: _positive_float("REVIEW_AGENT_TASK_TIMEOUT_SECONDS", "900")
-    )
-    deepseek_task_timeout_seconds: float = field(
-        default_factory=lambda: _positive_float(
-            "REVIEW_AGENT_DEEPSEEK_TASK_TIMEOUT_SECONDS", "3600"
-        )
-    )
     llm_max_concurrency: int = field(
         default_factory=lambda: _bounded_positive_int(
             "REVIEW_AGENT_LLM_MAX_CONCURRENCY", "2", 4

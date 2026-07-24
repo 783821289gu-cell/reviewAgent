@@ -34,13 +34,7 @@ def execute_review_job(task_id: str) -> dict:
                 "executed": False,
             }
         content = persistence.load_upload(task_id)
-        agent = ReviewOrchestratorAgent(
-            event_store,
-            node_timeout_seconds=settings.node_timeout_seconds,
-            task_timeout_seconds=_execution_timeout(settings),
-            deepseek_task_timeout_seconds=_execution_timeout(settings),
-            llm_max_concurrency=settings.llm_max_concurrency,
-        )
+        agent = _build_agent(event_store, settings)
         write_runtime_log(
             "rq_job_started",
             task_id=task_id,
@@ -109,14 +103,15 @@ def _build_persistence(settings: Settings) -> PostgresReviewPersistence:
     )
 
 
-def _execution_timeout(settings: Settings) -> int:
-    timeout = (
-        settings.rq_job_timeout_seconds
-        - settings.rq_status_reserve_seconds
+def _build_agent(
+    event_store: ReviewEventStore,
+    settings: Settings,
+) -> ReviewOrchestratorAgent:
+    return ReviewOrchestratorAgent(
+        event_store,
+        node_timeout_seconds=settings.node_timeout_seconds,
+        llm_max_concurrency=settings.llm_max_concurrency,
     )
-    if timeout <= 0:
-        raise RuntimeError("RQ status reserve leaves no execution time")
-    return timeout
 
 
 def _record_worker_failure(

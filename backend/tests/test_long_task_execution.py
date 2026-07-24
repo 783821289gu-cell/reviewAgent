@@ -298,7 +298,10 @@ class LongTaskExecutionTest(unittest.TestCase):
 
         final = store.get_task(task_id)
         self.assertEqual(final.status, ReviewStatus.EVIDENCE_VERIFIED)
-        self.assertEqual(evidence_calls, [finding["risk_id"] for finding in findings])
+        self.assertCountEqual(
+            evidence_calls,
+            [finding["risk_id"] for finding in findings],
+        )
         self.assertEqual(len(final.risk_findings), 2)
 
     def _persist_checkpoint(
