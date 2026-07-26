@@ -275,3 +275,13 @@ Redis 缓存也没有被当成可信状态。Embedding 缓存命中后会校验 
 本机 PostgreSQL 17 没有可用的 pgvector 扩展，且当前不采用 Docker。为避免改坏已存在的数据集，最终在 `D:\demo-runtime` 建立独立 PostgreSQL 16 + pgvector 0.8.3 验证实例，完成空库 upgrade、downgrade 后重升、`alembic check` 和真实索引检查。模型下载也固定到 D 盘，并按 Hugging Face revision 和文件 SHA-256 校验；网络代理多次中断时只续传官方固定 revision 文件，没有把不完整权重当成可用模型。
 
 CPU 首次加载 `bge-m3` 并编码 2 条文本约 56.9 秒，属于模型冷启动而不是单次条款推理耗时。模型加载后，61 条款完整建索引、混合召回和 BGE 重排约 25.9 秒，写入 61 条向量，未触发 90 秒节点边界。这个结果只证明当前机器上的 BGE 基础路径可运行；没有真实标注集对照，因此不能写成 Recall 已达标，也不能替代 DeepSeek 风险分析验收。
+
+## 2026-07-26：Memory Store 迁移不能让反馈接口承担模型冷启动
+
+原 SQLite Memory 已经有原始反馈、聚合偏好、冲突、过期和置信度规则，真正需要替换的是单进程存储和进程内向量，而不是重新设计领域规则。第一种直接做法是在每次人工反馈后立即计算 BGE 向量，但当前机器首次加载 `bge-m3` 需要几十秒。这样用户点一次采纳或忽略就可能等待模型冷启动，反馈虽然最终能保存，交互上却像接口卡死，也把模型计算放到了 API 进程。
+
+最终把写入和索引拆开：反馈接口只把不可变 Episode 和重新聚合的偏好写入 LangGraph Postgres Store；偏好记录先以 `index=False` 保存。下一次 RQ Worker 检索 Memory 时，按偏好内容哈希批量补建或刷新向量，再执行语义查询。条款检索和 Memory Store 在同一个 Worker 中复用一份 `BGEEmbeddingProvider`，避免同一任务加载两份相同权重。代价是新反馈第一次被检索时要支付一次索引延迟，但反馈写入不会被 BGE 冷启动阻塞，模型也继续只在 Worker 边界运行。
+
+Store namespace 用合同类型和审查立场的哈希组成，检索不会跨立场；领域层继续执行向量相似度、条款类型、风险类型、冲突、过期和置信度检查。原 `memory_items` 和 `semantic_preferences` 作为迁移来源只读一次，迁移标记只在 Episode、偏好和幂等映射全部写完后保存。这里没有维护业务双写：任务 10 切换前，默认 FastAPI/SQLite 路径仍走旧 Repository，PostgreSQL/RQ 路径走 Store。
+
+真实 PostgreSQL 测试验证了向量写入和召回、包含非空 Episode/偏好的旧数据迁移及重复迁移幂等。审查还发现 Worker 构建失败时，旧的嵌套 `finally` 会让资源 `close()` 异常覆盖真正的 Store 启动错误；现在资源逐个尽力关闭，关闭错误单独记录，原始依赖异常继续向上返回。32 个后端测试模块全部通过，PostgreSQL/Redis 外部组合 25 项通过，Alembic 未把 Store 包管理表识别为业务迁移差异。这些结果只验证存储和检索路径，不证明 Memory 已改善 DeepSeek 的最终风险判断。

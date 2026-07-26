@@ -273,12 +273,15 @@ class ReviewWorkerTest(unittest.TestCase):
             return_value=checkpoint_manager,
         ), patch(
             "workers.review_worker.PostgresHybridClauseRetriever"
-        ) as retriever_type:
+        ) as retriever_type, patch(
+            "workers.review_worker.LangGraphPostgresMemoryStore.postgres"
+        ) as memory_store_factory:
             agent = _build_agent(Mock(), persistence, settings)
 
         self.assertEqual(agent.node_timeout_seconds, 90)
         self.assertEqual(agent.checkpoint_backend, "memory")
         retriever_type.assert_called_once()
+        memory_store_factory.assert_called_once()
         self.assertFalse(hasattr(agent, "task_timeout_seconds"))
         self.assertFalse(hasattr(agent, "deepseek_task_timeout_seconds"))
         agent.close()
@@ -300,6 +303,34 @@ class ReviewWorkerTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "retriever unavailable"):
                 _build_agent(Mock(), persistence, settings)
 
+        checkpoint_manager.close.assert_called_once()
+
+    def test_memory_store_construction_failure_closes_prior_resources(self):
+        settings = Settings(database_url="postgresql+psycopg://local/test")
+        checkpoint_manager = Mock()
+        retriever = Mock()
+        retriever.close.side_effect = RuntimeError("retriever close failed")
+        persistence = Mock()
+        persistence.engine.dialect.name = "postgresql"
+
+        with patch.object(
+            ReviewCheckpointManager,
+            "postgres",
+            return_value=checkpoint_manager,
+        ), patch(
+            "workers.review_worker.PostgresHybridClauseRetriever",
+            return_value=retriever,
+        ), patch(
+            "workers.review_worker.LangGraphPostgresMemoryStore.postgres",
+            side_effect=RuntimeError("memory store unavailable"),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "memory store unavailable",
+            ):
+                _build_agent(Mock(), persistence, settings)
+
+        retriever.close.assert_called_once()
         checkpoint_manager.close.assert_called_once()
 
     def test_pre_execution_failure_is_persisted_as_task_error(self):

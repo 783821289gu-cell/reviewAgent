@@ -33,6 +33,11 @@ from services.log_service import (
     invoke_tool,
     reset_execution_control,
 )
+from services.memory_runtime import (
+    RelatedMemoryStore,
+    bind_memory_store,
+    reset_memory_store,
+)
 from services.planner_service import PlannerOutputInvalidError
 from services.review_workflow import (
     ReviewControlState,
@@ -115,6 +120,7 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
         llm_max_concurrency: int = 2,
         checkpoint_manager: ReviewCheckpointManager | None = None,
         related_clause_retriever: RelatedClauseRetriever | None = None,
+        memory_store: RelatedMemoryStore | None = None,
     ):
         init_kwargs = {
             "node_timeout_seconds": node_timeout_seconds,
@@ -130,6 +136,7 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
             checkpoint_manager or ReviewCheckpointManager.in_memory()
         )
         self._related_clause_retriever = related_clause_retriever
+        self._memory_store = memory_store
         self._graph = build_review_graph(self, _ReviewRuntime)
         self._control_graph = build_review_control_graph(
             self,
@@ -151,6 +158,10 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
     def checkpoint_backend(self) -> str:
         return self._checkpoint_manager.backend
 
+    @property
+    def memory_store(self) -> RelatedMemoryStore | None:
+        return self._memory_store
+
     def close(self) -> None:
         with self._execution_futures_lock:
             active_futures = tuple(self._execution_futures)
@@ -160,7 +171,11 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
             if self._related_clause_retriever is not None:
                 self._related_clause_retriever.close()
         finally:
-            self._checkpoint_manager.close()
+            try:
+                if self._memory_store is not None:
+                    self._memory_store.close()
+            finally:
+                self._checkpoint_manager.close()
 
     def start(
         self,
@@ -359,6 +374,7 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
             self._related_clause_retriever,
             task_id,
         )
+        memory_token = bind_memory_store(self._memory_store)
         write_runtime_log(
             "task_started",
             task_id=task_id,
@@ -474,6 +490,7 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
             reset_execution_control(control_token)
             reset_llm_mode(llm_mode_token)
             reset_related_clause_retriever(retrieval_token)
+            reset_memory_store(memory_token)
             self.event_store.release_execution(task_id, resolved_owner)
 
     def checkpoint_phase(

@@ -24,6 +24,7 @@ def submit_feedback(
             task_id,
             feedback_payload,
             event_store=event_store,
+            memory_store=review_agent.memory_store,
         )
         resumed = review_agent.resume_human_review(
             task_id,

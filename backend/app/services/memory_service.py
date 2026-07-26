@@ -17,6 +17,11 @@ from providers.embedding_provider import (
     embedding_call_records_from_tool_input,
 )
 from services.embedding_service import cosine_similarity, embed_texts
+from services.memory_runtime import current_memory_store
+from services.memory_text import (
+    build_memory_query_text,
+    build_preference_embedding_text,
+)
 
 
 DEFAULT_MEMORY_STALE_AFTER_DAYS = 365
@@ -66,6 +71,22 @@ def retrieve_memory(tool_input: dict) -> list[dict]:
     if memory_items not in (None, []):
         raise ValueError("memory_items must be a list")
 
+    memory_store = current_memory_store()
+    if memory_store is not None:
+        return _query_bound_store_preferences(
+            memory_store=memory_store,
+            contract_type=contract_type,
+            clause=clause,
+            risk_type=risk_type,
+            review_position=review_position,
+            limit=limit,
+            now=now,
+            stale_after_days=stale_after_days,
+            embedding_call_records=embedding_call_records_from_tool_input(
+                tool_input
+            ),
+        )
+
     return _query_sqlite_preferences(
         contract_type=contract_type,
         clause=clause,
@@ -86,8 +107,17 @@ def write_memory(tool_input: dict) -> dict:
         raise ValueError("human_feedback must be a dict")
 
     feedback = build_human_feedback(raw_feedback)
+    idempotency_key = str(tool_input.get("idempotency_key") or "") or None
+    memory_store = current_memory_store()
+    memory_id = str(raw_feedback.get("memory_id") or "")
+    if not memory_id:
+        memory_id = (
+            memory_store.stable_memory_id(idempotency_key)
+            if memory_store is not None and idempotency_key
+            else f"MEM-{uuid4().hex[:12]}"
+        )
     item = MemoryItem(
-        memory_id=str(raw_feedback.get("memory_id") or f"MEM-{uuid4().hex[:12]}"),
+        memory_id=memory_id,
         memory_type="human_feedback",
         contract_type=feedback.contract_type,
         clause_type=feedback.clause_type,
@@ -105,10 +135,16 @@ def write_memory(tool_input: dict) -> dict:
         created_at=_parse_timestamp(feedback.created_at).isoformat(),
     )
 
+    if memory_store is not None:
+        return memory_store.save(
+            item.to_dict(),
+            idempotency_key=idempotency_key,
+        )
+
     repository = MemoryRepository(str(tool_input.get("db_path") or settings.memory_db_path))
     return repository.save(
         item.to_dict(),
-        idempotency_key=str(tool_input.get("idempotency_key") or "") or None,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -254,13 +290,88 @@ def _query_sqlite_preferences(
         embedding_call_records=embedding_call_records,
         now=now,
     )
+    return _ranked_preference_payloads(
+        ranked_preferences,
+        limit=limit,
+        source="sqlite_vector_memory",
+        now=now,
+        stale_after_days=stale_after_days,
+        update_lifecycle=lambda preference, payload, now_text: (
+            repository.update_preference_lifecycle(
+                preference["preference_id"],
+                lifecycle_status=payload["lifecycle_status"],
+                confidence=float(payload["confidence"]),
+                updated_at=now_text,
+                last_used_at=(
+                    now_text
+                    if payload["lifecycle_status"] == "active"
+                    else None
+                ),
+            )
+        ),
+    )
+
+
+def _query_bound_store_preferences(
+    *,
+    memory_store,
+    contract_type: str,
+    clause: dict,
+    risk_type: str,
+    review_position: str,
+    limit: int,
+    now: datetime,
+    stale_after_days: int,
+    embedding_call_records: list | None,
+) -> list[dict]:
+    ranked_preferences = memory_store.find_ranked_preferences(
+        contract_type=contract_type,
+        clause=clause,
+        risk_type=risk_type,
+        review_position=review_position,
+        limit=limit,
+        embedding_call_records=embedding_call_records,
+    )
+    return _ranked_preference_payloads(
+        ranked_preferences,
+        limit=limit,
+        source=memory_store.source,
+        now=now,
+        stale_after_days=stale_after_days,
+        update_lifecycle=lambda preference, payload, now_text: (
+            memory_store.update_preference_lifecycle(
+                preference["preference_id"],
+                contract_type=preference["contract_type"],
+                review_position=preference["review_position"],
+                lifecycle_status=payload["lifecycle_status"],
+                confidence=float(payload["confidence"]),
+                updated_at=now_text,
+                last_used_at=(
+                    now_text
+                    if payload["lifecycle_status"] == "active"
+                    else None
+                ),
+            )
+        ),
+    )
+
+
+def _ranked_preference_payloads(
+    ranked_preferences: list[dict],
+    *,
+    limit: int,
+    source: str,
+    now: datetime,
+    stale_after_days: int,
+    update_lifecycle,
+) -> list[dict]:
     payloads = []
     now_text = now.isoformat()
     for ranked in ranked_preferences[:limit]:
         preference = ranked["preference"]
         payload = _preference_payload(
             preference,
-            source="sqlite_vector_memory",
+            source=source,
             match_score=ranked["match_score"],
             now=now,
             stale_after_days=stale_after_days,
@@ -295,13 +406,7 @@ def _query_sqlite_preferences(
                 "retrieval_strategy": "vector_with_structured_safety_filters",
             }
         )
-        repository.update_preference_lifecycle(
-            preference["preference_id"],
-            lifecycle_status=payload["lifecycle_status"],
-            confidence=float(payload["confidence"]),
-            updated_at=now_text,
-            last_used_at=now_text if payload["lifecycle_status"] == "active" else None,
-        )
+        update_lifecycle(preference, payload, now_text)
         if payload["lifecycle_status"] == "active":
             payload["last_used_at"] = now_text
         payloads.append(payload)
@@ -450,52 +555,6 @@ def _rank_preferences_by_embedding(
             item["preference"]["preference_id"],
         ),
         reverse=True,
-    )
-
-
-def build_memory_query_text(
-    contract_type: str,
-    clause: dict,
-    risk_type: str,
-    review_position: str,
-) -> str:
-    key_fields = clause.get("key_fields") or {}
-    return " ".join(
-        part
-        for part in (
-            contract_type,
-            review_position,
-            risk_type,
-            str(clause.get("clause_type", "")),
-            str(clause.get("title", "")),
-            str(clause.get("text", "")),
-            json.dumps(key_fields, ensure_ascii=False, sort_keys=True),
-        )
-        if part
-    )
-
-
-def build_preference_embedding_text(preference: dict) -> str:
-    variants = []
-    for variant in preference.get("variants") or []:
-        variants.extend(
-            [
-                str(variant.get("stance", "")),
-                str(variant.get("final_severity", "")),
-                str(variant.get("final_suggestion", "")),
-            ]
-        )
-    return " ".join(
-        part
-        for part in (
-            str(preference.get("contract_type", "")),
-            str(preference.get("review_position", "")),
-            str(preference.get("clause_type", "")),
-            str(preference.get("risk_type", "")),
-            str(preference.get("conflict_status", "")),
-            *variants,
-        )
-        if part
     )
 
 

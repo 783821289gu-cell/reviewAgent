@@ -376,3 +376,20 @@ python -m unittest backend.tests.test_langgraph_checkpoint.PostgresCheckpointInt
 ```
 
 当前默认 FastAPI 入口仍是 SQLite 和进程内 Checkpointer；PostgreSQL、RQ 和 PostgresSaver 的默认切换在迁移任务 10 一次性完成，当前不双写业务数据。
+
+## LangGraph Postgres Store Memory
+
+RQ Worker 使用 `langgraph.store.postgres.PostgresStore` 保存人工反馈 Episode 和聚合偏好。合同类型与审查立场是 namespace 级硬隔离条件；现有冲突、过期、置信度衰减、Playbook 优先和证据约束规则继续由领域层决定，Store 不会让历史偏好覆盖当前规则或合同原文。
+
+Memory 向量与条款检索共享同一个 `BAAI/bge-m3` Provider，使用 1024 维归一化向量、余弦距离和 HNSW `m=16`、`ef_construction=64`、`ef_search=80`。反馈写入不会同步冷启动 BGE；聚合偏好在下一次 Worker 检索时按内容哈希惰性建立或刷新索引。排序权重保持为向量相似度 0.7、条款类型精确命中 0.15、风险类型精确命中 0.15。
+
+LangGraph Store 自己管理 PostgreSQL `app` schema 中的 `store`、`store_vectors`、`store_migrations` 和 `vector_migrations` 表，Alembic 不管理这些表。原 `memory_items` 和 `semantic_preferences` 仅作为一次迁移来源；稳定幂等键防止同一人工反馈生成重复 Episode。
+
+外部集成测试默认跳过，显式验收命令如下：
+
+```powershell
+$env:REVIEW_AGENT_RUN_EXTERNAL_TESTS = "1"
+python -m unittest backend.tests.test_langgraph_memory_store -v
+```
+
+当前只有 PostgreSQL/RQ Agent 路径使用 Postgres Store；默认 FastAPI/SQLite 入口仍使用原 Memory Repository，任务 10 才一次性切换。现有验证证明持久化、迁移和向量召回路径可运行，不代表 Memory 已证明改善 DeepSeek 风险判断效果。

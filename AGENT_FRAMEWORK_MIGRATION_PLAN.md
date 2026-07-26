@@ -168,6 +168,17 @@ Docker 相关工作按用户最新指令后置，当前不安装、不维护 Com
 - 任务 6 相关测试、配置/迁移/队列/Checkpoint 外部测试均通过；31 个后端测试模块在每模块 180 秒限制下全部通过，总耗时 250.9 秒。真实 PostgreSQL Alembic 漂移检查返回 `No new upgrade operations detected`。
 - 以上真实模型结果验证本地 BGE 与检索基础设施，不代表 DeepSeek 风险分析效果或真实标注集召回率已经达标。默认应用入口和旧检索清理仍属于任务 10。
 
+### 任务 7：已完成
+
+- RQ Worker 路径接入 `langgraph.store.postgres.PostgresStore`，原始人工反馈保存为不可变 Episode，聚合偏好按合同类型和审查立场隔离保存。现有相似反馈聚合、冲突、过期、置信度衰减、Playbook 优先级和证据约束规则保持不变。
+- Memory Store 使用 PostgreSQL `app` schema 中由 LangGraph 包管理的 `store`、`store_vectors` 等表；Alembic 显式排除这些表，避免未来迁移误删包管理数据。业务表 `memory_items`、`semantic_preferences` 只作为一次迁移来源，不维护双写。
+- Memory 向量使用与条款检索共享的 `BAAI/bge-m3` Provider、1024 维归一化向量、余弦距离和 HNSW `m=16`、`ef_construction=64`、`ef_search=80`。同一 Worker 内只创建一份 BGE Embedding Provider，避免同一任务重复加载模型。
+- 人工反馈先写入 Episode 和聚合偏好，偏好向量在下一次 Worker 检索时按内容哈希惰性建立或刷新；反馈接口不因 BGE 冷启动被阻塞。检索先按合同类型和审查立场硬隔离，再使用向量相似度 0.7、条款类型精确命中 0.15、风险类型精确命中 0.15 排序。
+- 稳定反馈幂等键生成稳定 Memory ID；同一幂等键重复提交不会写入第二条 Episode。SQLite/PostgreSQL 迁移保留反馈、聚合偏好、生命周期和置信度，并使用迁移标记保证重复启动不会重复迁移。
+- Code Review 修复 Worker 构建失败时资源关闭异常覆盖原始依赖错误的问题；现在逐个尽力关闭检索器、Memory Store 和 Checkpointer，并保留最初的启动异常。
+- 32 个后端测试模块在每模块 180 秒限制下全部通过，总耗时约 196 秒。真实 PostgreSQL 16 + pgvector、Redis 验收覆盖 Memory 向量写入/召回、非空旧数据迁移、RQ 事件和 Checkpoint，共 25 项通过；`alembic check` 返回 `No new upgrade operations detected`。
+- 当前只有 PostgreSQL/RQ Agent 路径使用 LangGraph Postgres Store。默认 FastAPI/SQLite 入口继续使用原 Memory Repository，直到任务 10 一次性切换；本轮结果不代表 Memory 已证明改善 DeepSeek 风险判断效果。
+
 ### 下一个任务
 
-任务 7：实现 LangGraph Postgres Store Memory。
+任务 8：使用 Docling 统一 PDF/DOCX 文档解析。

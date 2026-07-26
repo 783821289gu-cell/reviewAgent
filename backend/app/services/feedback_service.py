@@ -9,6 +9,11 @@ from models.review import ReviewStatus
 from services.evidence_service import evidence_location_for_text
 from services.event_service import ReviewEventStore, review_event_store
 from services.log_service import invoke_tool
+from services.memory_runtime import (
+    RelatedMemoryStore,
+    bind_memory_store,
+    reset_memory_store,
+)
 from tools.registry import tool_registry
 
 
@@ -26,6 +31,7 @@ def apply_feedback_to_task(
     feedback_payload: dict,
     event_store: ReviewEventStore = review_event_store,
     db_path: str | None = None,
+    memory_store: RelatedMemoryStore | None = None,
 ) -> dict:
     task = event_store.get_task(task_id)
     if task is None:
@@ -77,15 +83,25 @@ def apply_feedback_to_task(
     resolved_db_path = db_path or event_store.db_path
     if resolved_db_path:
         tool_input["db_path"] = resolved_db_path
+    if resolved_db_path or memory_store is not None:
         tool_input["idempotency_key"] = _feedback_idempotency_key(task_id, feedback_payload)
-    memory_item = invoke_tool(
-        task_id,
-        tool_registry,
-        "write_memory",
-        tool_input,
-        logs,
-        step_name="memory_write",
+    memory_token = (
+        bind_memory_store(memory_store)
+        if memory_store is not None
+        else None
     )
+    try:
+        memory_item = invoke_tool(
+            task_id,
+            tool_registry,
+            "write_memory",
+            tool_input,
+            logs,
+            step_name="memory_write",
+        )
+    finally:
+        if memory_token is not None:
+            reset_memory_store(memory_token)
 
     _apply_feedback_to_risk(
         risk,

@@ -25,6 +25,12 @@ if database_url:
 
 target_metadata = Base.metadata
 MANAGED_SCHEMAS = {None, "app"}
+LANGGRAPH_STORE_TABLES = {
+    "store",
+    "store_migrations",
+    "store_vectors",
+    "vector_migrations",
+}
 
 
 def _configured_url() -> str:
@@ -39,6 +45,12 @@ def _configured_url() -> str:
 def _include_name(name, type_, parent_names) -> bool:
     if type_ == "schema":
         return name in MANAGED_SCHEMAS
+    if (
+        type_ == "table"
+        and parent_names.get("schema_name") == "app"
+        and name in LANGGRAPH_STORE_TABLES
+    ):
+        return False
     return True
 
 

@@ -7,8 +7,10 @@ from config import Settings
 from db.postgres_persistence import PostgresReviewPersistence
 from services.event_notification import RedisEventNotifier
 from models.review import ReviewStatus
+from providers.bge_provider import BGEEmbeddingProvider
 from services.checkpoint_service import ReviewCheckpointManager
 from services.event_service import ReviewEventStore, TERMINAL_STATUSES
+from services.langgraph_memory_store import LangGraphPostgresMemoryStore
 from services.postgres_clause_retrieval import PostgresHybridClauseRetriever
 from services.review_service import ReviewOrchestratorAgent
 from services.runtime_log_service import configure_runtime_logging, write_runtime_log
@@ -117,11 +119,19 @@ def _build_agent(
 ) -> ReviewOrchestratorAgent:
     checkpoint_manager = ReviewCheckpointManager.postgres(settings.database_url)
     related_clause_retriever = None
+    memory_store = None
     try:
+        embedding_provider = BGEEmbeddingProvider(settings)
         related_clause_retriever = PostgresHybridClauseRetriever(
             persistence.engine,
             Redis.from_url(settings.redis_url),
             settings,
+            embedding_provider=embedding_provider,
+        )
+        memory_store = LangGraphPostgresMemoryStore.postgres(
+            settings.database_url,
+            settings,
+            embedding_provider=embedding_provider,
         )
         return ReviewOrchestratorAgent(
             event_store,
@@ -129,11 +139,29 @@ def _build_agent(
             llm_max_concurrency=settings.llm_max_concurrency,
             checkpoint_manager=checkpoint_manager,
             related_clause_retriever=related_clause_retriever,
+            memory_store=memory_store,
         )
     except Exception:
-        if related_clause_retriever is not None:
-            related_clause_retriever.close()
-        checkpoint_manager.close()
+        resources = (
+            ("related_clause_retriever", related_clause_retriever),
+            ("memory_store", memory_store),
+            ("checkpoint_manager", checkpoint_manager),
+        )
+        for resource_name, resource in resources:
+            if resource is None:
+                continue
+            try:
+                resource.close()
+            except Exception as cleanup_error:
+                try:
+                    write_runtime_log(
+                        "worker_resource_cleanup_failed",
+                        resource=resource_name,
+                        error_type=cleanup_error.__class__.__name__,
+                        error_message=str(cleanup_error)[:300],
+                    )
+                except Exception:
+                    pass
         raise
 
 
