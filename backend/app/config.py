@@ -98,6 +98,15 @@ def _bounded_positive_int(name: str, default: str, maximum: int) -> int:
     return value
 
 
+def _boolean(name: str, default: str = "false") -> bool:
+    value = os.getenv(name, default).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str = os.getenv("REVIEW_AGENT_HOST", "127.0.0.1")
@@ -236,6 +245,30 @@ class Settings:
         _default_runtime_log_file(),
     )
     runtime_log_level: str = os.getenv("REVIEW_AGENT_RUNTIME_LOG_LEVEL", "INFO").upper()
+    mcp_enabled: bool = field(
+        default_factory=lambda: _boolean("REVIEW_AGENT_MCP_ENABLED")
+    )
+    observability_enabled: bool = field(
+        default_factory=lambda: _boolean("REVIEW_AGENT_OBSERVABILITY_ENABLED")
+    )
+    otel_service_name: str = os.getenv(
+        "REVIEW_AGENT_OTEL_SERVICE_NAME",
+        "contract-review-agent",
+    ).strip()
+    otel_exporter_otlp_traces_endpoint: str = os.getenv(
+        "REVIEW_AGENT_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        "",
+    ).strip()
+    otel_exporter_otlp_headers: str = os.getenv(
+        "REVIEW_AGENT_OTEL_EXPORTER_OTLP_HEADERS",
+        "",
+    ).strip()
+    otel_export_timeout_seconds: float = field(
+        default_factory=lambda: _positive_float(
+            "REVIEW_AGENT_OTEL_EXPORT_TIMEOUT_SECONDS",
+            "10",
+        )
+    )
     service_name: str = "contract-review-agent"
 
 

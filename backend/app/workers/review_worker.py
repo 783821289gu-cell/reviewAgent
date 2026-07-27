@@ -11,6 +11,10 @@ from providers.bge_provider import BGEEmbeddingProvider
 from services.checkpoint_service import ReviewCheckpointManager
 from services.event_service import ReviewEventStore, TERMINAL_STATUSES
 from services.langgraph_memory_store import LangGraphPostgresMemoryStore
+from services.observability_service import (
+    configure_observability,
+    shutdown_observability,
+)
 from services.postgres_clause_retrieval import PostgresHybridClauseRetriever
 from services.review_service import ReviewOrchestratorAgent
 from services.runtime_log_service import configure_runtime_logging, write_runtime_log
@@ -23,6 +27,7 @@ def execute_review_job(task_id: str) -> dict:
         settings.runtime_log_file,
         settings.runtime_log_level,
     )
+    configure_observability(settings)
     persistence = _build_persistence(settings)
     event_store = None
     agent = None
@@ -98,6 +103,7 @@ def main() -> int:
         worker.work(with_scheduler=False)
     finally:
         heartbeat.stop()
+        shutdown_observability()
     return 0
 
 

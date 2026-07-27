@@ -86,6 +86,9 @@
 78. 工具超时线程复制任务上下文，本地任务不会因全局 DeepSeek 配置而越界调用外部模型。
 79. LangGraph 节点超时默认 90 秒，不再使用应用层累计任务时限；RQ 硬超时默认 7200 秒并预留 120 秒状态落库窗口。关键字段和首次风险分析使用默认 2、最大 4 的受控并发，运行日志另写入可轮转的本地文件。
 80. SQLite 使用 WAL 与 `synchronous=NORMAL` 支持高频增量进度事务；细粒度 SSE 进度不重复保存完整历史任务快照，业务节点事件仍完整持久化。
+81. 14 个显式工具均绑定严格 Pydantic 输入/输出模型；`/api/tools` 同时返回机器可读 JSON Schema，LangChain `StructuredTool` 从同一 `tool_registry` 生成，不维护第二份工具清单。
+82. MCP 使用 Streamable HTTP 挂载在本地 `/mcp`，默认关闭；启用时要求 API 绑定 `127.0.0.1`，并再次校验请求来源。只暴露 11 个分析/检索工具，不暴露 `parse_document`、`write_memory` 和 `generate_report`。
+83. OpenTelemetry OTLP 工具 Trace 默认关闭，可直接发送到兼容 OTLP 的 Collector 或 Langfuse。Span 只记录任务、Trace、Step、工具、重试、状态和耗时，不记录合同正文、Prompt、证据、Memory、工具输入输出或凭据。
 
 ## 当前未实现
 
@@ -160,6 +163,9 @@ OCR 无法识别的低清扫描件和无有效文本文件不会进入合同类�
 7. `python-docx`：生成项目评测与测试使用的合法 DOCX Office 包，固定为 `1.2.0`。
 8. `pdfplumber`：只用于 PDF 签名、加密、损坏和复杂字体失败诊断，不再承担正文与坐标提取；固定为 `0.11.10`。
 9. Node.js、pnpm 和 `playwright@1.60.0`：只用于 Chromium 浏览器 E2E，不属于应用运行依赖。
+10. `langchain-core`：从现有显式 Tool Registry 生成 `StructuredTool`，不负责工作流编排。
+11. `mcp`：提供默认关闭、仅本机可用的 Streamable HTTP MCP 端点。
+12. `opentelemetry-api/sdk` 与 OTLP HTTP Exporter：提供可选工具级 Trace；Langfuse 通过其原生 OTLP 接口接收，不要求应用依赖 Langfuse SDK。
 
 安装：
 
@@ -214,6 +220,31 @@ python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
 ```
 
 未配置 Key 时服务仍可启动；界面打开 DeepSeek 开关创建任务时会返回配置错误。默认代码配置是 `local_structured`，而 `.env.example` 有意展示 DeepSeek 外部模式。成本单价未配置时只记录 token 和“未配置”，不推测金额。
+
+## MCP 配置
+
+MCP 默认不存在。只在 API 本身绑定回环地址时启用：
+
+```dotenv
+REVIEW_AGENT_HOST=127.0.0.1
+REVIEW_AGENT_MCP_ENABLED=true
+```
+
+启动方式不变，Streamable HTTP 客户端连接 `http://127.0.0.1:8000/mcp`。工具名来自现有 14 项 `tool_registry`；MCP 只暴露其中 11 项，文件解析、Memory 写入和报告文件生成不会对外开放。
+
+## OTLP / Langfuse 配置
+
+默认不发送 Trace。通用 OTLP HTTP Collector 配置如下：
+
+```dotenv
+REVIEW_AGENT_OBSERVABILITY_ENABLED=true
+REVIEW_AGENT_OTEL_SERVICE_NAME=contract-review-agent
+REVIEW_AGENT_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces
+REVIEW_AGENT_OTEL_EXPORTER_OTLP_HEADERS=
+REVIEW_AGENT_OTEL_EXPORT_TIMEOUT_SECONDS=10
+```
+
+Langfuse 使用 `https://<langfuse-host>/api/public/otel/v1/traces`，并按 Langfuse 文档把 URL 编码后的 Basic Authorization 与 `x-langfuse-ingestion-version=4` 写入 `REVIEW_AGENT_OTEL_EXPORTER_OTLP_HEADERS`。Header 值只写本地 `.env`，不提交仓库；默认 Trace 不含合同正文和模型上下文。
 
 ## 运行服务
 

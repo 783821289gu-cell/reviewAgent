@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -12,8 +12,13 @@ from config import Settings, settings
 from db.repositories import ReviewPersistence
 from services.event_service import ReviewEventStore
 from services.event_notification import PersistentEventStream
+from services.mcp_service import create_mcp_runtime
+from services.observability_service import (
+    configure_observability,
+    shutdown_observability,
+)
 from services.review_service import ReviewOrchestratorAgent
-from services.runtime_log_service import configure_runtime_logging
+from services.runtime_log_service import close_runtime_logging, configure_runtime_logging
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +34,7 @@ def create_app(
         app_settings.runtime_log_file,
         app_settings.runtime_log_level,
     )
+    mcp_runtime = create_mcp_runtime(app_settings)
     if event_store is None:
         event_store = ReviewEventStore(
             ReviewPersistence(app_settings.memory_db_path, app_settings.upload_dir)
@@ -37,27 +43,36 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.accepting_tasks = False
-        try:
-            loaded_states = event_store.load_persisted()
-            app.state.materialized_evidence_task_ids = (
-                app.state.review_agent.materialize_legacy_evidence_failures(
-                    loaded_states
+        async with AsyncExitStack() as stack:
+            stack.callback(_close_runtime_resources, app.state.review_agent)
+            try:
+                app.state.observability = configure_observability(app_settings)
+                if mcp_runtime is not None:
+                    await stack.enter_async_context(
+                        mcp_runtime.server.session_manager.run()
+                    )
+                loaded_states = event_store.load_persisted()
+                app.state.materialized_evidence_task_ids = (
+                    app.state.review_agent.materialize_legacy_evidence_failures(
+                        loaded_states
+                    )
                 )
-            )
-            app.state.recovered_task_ids = (
-                app.state.review_agent.recover_pending_tasks()
-            )
-            app.state.accepting_tasks = True
-            yield
-        finally:
-            app.state.accepting_tasks = False
-            event_store.notify_waiters()
-            app.state.review_agent.close()
+                app.state.recovered_task_ids = (
+                    app.state.review_agent.recover_pending_tasks()
+                )
+                app.state.accepting_tasks = True
+                yield
+            finally:
+                app.state.accepting_tasks = False
+                event_store.notify_waiters()
+                app.state.observability = None
 
     application = FastAPI(title="ContractReviewAgent", lifespan=lifespan)
     application.state.settings = app_settings
     application.state.event_store = event_store
     application.state.persistent_event_stream = persistent_event_stream
+    application.state.observability = None
+    application.state.mcp_runtime = mcp_runtime
     application.state.review_agent = ReviewOrchestratorAgent(
         event_store,
         node_timeout_seconds=app_settings.node_timeout_seconds,
@@ -83,6 +98,8 @@ def create_app(
     application.include_router(reports.router)
     application.include_router(local_review.router)
     application.include_router(evaluation.router)
+    if mcp_runtime is not None:
+        application.mount("/mcp", mcp_runtime.application, name="mcp")
 
     application.mount("/src", StaticFiles(directory=FRONTEND_DIR / "src"), name="frontend-src")
 
@@ -91,6 +108,16 @@ def create_app(
         return FileResponse(FRONTEND_DIR / "index.html")
 
     return application
+
+
+def _close_runtime_resources(review_agent: ReviewOrchestratorAgent) -> None:
+    try:
+        review_agent.close()
+    finally:
+        try:
+            shutdown_observability()
+        finally:
+            close_runtime_logging()
 
 
 app = create_app()

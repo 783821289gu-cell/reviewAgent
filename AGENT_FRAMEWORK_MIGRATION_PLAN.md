@@ -189,6 +189,16 @@ Docker 相关工作按用户最新指令后置，当前不安装、不维护 Com
 - 用户提供的 `Confidentiality Agreement.pdf` 由真实 Docling 模型在 12.269 秒内解析为 5 页、133 个正文块，133 个块均带页码和四元 `bbox`；文件未复制到仓库，也未在本任务调用 DeepSeek。
 - 32 个后端测试模块在每模块 300 秒限制下全部通过，审查修复后的最终一轮耗时 547.6 秒；直接受影响的 Python 编译、JS 语法、依赖检查、PDF/文档/配置/节点超时测试和 1 个 Chromium 扫描 OCR 用例均通过。外部 PostgreSQL/Redis opt-in 测试本轮未运行，因为 PostgreSQL 与 Worker 当时处于停止状态；没有将其记录为通过。
 
+### 任务 9 完成记录
+
+- 14 个显式 Tool Contract 均绑定 Pydantic 输入/输出模型，`/api/tools` 返回对应 JSON Schema；14 个 LangChain `StructuredTool` 直接按现有 `tool_registry` 生成，没有新增第二份工具清单。
+- 外部适配层统一处理 Pydantic 输入校验、领域 dataclass/列表 JSON 序列化、必要的输出对象包装和输出模型校验；内部 Agent 仍调用原 Registry 函数，不改变 LLM Provider 或领域流程。
+- MCP 固定 `mcp==1.28.1`，使用 Streamable HTTP 挂载 `/mcp`，默认关闭。启用时要求 `REVIEW_AGENT_HOST=127.0.0.1`，并执行请求 IP 回环校验；只暴露 11 个工具，排除 `parse_document`、`write_memory` 和 `generate_report`。
+- OpenTelemetry 固定 1.44.0，通过 OTLP HTTP Exporter 可选发送工具 Span。默认关闭；Span 只记录任务/Trace/Step 标识、工具、重试、状态和耗时，异常只记录类型，不发送合同、Prompt、证据、Memory、输入输出或凭据。Langfuse 使用原生 OTLP endpoint，不增加 Langfuse SDK。
+- 依赖解析实际出现 MCP 将 Starlette 升级到与 FastAPI 不兼容的问题；最终固定 `starlette==0.47.3` 与 `sse-starlette==3.0.3`，`pip check` 已恢复通过。
+- Code Review 补齐 FastAPI 生命周期中的 MCP Session Manager，并把 Agent、OpenTelemetry 与轮转日志按顺序纳入同一清理回调；即使 Agent 关闭失败，OTel flush 和日志句柄关闭也继续执行。Pydantic 模型不再全局裁剪字符串，避免合同原文和证据在外部工具边界被静默改写。
+- 34 个后端测试模块、305 项测试在每模块 300 秒限制下全部通过，总耗时 525.2 秒；Python 编译、`pip check`、差异空白检查、MCP `initialize` / `tools/list` 协议调用、14 个 StructuredTool 生成和 OTel 脱敏 Span 均已验证。没有连接外部 OTLP/Langfuse 服务；Docker 仍按用户指令后置，该运行环境验收保留到任务 10。
+
 ### 下一个任务
 
-任务 9：为显式 Tool Registry 增加 Pydantic Tool、MCP 与 OpenTelemetry/Langfuse 适配。
+下一项是任务 10：运行环境验收、默认入口直接切换、确认无引用后清理旧实现，并完成全量与真实服务验收。Docker 仍按用户指令后置，是否重新采用需在该任务开始时确认。

@@ -298,3 +298,19 @@ Store namespace 用合同类型和审查立场的哈希组成，检索不会跨�
 另一个边界是超时。Docling 文档时限设为 300 秒，但 Agent 通用节点边界是 90 秒；若不处理，解析器的配置只是表面值，工具控制会提前终止。最终只给 PDF 解析节点传入 `max(通用节点时限, Docling 时限 + 30 秒)`，当前为 330 秒；DOCX 和其他工具仍保持 90 秒，RQ 的 7200 秒最终硬超时也没有改变。这是节点级例外，不是恢复已经证明会误报长合同的全任务累计计时器。
 
 真实验证使用用户提供的 404,525 字节 `Confidentiality Agreement.pdf`，Docling 在 12.269 秒内解析 5 页、133 个正文块，全部块都有页码和四元 bbox。32 个后端测试模块在每模块 300 秒限制下全部通过，审查修复后的最终一轮耗时 547.6 秒；扫描 PDF Chromium 用例通过。外部 PostgreSQL/Redis opt-in 测试本轮没有重跑，因为 PostgreSQL 和 Worker 当时停止；用户 PDF 也没有在任务 8 调用 DeepSeek。这些未执行项继续保留到后续切换/最终验收，不能混写成 Docling 已证明 Agent 模型效果。
+
+## 2026-07-27：接入现成 Tool/MCP 框架不能再复制一份工具清单
+
+原来的 `ToolContract` 用字符串描述输入输出，例如 `"dict"`、`"list[Clause]"`。它适合给人看，但 LangChain、MCP 和调用方不能据此自动校验。最直接的做法是再维护一份 LangChain Tool 列表和一份 MCP Tool 列表，但项目已经发生过手工结构同步遗漏；三份工具名称、参数和输出继续靠记忆同步，会重现同类问题。
+
+最终仍把 `tool_registry` 保留为唯一工具清单，在每个已有 `ToolContract` 上绑定 Pydantic 输入模型、输出模型和必要的输出包装键。LangChain 的 14 个 `StructuredTool` 与 MCP 的 11 个工具都按 Registry 顺序动态生成，名称和描述也来自同一契约。现有内部工具函数继续保持原返回类型，适配层只在外部边界把 dataclass/list 转为 JSON 并执行输出校验，因此没有为接框架重写 Agent 领域流程。
+
+MCP 不能因为“只在本机开发”就默认暴露全部能力。文件解析可以接收原始文件，Memory 和报告工具会写入持久状态或文件，所以这三项明确排除。MCP 默认关闭；启用时 API 必须绑定 `127.0.0.1`，请求还要通过 IP 回环校验，MCP SDK 自带的 DNS rebinding 防护继续开启。协议级测试实际执行了 `initialize` 和 `tools/list`，不是只检查 Python 字典。
+
+可观测性也不能把现有 Step Log 的完整摘要直接复制到第三方。合同正文、Prompt、证据和 Memory 都可能包含敏感信息，异常消息也可能夹带原文。最终 OpenTelemetry Span 只记录 `task_id`、`trace_id`、`step_id`、工具/步骤名、重试、状态和耗时；异常只记录异常类型，显式关闭自动异常事件和异常消息。OTLP HTTP 是统一出口，Langfuse 使用其原生 OTLP endpoint 和本地 Header 配置，不再引入一套专用 SDK 与回调。
+
+依赖安装时，`mcp==1.28.1` 的传递依赖一度把 Starlette 升到与当前 FastAPI 不兼容的版本。没有以“能 import”作为完成标准，而是恢复 `starlette==0.47.3`，选择兼容的 `sse-starlette==3.0.3`，固定相关版本后重新执行 `pip check`。这也是本轮把直接依赖写全的原因：后续环境重建不能再依赖解析器碰巧选择同一组合。
+
+审查时又发现两个容易静默发生的问题。第一版 Pydantic 基类设置了 `str_strip_whitespace=True`，这对普通表单字段方便，但合同原文、证据和 Prompt 都不是可以随意规范化的普通字段；外部 Tool 一旦先经过模型校验，首尾空白就会在进入领域逻辑前被改写。最终只保留 `extra="forbid"`，标识符和业务枚举仍由各字段及原有领域校验负责，源文本保持逐字传递。第二个问题是 FastAPI 关闭流程按顺序直接调用 Agent、OTel 和日志清理；如果 Agent 资源关闭抛错，后两项就不会执行，Windows 上会留下被占用的日志文件，遥测缓冲也可能丢失。现在三项进入同一个 `finally` 链，顺序固定为 Agent、OTel、日志，前一项失败不会跳过后续清理。
+
+最终按模块运行 34 个后端测试文件、305 项测试，耗时 525.2 秒并全部通过。MCP 已完成真实协议 `initialize` 和 `tools/list`，OpenTelemetry 使用内存 Exporter 验证字段白名单与异常脱敏；没有启动外部 Langfuse 或 OTLP 服务，因为 Docker 仍按用户指令后置。这一限制保留到任务 10，不能把本地 Span 测试写成第三方可观测服务已经部署。

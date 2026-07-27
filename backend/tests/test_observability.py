@@ -4,17 +4,28 @@ import json
 import sys
 import unittest
 
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
+
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 TEST_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(APP_DIR))
 sys.path.insert(0, str(TEST_DIR))
 
+from config import Settings
 from db.repositories import ReviewPersistence
 from models.review import ReviewPosition, ReviewStatus
 from providers.embedding_provider import EmbeddingRequest, LocalSparseEmbeddingProvider
 from services.event_service import ReviewEventStore
 from services.log_service import invoke_tool
+from services.observability_service import (
+    _parse_otlp_headers,
+    configure_observability,
+    shutdown_observability,
+    trace_tool_call,
+)
 from services.review_service import ReviewOrchestratorAgent
 from services.runtime_log_service import (
     close_runtime_logging,
@@ -26,12 +37,15 @@ from test_document_pipeline import build_docx_bytes
 
 class ObservabilityTest(unittest.TestCase):
     def setUp(self):
+        shutdown_observability()
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.db_path = str(self.root / "review.sqlite3")
         self.persistence = ReviewPersistence(self.db_path, str(self.root / "uploads"))
 
     def tearDown(self):
+        shutdown_observability()
+        close_runtime_logging()
         self.temp_dir.cleanup()
 
     def test_trace_and_step_ids_survive_restart(self):
@@ -186,6 +200,117 @@ class ObservabilityTest(unittest.TestCase):
         self.assertIn('"status": "failed"', content)
         self.assertNotIn(secret, content)
         self.assertNotIn("Bearer", content)
+
+    def test_observability_is_disabled_by_default(self):
+        runtime = configure_observability(Settings(observability_enabled=False))
+        self.assertFalse(runtime.enabled)
+        with trace_tool_call(
+            task_id="task-disabled",
+            trace_id="trace-disabled",
+            step_id="step-disabled",
+            step_name="parse",
+            tool_name="parse_document",
+            retry_index=0,
+        ):
+            pass
+
+    def test_enabled_observability_requires_an_otlp_endpoint(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "REVIEW_AGENT_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        ):
+            configure_observability(Settings(observability_enabled=True))
+
+    def test_tool_span_contains_metadata_but_not_business_content(self):
+        exporter = InMemorySpanExporter()
+        configure_observability(
+            Settings(
+                observability_enabled=True,
+                otel_service_name="review-test",
+            ),
+            span_exporter=exporter,
+        )
+        with trace_tool_call(
+            task_id="task-1",
+            trace_id="trace-1",
+            step_id="step-1",
+            step_name="risk_analyzed",
+            tool_name="analyze_risk",
+            retry_index=1,
+        ):
+            contract_text = "TOP SECRET CONTRACT BODY"
+            api_key = "secret-api-key"
+            self.assertTrue(contract_text and api_key)
+
+        spans = exporter.get_finished_spans()
+        self.assertEqual(1, len(spans))
+        span = spans[0]
+        self.assertEqual("tool.analyze_risk", span.name)
+        self.assertEqual("task-1", span.attributes["review.task_id"])
+        self.assertEqual("success", span.attributes["review.status"])
+        self.assertEqual(1, span.attributes["review.retry_index"])
+        serialized = repr(dict(span.attributes))
+        self.assertNotIn("TOP SECRET CONTRACT BODY", serialized)
+        self.assertNotIn("secret-api-key", serialized)
+
+    def test_failure_records_only_exception_type(self):
+        exporter = InMemorySpanExporter()
+        configure_observability(
+            Settings(observability_enabled=True),
+            span_exporter=exporter,
+        )
+        with self.assertRaisesRegex(RuntimeError, "sensitive contract sentence"):
+            with trace_tool_call(
+                task_id="task-2",
+                trace_id="trace-2",
+                step_id="step-2",
+                step_name="evidence",
+                tool_name="verify_evidence",
+                retry_index=0,
+            ):
+                raise RuntimeError("sensitive contract sentence")
+
+        span = exporter.get_finished_spans()[0]
+        self.assertEqual("failed", span.attributes["review.status"])
+        self.assertEqual("RuntimeError", span.attributes["error.type"])
+        self.assertNotIn("sensitive contract sentence", repr(span.to_json()))
+        self.assertEqual([], list(span.events))
+
+    def test_invoke_tool_creates_a_redacted_span(self):
+        exporter = InMemorySpanExporter()
+        configure_observability(
+            Settings(observability_enabled=True),
+            span_exporter=exporter,
+        )
+        logs = []
+        result = invoke_tool(
+            "task-integrated",
+            {"echo": lambda tool_input: {"count": len(tool_input)}},
+            "echo",
+            {"contract_text": "private clause", "authorization": "Bearer secret"},
+            logs,
+        )
+        self.assertEqual({"count": 2}, result)
+        self.assertEqual("success", logs[0].status)
+        span = exporter.get_finished_spans()[0]
+        self.assertEqual("tool.echo", span.name)
+        self.assertEqual("task-integrated", span.attributes["review.task_id"])
+        self.assertNotIn("private clause", repr(span.to_json()))
+        self.assertNotIn("Bearer secret", repr(span.to_json()))
+
+    def test_otlp_headers_are_url_decoded_and_require_key_value_pairs(self):
+        self.assertEqual(
+            {
+                "Authorization": "Basic abc==",
+                "x-langfuse-ingestion-version": "4",
+            },
+            _parse_otlp_headers(
+                "Authorization=Basic%20abc%3D%3D,"
+                "x-langfuse-ingestion-version=4"
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "key=value"):
+            _parse_otlp_headers("invalid-header")
 
     @staticmethod
     def _raise_secret(secret: str):

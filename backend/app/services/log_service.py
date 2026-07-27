@@ -28,6 +28,7 @@ from providers.llm_provider import LLMCallMetadata, LLM_CALL_RECORDS_INPUT_KEY
 from providers.llm_provider import effective_llm_mode
 from tools.contracts import runtime_calls_llm, runtime_llm_mode, tool_contracts
 from services.runtime_log_service import write_runtime_log
+from services.observability_service import trace_tool_call
 
 
 IDEMPOTENT_DECISION_TOOLS = {
@@ -188,24 +189,32 @@ def invoke_tool(
     try:
         if execution_control is not None:
             execution_control.before_step(resolved_step_name)
-        operation = lambda: tool_registry[tool_name](runtime_tool_input)
-        operation_started = True
-        output = (
-            execution_control.invoke(
-                resolved_step_name,
-                start,
-                operation,
-                node_timeout_seconds,
+        with trace_tool_call(
+            task_id=task_id,
+            trace_id=trace_id,
+            step_id=step_id,
+            step_name=resolved_step_name,
+            tool_name=tool_name,
+            retry_index=retry_index,
+        ):
+            operation = lambda: tool_registry[tool_name](runtime_tool_input)
+            operation_started = True
+            output = (
+                execution_control.invoke(
+                    resolved_step_name,
+                    start,
+                    operation,
+                    node_timeout_seconds,
+                )
+                if execution_control is not None
+                else operation()
             )
-            if execution_control is not None
-            else operation()
-        )
-        if execution_control is not None:
-            execution_control.after_step(
-                resolved_step_name,
-                start,
-                node_timeout_seconds,
-            )
+            if execution_control is not None:
+                execution_control.after_step(
+                    resolved_step_name,
+                    start,
+                    node_timeout_seconds,
+                )
     except Exception as exc:
         status = _exception_status(exc)
         token_summary = _token_cost_summary(
