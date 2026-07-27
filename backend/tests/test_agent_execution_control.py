@@ -68,6 +68,23 @@ class AgentExecutionControlTest(unittest.TestCase):
 
         self.assertEqual(resolved_mode, "local_structured")
 
+    def test_tool_control_accepts_a_node_specific_timeout(self):
+        control = ToolExecutionControl(
+            cancel_check=lambda: None,
+            task_started_at=perf_counter(),
+            task_timeout_seconds=None,
+            node_timeout_seconds=0.01,
+        )
+
+        result = control.invoke(
+            "document_parse",
+            perf_counter(),
+            lambda: (time.sleep(0.03), "parsed")[1],
+            node_timeout_seconds=0.1,
+        )
+
+        self.assertEqual(result, "parsed")
+
     def test_cancel_stops_new_nodes_and_retains_completed_results(self):
         agent = ReviewOrchestratorAgent(self.store)
         original_classifier = tool_registry["classify_contract_type"]
@@ -189,13 +206,13 @@ class AgentExecutionControlTest(unittest.TestCase):
         original_classifier = tool_registry["classify_contract_type"]
 
         def slow_classifier(tool_input):
-            time.sleep(0.03)
+            time.sleep(0.15)
             return original_classifier(tool_input)
 
         with patch.dict(tool_registry, {"classify_contract_type": slow_classifier}):
             classification_state = ReviewOrchestratorAgent(
                 classification_store,
-                node_timeout_seconds=0.01,
+                node_timeout_seconds=0.1,
             ).run_sync(
                 "classification-timeout.docx",
                 "docx",

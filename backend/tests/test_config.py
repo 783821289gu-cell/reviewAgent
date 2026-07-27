@@ -91,6 +91,13 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(settings.bge_embedding_max_length, 1024)
         self.assertEqual(settings.bge_reranker_model, "BAAI/bge-reranker-base")
         self.assertEqual(settings.bge_reranker_max_length, 512)
+        self.assertEqual(settings.docling_document_timeout_seconds, 300)
+        self.assertEqual(
+            settings.docling_layout_revision,
+            "8f39ad3c0b4c58e9c2d2c84a38465abf757272d8",
+        )
+        self.assertEqual(settings.docling_table_revision, "v2.3.0")
+        self.assertEqual(settings.docling_device, "cpu")
         self.assertEqual(settings.embedding_cache_ttl_seconds, 604800)
         self.assertEqual(settings.retrieval_cache_ttl_seconds, 3600)
 

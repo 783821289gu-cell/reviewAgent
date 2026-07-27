@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from langgraph.types import Command, interrupt
 
+from config import settings
 from db.repositories import RecoveryError
 from models.contract import clause_from_dict, contract_document_from_dict
 from models.log import StepLog
@@ -589,6 +590,14 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
                 context.logs,
                 step_name="document_parse",
                 execution_control=context.execution_control,
+                node_timeout_seconds=(
+                    max(
+                        self.node_timeout_seconds,
+                        settings.docling_document_timeout_seconds + 30,
+                    )
+                    if state.file_type == "pdf"
+                    else None
+                ),
             )
             state = self.event_store.update_task(
                 context.task_id,

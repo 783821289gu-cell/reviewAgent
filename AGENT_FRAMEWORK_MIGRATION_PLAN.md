@@ -179,6 +179,16 @@ Docker 相关工作按用户最新指令后置，当前不安装、不维护 Com
 - 32 个后端测试模块在每模块 180 秒限制下全部通过，总耗时约 196 秒。真实 PostgreSQL 16 + pgvector、Redis 验收覆盖 Memory 向量写入/召回、非空旧数据迁移、RQ 事件和 Checkpoint，共 25 项通过；`alembic check` 返回 `No new upgrade operations detected`。
 - 当前只有 PostgreSQL/RQ Agent 路径使用 LangGraph Postgres Store。默认 FastAPI/SQLite 入口继续使用原 Memory Repository，直到任务 10 一次性切换；本轮结果不代表 Memory 已证明改善 DeepSeek 风险判断效果。
 
+### 任务 8 完成记录
+
+- PDF 已切换到 Docling `2.115.0` Standard Pipeline，启用按需 RapidOCR 和 TableFormer accurate 表格结构识别，不启用 VLM、远程服务、外部插件、图片描述或图表提取。DOCX 使用同一 Docling 文档模型读取段落与表格。
+- 解析结果继续映射为现有 `ContractDocument` / `TextBlock`，保留稳定块 ID、原文顺序、页码、top-left `bbox`、`page_map` 和条款/证据位置契约。Docling 将编号标题识别为 `list_item` 时，适配层恢复其结构化 marker，避免条款边界静默合并。
+- Layout 固定 revision `8f39ad3c0b4c58e9c2d2c84a38465abf757272d8`，TableFormer 固定 `v2.3.0`，模型准备脚本只下载实际使用的 accurate 权重与 RapidOCR torch/chinese。模型、Hugging Face 缓存和临时目录均位于 `D:\demo-runtime`；Layout 和 TableFormer 权重分别按官方 SHA-256 验证，解析启动前还会拒绝缺失或零字节的固定模型文件。
+- PDF 解析内部时限为 300 秒；活动 Agent 仅对 PDF 解析节点使用 330 秒边界，其他工具继续使用 90 秒节点边界。应用层累计任务计时器没有恢复。
+- 回归覆盖中英文文本 PDF、扫描 OCR、PDF 表格、空白、加密、复杂字体、损坏文件、合法 DOCX 段落/表格以及条款与证据位置。扫描 PDF 浏览器流程已验证进入合同类型判断而非伪造 `PARSE_FAILED`。
+- 用户提供的 `Confidentiality Agreement.pdf` 由真实 Docling 模型在 12.269 秒内解析为 5 页、133 个正文块，133 个块均带页码和四元 `bbox`；文件未复制到仓库，也未在本任务调用 DeepSeek。
+- 32 个后端测试模块在每模块 300 秒限制下全部通过，审查修复后的最终一轮耗时 547.6 秒；直接受影响的 Python 编译、JS 语法、依赖检查、PDF/文档/配置/节点超时测试和 1 个 Chromium 扫描 OCR 用例均通过。外部 PostgreSQL/Redis opt-in 测试本轮未运行，因为 PostgreSQL 与 Worker 当时处于停止状态；没有将其记录为通过。
+
 ### 下一个任务
 
-任务 8：使用 Docling 统一 PDF/DOCX 文档解析。
+任务 9：为显式 Tool Registry 增加 Pydantic Tool、MCP 与 OpenTelemetry/Langfuse 适配。

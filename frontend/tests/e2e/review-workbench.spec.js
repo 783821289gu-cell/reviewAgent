@@ -248,7 +248,7 @@ test("损坏 DOCX 进入解析失败而不显示成功", async ({ page }) => {
 });
 
 
-test("扫描 PDF 显示需要 OCR 的支持边界", async ({ page }) => {
+test("扫描 PDF 通过 OCR 后继续合同类型判断", async ({ page }) => {
   await page.goto("/");
   await upload(
     page,
@@ -256,8 +256,9 @@ test("扫描 PDF 显示需要 OCR 的支持边界", async ({ page }) => {
     "甲方",
   );
 
-  await expect(page.locator("[data-review-status]")).toHaveText("PARSE_FAILED");
-  await expect(page.locator(".progress-failed")).toContainText("OCR");
+  await expect(page.locator("[data-review-status]")).toHaveText("NEED_MANUAL_REVIEW");
+  await expect(page.locator(".progress-list")).toContainText("文档已解析");
+  await expect(page.locator(".progress-list")).toContainText("合同类型特征不足");
 });
 
 

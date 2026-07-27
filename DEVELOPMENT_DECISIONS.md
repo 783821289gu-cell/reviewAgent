@@ -285,3 +285,16 @@ CPU 首次加载 `bge-m3` 并编码 2 条文本约 56.9 秒，属于模型冷启
 Store namespace 用合同类型和审查立场的哈希组成，检索不会跨立场；领域层继续执行向量相似度、条款类型、风险类型、冲突、过期和置信度检查。原 `memory_items` 和 `semantic_preferences` 作为迁移来源只读一次，迁移标记只在 Episode、偏好和幂等映射全部写完后保存。这里没有维护业务双写：任务 10 切换前，默认 FastAPI/SQLite 路径仍走旧 Repository，PostgreSQL/RQ 路径走 Store。
 
 真实 PostgreSQL 测试验证了向量写入和召回、包含非空 Episode/偏好的旧数据迁移及重复迁移幂等。审查还发现 Worker 构建失败时，旧的嵌套 `finally` 会让资源 `close()` 异常覆盖真正的 Store 启动错误；现在资源逐个尽力关闭，关闭错误单独记录，原始依赖异常继续向上返回。32 个后端测试模块全部通过，PostgreSQL/Redis 外部组合 25 项通过，Alembic 未把 Store 包管理表识别为业务迁移差异。这些结果只验证存储和检索路径，不证明 Memory 已改善 DeepSeek 的最终风险判断。
+## 2026-07-27：统一解析器不只是把 `pdfplumber` 换成 Docling
+
+原来的 PDF 实现按 `pdfplumber` 词块拼行，能处理简单文本型文件和坐标，但扫描件只能报“需要 OCR”，表格也只是普通文本。DOCX 实现则直接读取 `word/document.xml`。这个实现一开始足够轻，但测试夹具也跟着只写了一个 XML 到 ZIP 里；这种文件不是完整 Office 包，旧解析器能读，Docling 和真实办公软件却会认为结构无效。继续为这些夹具兼容会让新解析器为错误测试数据背书，因此本轮先把评测和测试中的 DOCX 生成改为 `python-docx`，再要求 Docling 读取真实 Office 包。
+
+模型准备也不是调用一次默认下载就结束。Docling 默认 Hugging Face 下载在 Windows 上遇到三个实际问题：本机普通权限不能创建缓存 symlink；网络多次出现 TLS EOF 和分块传输中断；若不显式配置缓存，依赖可能写入 C 盘。最终新增独立准备脚本，在导入 Docling/Hugging Face 前设置 `HF_HOME`、Hub cache、临时目录和超时，统一写入 `D:\demo-runtime`。Layout 固定到 revision `8f39ad3c0b4c58e9c2d2c84a38465abf757272d8`，TableFormer 固定 `v2.3.0`，并只下载运行配置实际使用的 accurate 权重，不再下载 fast 权重。网络中断时只续传固定 revision 文件；Layout 和 accurate TableFormer 最终分别按官方 SHA-256 校验。审查又补上了运行前固定清单校验，目录存在但文件缺失或为零字节时直接返回“模型不完整”，不让第三方库回退到默认缓存或把半成品当成可用模型。
+
+解析配置选择 Standard PDF Pipeline、按需 RapidOCR 和表格结构识别，不使用 VLM。原因是本项目需要可追溯文本、页码和 bbox，而不是让视觉模型自由描述页面；远程服务和外部插件也默认关闭，合同不因解析被发送到外部。`force_full_page_ocr=False` 保留已有文本层，扫描图像才进入 OCR。测试证明合成扫描件可以恢复 `SCANNED NDA IMAGE - NO PDF TEXT LAYER`，两行两列表格可以恢复为一个 `table` 块；空白、加密、复杂字体和损坏 PDF 仍返回可区分的真实失败。
+
+第一次完整管线测试又暴露了结构适配问题。Docling 正确识别了标题 `2. Term` 是枚举列表项，但把 `2.` 放在 `marker` 字段，只在 `text` 中保留 `Term`。现有条款分段器因此把两页内容合并成一条，风险类型碰巧仍能命中，属于容易静默漏掉的回归。最终没有修改条款算法，而是在 Docling 适配层只对 `enumerated=True` 的文本项恢复 marker；已有编号时不重复添加。这样结构化模型的信息被保留下来，现有 `TextBlock` 和条款边界契约也不需要两套实现。
+
+另一个边界是超时。Docling 文档时限设为 300 秒，但 Agent 通用节点边界是 90 秒；若不处理，解析器的配置只是表面值，工具控制会提前终止。最终只给 PDF 解析节点传入 `max(通用节点时限, Docling 时限 + 30 秒)`，当前为 330 秒；DOCX 和其他工具仍保持 90 秒，RQ 的 7200 秒最终硬超时也没有改变。这是节点级例外，不是恢复已经证明会误报长合同的全任务累计计时器。
+
+真实验证使用用户提供的 404,525 字节 `Confidentiality Agreement.pdf`，Docling 在 12.269 秒内解析 5 页、133 个正文块，全部块都有页码和四元 bbox。32 个后端测试模块在每模块 300 秒限制下全部通过，审查修复后的最终一轮耗时 547.6 秒；扫描 PDF Chromium 用例通过。外部 PostgreSQL/Redis opt-in 测试本轮没有重跑，因为 PostgreSQL 和 Worker 当时停止；用户 PDF 也没有在任务 8 调用 DeepSeek。这些未执行项继续保留到后续切换/最终验收，不能混写成 Docling 已证明 Agent 模型效果。

@@ -57,7 +57,7 @@ export function UploadPanel(root, props) {
         <p class="form-message" id="upload-message">
           ${props.disabled ? "请先启动后端服务。" : "请选择 DOCX/PDF 合同文件和审查立场。"}
         </p>
-        <p>PDF 仅支持可复制文本的文件，扫描件当前未启用 OCR。</p>
+        <p>PDF 支持可复制文本和清晰扫描件；低清图像可能无法通过 OCR 识别。</p>
         <p class="error-message" id="upload-error" hidden></p>
       </div>
     </section>

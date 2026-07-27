@@ -2,8 +2,8 @@ from io import BytesIO
 from pathlib import Path
 import sys
 import unittest
-from zipfile import ZipFile
 
+from docx import Document as WordDocument
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -89,10 +89,36 @@ class DocumentPipelineTest(unittest.TestCase):
         self.assertEqual(len(evidence_location["pdf_blocks"][0]["bbox"]), 4)
         self.assertEqual(payload["evidence_results"][0]["source_location"], evidence_location)
 
+    def test_scanned_pdf_upload_uses_ocr_before_review(self):
+        fixture = (
+            PROJECT_ROOT
+            / "backend"
+            / "tests"
+            / "fixtures"
+            / "pdf"
+            / "scanned_image.pdf"
+        )
+
+        task = create_review_task(
+            file_name=fixture.name,
+            content=fixture.read_bytes(),
+            review_position_value="甲方",
+        )
+
+        payload = task.to_dict()
+        self.assertNotEqual(task.status, ReviewStatus.PARSE_FAILED)
+        self.assertEqual(
+            payload["document"]["blocks"][0]["text"],
+            "SCANNED NDA IMAGE - NO PDF TEXT LAYER",
+        )
+        self.assertEqual(
+            payload["document"]["blocks"][0]["source_location"]["page_number"],
+            1,
+        )
+
     def test_pdf_parse_failures_stop_before_risk_analysis(self):
         cases = (
-            ("scanned_image.pdf", "需要 OCR"),
-            ("empty_text.pdf", "需要 OCR"),
+            ("empty_text.pdf", "OCR"),
             ("encrypted.pdf", "加密"),
             ("complex_font.pdf", "复杂字体"),
             ("damaged.pdf", "损坏"),
@@ -161,57 +187,36 @@ class DocumentPipelineTest(unittest.TestCase):
 
 
 def build_docx_bytes() -> bytes:
-    document_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    <w:p><w:r><w:t>1. 定义</w:t></w:r></w:p>
-    <w:p><w:r><w:t>保密信息是指披露方提供的商业信息。</w:t></w:r></w:p>
-    <w:tbl>
-      <w:tr>
-        <w:tc><w:p><w:r><w:t>披露方</w:t></w:r></w:p></w:tc>
-        <w:tc><w:p><w:r><w:t>甲方</w:t></w:r></w:p></w:tc>
-      </w:tr>
-    </w:tbl>
-    <w:p><w:r><w:t>2. 保密义务</w:t></w:r></w:p>
-    <w:p><w:r><w:t>接收方应仅用于评估合作目的，并保密3年。</w:t></w:r></w:p>
-  </w:body>
-</w:document>
-"""
+    document = WordDocument()
+    document.add_paragraph("1. 定义")
+    document.add_paragraph("保密信息是指披露方提供的商业信息。")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "披露方"
+    table.cell(0, 1).text = "甲方"
+    document.add_paragraph("2. 保密义务")
+    document.add_paragraph("接收方应仅用于评估合作目的，并保密3年。")
     buffer = BytesIO()
-    with ZipFile(buffer, "w") as archive:
-        archive.writestr("word/document.xml", document_xml)
+    document.save(buffer)
     return buffer.getvalue()
 
 
 def build_confidentiality_docx_bytes() -> bytes:
-    document_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    <w:p><w:r><w:t>1. 保密义务</w:t></w:r></w:p>
-    <w:p><w:r><w:t>接收方不得披露披露方提供的保密信息。</w:t></w:r></w:p>
-  </w:body>
-</w:document>
-"""
+    document = WordDocument()
+    document.add_paragraph("1. 保密义务")
+    document.add_paragraph("接收方不得披露披露方提供的保密信息。")
     buffer = BytesIO()
-    with ZipFile(buffer, "w") as archive:
-        archive.writestr("word/document.xml", document_xml)
+    document.save(buffer)
     return buffer.getvalue()
 
 
 def build_high_risk_docx_bytes() -> bytes:
-    document_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    <w:p><w:r><w:t>保密协议</w:t></w:r></w:p>
-    <w:p><w:r><w:t>披露方与接收方就保密信息签署本协议，接收方承担保密义务。</w:t></w:r></w:p>
-    <w:p><w:r><w:t>1. 违约责任</w:t></w:r></w:p>
-    <w:p><w:r><w:t>违约方应赔偿守约方全部损失、间接损失，且责任不限。</w:t></w:r></w:p>
-  </w:body>
-</w:document>
-"""
+    document = WordDocument()
+    document.add_paragraph("保密协议")
+    document.add_paragraph("披露方与接收方就保密信息签署本协议，接收方承担保密义务。")
+    document.add_paragraph("1. 违约责任")
+    document.add_paragraph("违约方应赔偿守约方全部损失、间接损失，且责任不限。")
     buffer = BytesIO()
-    with ZipFile(buffer, "w") as archive:
-        archive.writestr("word/document.xml", document_xml)
+    document.save(buffer)
     return buffer.getvalue()
 
 

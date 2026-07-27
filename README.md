@@ -13,8 +13,8 @@
 5. 独立的新建合同审查入口、合同文件上传和甲方 / 乙方审查立场选择。
 6. 未选择合同文件或审查立场时不能上传解析。
 7. Workbench 布局：全局工作区导航、顶部任务命令栏、左侧上下文与进度、中间合同原文与证据、右侧风险检查器、底部执行记录抽屉。
-8. DOCX 段落和表格文本解析。
-9. 基于 `pdfplumber` 的中英文文本型 PDF 解析，保留页码、文本块顺序和边界坐标，并将条款位置回溯到对应 PDF 页和块。
+8. 基于 Docling 的 DOCX 段落和表格解析。
+9. 基于 Docling Standard Pipeline 的中英文 PDF 解析，支持按需 OCR 和表格结构识别，保留页码、文本块顺序和边界坐标，并将条款位置回溯到对应 PDF 页和块。
 10. 条款编号、条款正文、条款类型、关键字段和原文位置结构化。
 11. 完整显式 `tool_registry` 字典和工具输入输出契约。
 12. 当前解析链路通过 `ReviewOrchestratorAgent` 调度，并只通过 `tool_registry` 调用工具。
@@ -63,7 +63,7 @@
 55. 效果评测计算 27 项指标，包括 NDA 分类、非 NDA 拒绝、条款、Playbook/相关条款、风险、证据、人工复核、报告、工具、端到端、Planner、结构化输出、修复、恢复、无证据风险、Memory 偏好一致性、Memory Recall@K、Memory MRR、Memory 向量覆盖率、Embedding 调用成功率和 Injection；token、成本状态和 P95 延迟作为运行测量单独记录。
 56. 每个效果指标记录样本数、通过数、失败数、阈值和失败样本；版本化 JSON/Markdown 摘要记录 Git、Playbook、标注、LLM、Embedding 和关键参数。
 57. Web 评测面板使用“流程摘要”和“效果摘要”两个独立视图；未达阈值指标按实际失败状态展示。
-58. 扫描件、空文本、加密、复杂字体映射失败和损坏 PDF 会进入真实 `PARSE_FAILED` 状态，不生成伪造正文或正式风险。
+58. 清晰扫描件通过按需 OCR 提取正文；空文本、OCR 无法识别、加密、复杂字体映射失败和损坏 PDF 会进入真实 `PARSE_FAILED` 状态，不生成伪造正文或正式风险。
 59. 每个任务持久化 `trace_id`，每次工具调用持久化唯一 `step_id`；旧 SQLite 日志在初始化时生成确定性 Step 标识。
 60. 任务恢复次数和恢复起点进入任务快照、API 响应和 Web 执行记录，服务重启后保留。
 61. LLM/Embedding 执行摘要展示模型、token 或输入量、耗时、成本状态和错误类型，并在供应商提供时展示脱敏请求 ID；日志摘要屏蔽密钥、Authorization、完整 prompt 和完整任务正文。
@@ -94,7 +94,6 @@
 1. 未使用 DeepSeek 对 23 份完整标注集完成两轮外部模型稳定性评测；当前真实运行只覆盖固定的 2 份合成 NDA 子集。
 2. 真实 DeepSeek 两轮的 Evidence span、Memory 一致性和结构化修复指标未全部达标，且两轮波动明显；不能声明 Agent 效果验收通过。
 3. 任务 9 Code Review 后的代码没有再次消耗 DeepSeek 复跑；现有外部结果对应 Review 前的未提交工作区，限制详见 `evaluation/release/agent-evolution-verification.md`。
-4. OCR 尚未实现；扫描件会进入明确的 `PARSE_FAILED`，是否引入 OCR 必须另立迭代计划。
 
 迭代技术方案、实施顺序和验收口径见 `NEXT_PLAN.md`、`TASKS_2.md`、`UI_REDESIGN_PLAN.md`、`AGENT_EVOLUTION_PLAN.md`、`TASKS_AGENT.md` 和 `DEEPSEEK_TIMEOUT_PLAN.md`；这些文件保留计划形成过程，当前完成状态以代码、测试和本 README 为准。
 
@@ -144,9 +143,9 @@ Planner 只能选择白名单动作，Orchestrator 才能执行工具；Critic �
 
 ## PDF 支持边界
 
-当前只支持带有可复制文本层的普通中文和英文 PDF。解析结果按页输出文本块，并为每个块记录 `page_number` 和 `bbox`；条款通过 `source_location.pdf_blocks` 回溯到原 PDF 页码、块 ID 和坐标。证据验证完成后，正式风险的 `evidence_location.pdf_blocks` 会记录证据实际命中的页码、块 ID、`bbox` 和块内字符范围，不只依赖 `clause_id` 间接定位整条条款。
+PDF 使用 Docling Standard Pipeline 统一解析普通中文、英文文本型文件和清晰扫描件。OCR 按需启用，不强制对已有文本层的整页重复识别；表格通过 TableFormer 识别并映射为 `table` 文本块。解析结果按页输出文本块，并为每个块记录 `page_number` 和 `bbox`；条款通过 `source_location.pdf_blocks` 回溯到原 PDF 页码、块 ID 和坐标。证据验证完成后，正式风险的 `evidence_location.pdf_blocks` 会记录证据实际命中的页码、块 ID、`bbox` 和块内字符范围，不只依赖 `clause_id` 间接定位整条条款。
 
-扫描件和无有效文本文件不会进入合同类型识别或正式风险分析。扫描件返回“需要 OCR”，空文本文件说明当前未启用 OCR；加密 PDF 不提供密码输入或解密流程，复杂字体无法可靠映射 Unicode、文件损坏或结构不完整时均返回对应解析失败原因。OCR 不在当前任务范围内，后续是否实施需新增独立迭代计划。
+OCR 无法识别的低清扫描件和无有效文本文件不会进入合同类型识别或正式风险分析。加密 PDF 不提供密码输入或解密流程；复杂字体无法可靠映射 Unicode、文件损坏、结构不完整或解析超时时均返回对应真实原因。当前不启用 VLM，不承诺手写体、严重倾斜、模糊图像或复杂跨页表格的识别效果。
 
 `samples/pdf/` 和 `backend/tests/fixtures/pdf/` 中的文件均为项目内合成测试材料，来源和用途见各目录 README，不包含真实客户或未经授权的合同文本。
 
@@ -157,16 +156,22 @@ Planner 只能选择白名单动作，Orchestrator 才能执行工具；Critic �
 3. `python-multipart`：解析 `multipart/form-data` 合同上传请求。
 4. `python-dotenv`：应用启动时读取项目根目录 `.env`，已存在的进程环境变量保持优先。
 5. `httpx`：供 FastAPI `TestClient` 执行 API 契约测试，并执行 OpenAI-compatible HTTP 调用。
-6. `pdfplumber`：提取 PDF 页、文本词块和边界坐标，底层使用 `pdfminer.six`；项目固定为 `0.11.10`，采用 MIT 许可证。该依赖会同时安装 `pdfminer.six`、Pillow 和 `pypdfium2`，不包含 OCR 模型，也不会将合同发送到网络服务。
-7. Node.js、pnpm 和 `playwright@1.60.0`：只用于 Chromium 浏览器 E2E，不属于应用运行依赖。
+6. `docling`：使用 Standard PDF Pipeline、RapidOCR 和 TableFormer 解析 PDF，并统一读取 DOCX；固定为 `2.115.0`，默认使用 CPU、本地模型且不启用 VLM 或远程服务。
+7. `python-docx`：生成项目评测与测试使用的合法 DOCX Office 包，固定为 `1.2.0`。
+8. `pdfplumber`：只用于 PDF 签名、加密、损坏和复杂字体失败诊断，不再承担正文与坐标提取；固定为 `0.11.10`。
+9. Node.js、pnpm 和 `playwright@1.60.0`：只用于 Chromium 浏览器 E2E，不属于应用运行依赖。
 
 安装：
 
 ```powershell
-python -m pip install -r requirements.txt
+$python = Join-Path $env:REVIEW_AGENT_RUNTIME_ROOT "venv\Scripts\python.exe"
+& $python -m pip install -r requirements.txt
+& $python scripts/prepare_docling_models.py
 pnpm install --frozen-lockfile
 pnpm exec playwright install chromium
 ```
+
+`scripts/prepare_docling_models.py` 将固定 revision 的 Layout、TableFormer accurate 和 RapidOCR torch/chinese 模型写入 `REVIEW_AGENT_DOCLING_ARTIFACTS_PATH`。未配置该变量时使用 `REVIEW_AGENT_RUNTIME_ROOT\models\docling`；两个变量都缺失时脚本直接失败，不回退到用户 C 盘缓存。
 
 ## DeepSeek 配置
 
@@ -262,7 +267,7 @@ http://127.0.0.1:8000/health
 30. 运行效果评测，确认返回 27 个指标，且每项包含样本数、通过数、失败数、阈值、达标状态和失败样本；样本数为 0 时必须显示“无样本”且不得视为达标。相关条款与 Memory 检索分别显示 Recall@K，Memory 同时显示 MRR 和向量覆盖率，Embedding 显示调用成功率。
 31. 确认效果摘要显示 Git、Playbook、标注、LLM 和 Embedding 版本，并在 `evaluation/effect/` 生成以评测 ID 命名的 JSON 和 Markdown 文件。
 32. 上传 `samples/pdf/nda_text_zh.pdf` 和 `samples/pdf/nda_text_en.pdf`，确认正文按页解析，条款 `source_location` 包含页码、块 ID 和 `bbox`；正式风险的 `evidence_location` 精确到证据命中的 PDF 块和块内字符范围。
-33. 上传 `backend/tests/fixtures/pdf/scanned_image.pdf`，确认任务进入 `PARSE_FAILED`、提示“需要 OCR”，且不生成文档、条款和风险。
+33. 上传 `backend/tests/fixtures/pdf/scanned_image.pdf`，确认按需 OCR 提取 `SCANNED NDA IMAGE - NO PDF TEXT LAYER`，任务继续进入合同类型判断而不是 `PARSE_FAILED`，且文本块包含页码和 `bbox`。
 34. 使用加密、复杂字体映射失败或损坏 PDF 时，确认界面展示具体解析原因，不显示文档解析成功。
 35. 展开 Agent 执行记录，确认任务 Trace、工具 Step、恢复信息和 Provider 摘要可读；本地模式与 DeepSeek 真实调用明确区分，且不出现密钥、完整合同 Prompt 或前端堆栈。
 36. 确认配置错误、Planner 非法动作、一次检索修复、Injection 阻断、取消、超时和恢复均有浏览器验收状态，且没有把夹具状态写入生产任务 API。

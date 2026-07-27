@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
-from xml.sax.saxutils import escape
 from collections import Counter
 from hashlib import sha256
 from math import ceil
@@ -9,9 +8,9 @@ import json
 import os
 import re
 import subprocess
-from zipfile import ZipFile
 from io import BytesIO
 
+from docx import Document as WordDocument
 from pydantic import ValidationError
 
 from config import settings
@@ -2392,25 +2391,19 @@ def _review_position(value: str) -> ReviewPosition:
 
 
 def _docx_bytes_from_text(text: str) -> bytes:
-    paragraphs = []
+    document = WordDocument()
+    paragraph_count = 0
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        paragraphs.append(f"<w:p><w:r><w:t>{escape(stripped)}</w:t></w:r></w:p>")
-    if not paragraphs:
+        document.add_paragraph(stripped)
+        paragraph_count += 1
+    if not paragraph_count:
         raise ValueError("sample text is empty")
 
-    document_xml = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-        "<w:body>"
-        + "".join(paragraphs)
-        + "</w:body></w:document>"
-    )
     buffer = BytesIO()
-    with ZipFile(buffer, "w") as archive:
-        archive.writestr("word/document.xml", document_xml)
+    document.save(buffer)
     return buffer.getvalue()
 
 

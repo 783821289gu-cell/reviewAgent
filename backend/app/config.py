@@ -52,6 +52,13 @@ def _default_bge_cache_dir() -> str:
     return str(PROJECT_ROOT / ".cache" / "huggingface")
 
 
+def _default_docling_artifacts_path() -> str:
+    runtime_root = os.getenv("REVIEW_AGENT_RUNTIME_ROOT", "").strip()
+    if runtime_root:
+        return str(Path(runtime_root) / "models" / "docling")
+    return ""
+
+
 def _allowed_origins() -> tuple[str, ...]:
     raw_value = os.getenv("REVIEW_AGENT_ALLOWED_ORIGINS", "")
     origins = tuple(origin.strip().rstrip("/") for origin in raw_value.split(",") if origin.strip())
@@ -167,6 +174,28 @@ class Settings:
             "8",
         )
     )
+    docling_artifacts_path: str = os.getenv(
+        "REVIEW_AGENT_DOCLING_ARTIFACTS_PATH",
+        _default_docling_artifacts_path(),
+    ).strip()
+    docling_document_timeout_seconds: float = field(
+        default_factory=lambda: _positive_float(
+            "REVIEW_AGENT_DOCLING_DOCUMENT_TIMEOUT_SECONDS",
+            "300",
+        )
+    )
+    docling_layout_revision: str = os.getenv(
+        "REVIEW_AGENT_DOCLING_LAYOUT_REVISION",
+        "8f39ad3c0b4c58e9c2d2c84a38465abf757272d8",
+    ).strip()
+    docling_table_revision: str = os.getenv(
+        "REVIEW_AGENT_DOCLING_TABLE_REVISION",
+        "v2.3.0",
+    ).strip()
+    docling_device: str = os.getenv(
+        "REVIEW_AGENT_DOCLING_DEVICE",
+        "cpu",
+    ).strip() or "cpu"
     embedding_cache_ttl_seconds: int = field(
         default_factory=lambda: _positive_int(
             "REVIEW_AGENT_EMBEDDING_CACHE_TTL_SECONDS",

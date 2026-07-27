@@ -6,4 +6,4 @@
 2. `service_agreement.txt` / `service_agreement.docx`：合成服务协议，用于验证非 NDA 拒绝。
 3. `build_fixtures.py`：使用 Python 标准库确定性重建上述 DOCX。
 
-扫描 PDF 错误流复用 `backend/tests/fixtures/pdf/scanned_image.pdf`，其来源说明见该目录 README。
+扫描 PDF OCR 流程复用 `backend/tests/fixtures/pdf/scanned_image.pdf`，其来源说明见该目录 README。

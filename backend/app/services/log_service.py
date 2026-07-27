@@ -60,7 +60,12 @@ class ToolExecutionControl:
                 f"{self.task_timeout_seconds:.3f}s"
             )
 
-    def after_step(self, step_name: str, node_started_at: float) -> None:
+    def after_step(
+        self,
+        step_name: str,
+        node_started_at: float,
+        node_timeout_seconds: float | None = None,
+    ) -> None:
         self.cancel_check()
         task_elapsed = perf_counter() - self.task_started_at
         if (
@@ -72,14 +77,25 @@ class ToolExecutionControl:
                 f"{self.task_timeout_seconds:.3f}s"
             )
         node_elapsed = perf_counter() - node_started_at
-        if node_elapsed > self.node_timeout_seconds:
+        timeout_seconds = (
+            self.node_timeout_seconds
+            if node_timeout_seconds is None
+            else node_timeout_seconds
+        )
+        if node_elapsed > timeout_seconds:
             raise NodeExecutionTimeoutError(
                 step_name,
                 node_elapsed,
-                self.node_timeout_seconds,
+                timeout_seconds,
             )
 
-    def invoke(self, step_name: str, node_started_at: float, operation: Callable):
+    def invoke(
+        self,
+        step_name: str,
+        node_started_at: float,
+        operation: Callable,
+        node_timeout_seconds: float | None = None,
+    ):
         result_queue: Queue = Queue(maxsize=1)
         execution_context = copy_context()
 
@@ -99,7 +115,11 @@ class ToolExecutionControl:
             try:
                 succeeded, result = result_queue.get(timeout=0.01)
             except Empty:
-                self.after_step(step_name, node_started_at)
+                self.after_step(
+                    step_name,
+                    node_started_at,
+                    node_timeout_seconds,
+                )
                 continue
             if succeeded:
                 return result
@@ -123,6 +143,7 @@ def invoke_tool(
     step_name: str | None = None,
     execution_control: ToolExecutionControl | None = None,
     parent_step_id: str | None = None,
+    node_timeout_seconds: float | None = None,
 ):
     if tool_name not in tool_registry:
         raise ValueError(f"未注册工具：{tool_name}")
@@ -170,12 +191,21 @@ def invoke_tool(
         operation = lambda: tool_registry[tool_name](runtime_tool_input)
         operation_started = True
         output = (
-            execution_control.invoke(resolved_step_name, start, operation)
+            execution_control.invoke(
+                resolved_step_name,
+                start,
+                operation,
+                node_timeout_seconds,
+            )
             if execution_control is not None
             else operation()
         )
         if execution_control is not None:
-            execution_control.after_step(resolved_step_name, start)
+            execution_control.after_step(
+                resolved_step_name,
+                start,
+                node_timeout_seconds,
+            )
     except Exception as exc:
         status = _exception_status(exc)
         token_summary = _token_cost_summary(
