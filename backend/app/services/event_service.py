@@ -1,11 +1,12 @@
 from copy import deepcopy
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Condition, Lock
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from db.repositories import ReviewPersistence
 from models.review import (
     AgentState,
     LLMMode,
@@ -14,6 +15,9 @@ from models.review import (
     TaskCancelledError,
     trace_id_for_task,
 )
+
+if TYPE_CHECKING:
+    from db.repositories import ReviewPersistence
 
 
 TERMINAL_STATUSES = {
@@ -88,7 +92,7 @@ class ReviewEvent:
 
 
 class ReviewEventStore:
-    def __init__(self, persistence: ReviewPersistence | None = None):
+    def __init__(self, persistence: "ReviewPersistence | None" = None):
         self.persistence = persistence
         self._states: dict[str, AgentState] = {}
         self._events: dict[str, list[ReviewEvent]] = {}
@@ -164,83 +168,94 @@ class ReviewEventStore:
         progress: dict | None = None,
     ) -> AgentState:
         with self._condition:
-            state = deepcopy(self._states[task_id])
-            if state.status in {ReviewStatus.CANCEL_REQUESTED, ReviewStatus.CANCELLED} and status not in {
-                ReviewStatus.CANCEL_REQUESTED,
-                ReviewStatus.CANCELLED,
-            }:
-                raise TaskCancelledError(f"task cancellation is active: {task_id}")
-            state.status = status
-            state.message = message
-            if document is not None:
-                state.document = deepcopy(document)
-            if contract_classification is not None:
-                state.contract_classification = deepcopy(contract_classification)
-            if clauses is not None:
-                state.clauses = deepcopy(clauses)
-            if matched_rules is not None:
-                state.matched_rules = deepcopy(matched_rules)
-            if review_contexts is not None:
-                state.review_contexts = deepcopy(review_contexts)
-            if analysis_results is not None:
-                state.analysis_results = deepcopy(analysis_results)
-            if risk_findings is not None:
-                state.risk_findings = deepcopy(risk_findings)
-            if evidence_results is not None:
-                state.evidence_results = deepcopy(evidence_results)
-            if report_file is not None:
-                state.report_file = deepcopy(report_file)
-            if logs is not None:
-                state.logs = deepcopy(logs)
-            if recovery_from_status is not None:
-                state.recovery_count += 1
-                state.recovery_from_status = recovery_from_status
-            if retry_counts is not None:
-                state.retry_counts = deepcopy(retry_counts)
-            category = ERROR_RETRY_CATEGORIES.get(status)
-            previous_status = self._states[task_id].status
-            if category and previous_status != status and retry_counts is None:
-                state.retry_counts = dict(state.retry_counts or {})
-                state.retry_counts[category] = int(state.retry_counts.get(category, 0)) + 1
-            if recovery_history is not None:
-                state.recovery_history = deepcopy(recovery_history)
-            if cancel_requested_at is not None:
-                state.cancel_requested_at = cancel_requested_at
-            if cancelled_at is not None:
-                state.cancelled_at = cancelled_at
-            if cancel_reason is not None:
-                state.cancel_reason = cancel_reason
-            if last_timeout is not None:
-                state.last_timeout = deepcopy(last_timeout)
-            if progress is not None:
-                state.progress = deepcopy(progress)
-            elif status in TERMINAL_STATUSES and state.progress is not None:
-                state.progress = {
-                    **deepcopy(state.progress),
-                    "state": _terminal_progress_state(status),
-                    "message": message,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }
-            existing_events = self._events[task_id]
-            event = self._new_event_locked(
-                state,
-                existing_events,
-                status,
-                message,
-                step_name=step_name,
-                tool_name=tool_name,
-            )
-            state.events = [item.to_dict() for item in existing_events] + [event.to_dict()]
-            if self.persistence is not None:
-                self.persistence.save_state_and_event(
+            with self._persistence_mutation_lock(task_id):
+                self._refresh_for_access_locked(task_id)
+                state = deepcopy(self._states[task_id])
+                if state.status in {
+                    ReviewStatus.CANCEL_REQUESTED,
+                    ReviewStatus.CANCELLED,
+                } and status not in {
+                    ReviewStatus.CANCEL_REQUESTED,
+                    ReviewStatus.CANCELLED,
+                }:
+                    raise TaskCancelledError(
+                        f"task cancellation is active: {task_id}"
+                    )
+                state.status = status
+                state.message = message
+                if document is not None:
+                    state.document = deepcopy(document)
+                if contract_classification is not None:
+                    state.contract_classification = deepcopy(contract_classification)
+                if clauses is not None:
+                    state.clauses = deepcopy(clauses)
+                if matched_rules is not None:
+                    state.matched_rules = deepcopy(matched_rules)
+                if review_contexts is not None:
+                    state.review_contexts = deepcopy(review_contexts)
+                if analysis_results is not None:
+                    state.analysis_results = deepcopy(analysis_results)
+                if risk_findings is not None:
+                    state.risk_findings = deepcopy(risk_findings)
+                if evidence_results is not None:
+                    state.evidence_results = deepcopy(evidence_results)
+                if report_file is not None:
+                    state.report_file = deepcopy(report_file)
+                if logs is not None:
+                    state.logs = deepcopy(logs)
+                if recovery_from_status is not None:
+                    state.recovery_count += 1
+                    state.recovery_from_status = recovery_from_status
+                if retry_counts is not None:
+                    state.retry_counts = deepcopy(retry_counts)
+                category = ERROR_RETRY_CATEGORIES.get(status)
+                previous_status = self._states[task_id].status
+                if category and previous_status != status and retry_counts is None:
+                    state.retry_counts = dict(state.retry_counts or {})
+                    state.retry_counts[category] = (
+                        int(state.retry_counts.get(category, 0)) + 1
+                    )
+                if recovery_history is not None:
+                    state.recovery_history = deepcopy(recovery_history)
+                if cancel_requested_at is not None:
+                    state.cancel_requested_at = cancel_requested_at
+                if cancelled_at is not None:
+                    state.cancelled_at = cancelled_at
+                if cancel_reason is not None:
+                    state.cancel_reason = cancel_reason
+                if last_timeout is not None:
+                    state.last_timeout = deepcopy(last_timeout)
+                if progress is not None:
+                    state.progress = deepcopy(progress)
+                elif status in TERMINAL_STATUSES and state.progress is not None:
+                    state.progress = {
+                        **deepcopy(state.progress),
+                        "state": _terminal_progress_state(status),
+                        "message": message,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                existing_events = self._events[task_id]
+                event = self._new_event_locked(
                     state,
-                    event.to_dict(include_task=True),
-                    recovery_from_status=recovery_from_status,
+                    existing_events,
+                    status,
+                    message,
+                    step_name=step_name,
+                    tool_name=tool_name,
                 )
-            self._states[task_id] = state
-            self._events[task_id] = [*existing_events, event]
-            self._condition.notify_all()
-            return self._snapshot_locked(task_id)
+                state.events = [
+                    item.to_dict() for item in existing_events
+                ] + [event.to_dict()]
+                if self.persistence is not None:
+                    self.persistence.save_state_and_event(
+                        state,
+                        event.to_dict(include_task=True),
+                        recovery_from_status=recovery_from_status,
+                    )
+                self._states[task_id] = state
+                self._events[task_id] = [*existing_events, event]
+                self._condition.notify_all()
+                return self._snapshot_locked(task_id)
 
     def load_persisted(
         self,
@@ -394,6 +409,7 @@ class ReviewEventStore:
 
     def try_acquire_execution(self, task_id: str, execution_owner: str) -> bool:
         with self._condition:
+            self._refresh_task_locked(task_id)
             state = self._states.get(task_id)
             if state is None or task_id in self._execution_owners:
                 return False
@@ -441,6 +457,10 @@ class ReviewEventStore:
                 self._condition.notify_all()
 
     def is_execution_active(self, task_id: str) -> bool:
+        repository = getattr(self.persistence, "task_repository", None)
+        persisted_check = getattr(repository, "is_execution_active", None)
+        if callable(persisted_check):
+            return bool(persisted_check(task_id))
         with _PROCESS_EXECUTION_LOCK:
             return self._execution_key(task_id) in _PROCESS_EXECUTION_OWNERS
 
@@ -457,12 +477,14 @@ class ReviewEventStore:
 
     def get_task(self, task_id: str) -> AgentState | None:
         with self._condition:
+            self._refresh_for_access_locked(task_id)
             if task_id not in self._states:
                 return None
             return self._snapshot_locked(task_id)
 
     def get_task_payload(self, task_id: str) -> dict | None:
         with self._condition:
+            self._refresh_for_access_locked(task_id)
             state = self._states.get(task_id)
             if state is None:
                 return None
@@ -544,6 +566,67 @@ class ReviewEventStore:
             state.execution_active and state.status not in TERMINAL_STATUSES
         )
         return payload
+
+    def _persistence_mutation_lock(self, task_id: str):
+        lock_factory = getattr(self.persistence, "task_mutation_lock", None)
+        if not callable(lock_factory):
+            return nullcontext()
+        return lock_factory(task_id)
+
+    def _refresh_task_locked(self, task_id: str) -> None:
+        loader = getattr(self.persistence, "load_state", None)
+        if not callable(loader):
+            return
+        persisted = loader(task_id)
+        if persisted is None:
+            self._states.pop(task_id, None)
+            self._events.pop(task_id, None)
+            return
+        state, event_payloads = persisted
+        events = [
+            ReviewEvent(
+                event_id=int(payload["event_id"]),
+                task_id=str(payload["task_id"]),
+                status=ReviewStatus(payload["status"]),
+                message=str(payload["message"]),
+                step_name=str(payload.get("step_name", "")),
+                tool_name=str(payload.get("tool_name", "")),
+                created_at=str(payload["created_at"]),
+                task=dict(payload.get("task") or state.to_dict()),
+            )
+            for payload in event_payloads
+        ]
+        state.events = [event.to_dict() for event in events]
+        self._states[task_id] = state
+        self._events[task_id] = events
+
+    def _refresh_for_access_locked(self, task_id: str) -> None:
+        if task_id not in self._execution_owners:
+            self._refresh_task_locked(task_id)
+            return
+        control_loader = getattr(
+            self.persistence,
+            "load_task_execution_control",
+            None,
+        )
+        if not callable(control_loader):
+            return
+        control = control_loader(task_id)
+        if control is None:
+            self._states.pop(task_id, None)
+            self._events.pop(task_id, None)
+            return
+        state = self._states.get(task_id)
+        events = self._events.get(task_id, [])
+        latest_event_id = events[-1].event_id if events else -1
+        if (
+            state is None
+            or str(control["status"]) != state.status.value
+            or int(control["latest_event_id"]) != latest_event_id
+        ):
+            self._refresh_task_locked(task_id)
+            return
+        state.execution_active = bool(control["execution_owner"])
 
 
 review_event_store = ReviewEventStore()

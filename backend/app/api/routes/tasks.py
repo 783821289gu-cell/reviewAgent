@@ -6,16 +6,27 @@ from time import monotonic
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
-from api.dependencies import get_event_store, get_review_agent, get_settings, require_accepting_tasks
+from api.dependencies import (
+    get_event_store,
+    get_queued_review_service,
+    get_review_agent,
+    get_settings,
+    require_accepting_tasks,
+)
 from api.errors import ApiError, task_error
 from config import Settings
-from models.review import LLMMode
+from models.review import LLMMode, ReviewPosition
 from services.event_service import TERMINAL_STATUSES, ReviewEventStore
 from services.review_service import ReviewOrchestratorAgent
 from services.task_service import (
     cancel_review_task,
+    parse_recovery_request,
     recover_review_task,
     start_review_task,
+)
+from services.task_queue import (
+    QueueDependencyError,
+    QueuedReviewService,
 )
 
 
@@ -45,6 +56,9 @@ async def create_task(
     llm_mode: str = Form(default=LLMMode.LOCAL_STRUCTURED.value),
     app_settings: Settings = Depends(get_settings),
     review_agent: ReviewOrchestratorAgent = Depends(get_review_agent),
+    queued_service: QueuedReviewService | None = Depends(
+        get_queued_review_service
+    ),
     _accepting_tasks: None = Depends(require_accepting_tasks),
 ) -> dict:
     if "multipart/form-data" not in request.headers.get("content-type", "").lower():
@@ -60,13 +74,24 @@ async def create_task(
     _validate_llm_configuration(llm_mode, app_settings)
 
     try:
-        task = start_review_task(
-            file_name=file_name,
-            content=content,
-            review_position_value=review_position,
-            llm_mode_value=llm_mode,
-            review_agent=review_agent,
-        )
+        if queued_service is not None:
+            task = queued_service.start(
+                file_name=file_name,
+                file_type=file_type,
+                content=content,
+                review_position=ReviewPosition(review_position),
+                llm_mode=LLMMode(llm_mode),
+            )
+        else:
+            task = start_review_task(
+                file_name=file_name,
+                content=content,
+                review_position_value=review_position,
+                llm_mode_value=llm_mode,
+                review_agent=review_agent,
+            )
+    except QueueDependencyError as exc:
+        raise task_error(str(exc), status_code=503) from exc
     except ValueError as exc:
         raise task_error(str(exc)) from exc
     return task.to_dict()
@@ -107,11 +132,33 @@ def recover_task(
     payload: dict,
     event_store: ReviewEventStore = Depends(get_event_store),
     review_agent: ReviewOrchestratorAgent = Depends(get_review_agent),
+    queued_service: QueuedReviewService | None = Depends(
+        get_queued_review_service
+    ),
 ) -> dict:
     if event_store.get_task(task_id) is None:
         raise ApiError(status_code=404, payload={"error": "Task not found"})
     try:
-        return recover_review_task(task_id, payload, review_agent)
+        if queued_service is None:
+            return recover_review_task(task_id, payload, review_agent)
+        reason, operator_action, resume_from = parse_recovery_request(payload)
+        state = queued_service.recover(
+            task_id,
+            resume_from=resume_from,
+            operator_action=operator_action,
+            reason=reason,
+            review_agent=review_agent,
+        )
+        task_payload = (
+            event_store.get_task_payload(task_id) or state.to_dict()
+        )
+        return {
+            "status": task_payload["status"],
+            "message": task_payload["message"],
+            "task": task_payload,
+        }
+    except QueueDependencyError as exc:
+        raise task_error(str(exc), status_code=503) from exc
     except RuntimeError as exc:
         raise ApiError(status_code=409, payload={"message": str(exc)}) from exc
     except ValueError as exc:

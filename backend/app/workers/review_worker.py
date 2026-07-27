@@ -1,24 +1,31 @@
 import os
+from time import perf_counter
 
 from redis import Redis
 from rq import Queue, SimpleWorker
 
 from config import Settings
+from db.errors import RecoveryError
 from db.postgres_persistence import PostgresReviewPersistence
 from services.event_notification import RedisEventNotifier
 from models.review import ReviewStatus
-from providers.bge_provider import BGEEmbeddingProvider
-from services.checkpoint_service import ReviewCheckpointManager
+from services.application_runtime import build_postgres_review_agent
+from services.application_runtime import (
+    ReviewWorkerRuntime,
+    initialize_review_worker_runtime,
+    shutdown_review_worker_runtime,
+)
 from services.event_service import ReviewEventStore, TERMINAL_STATUSES
-from services.langgraph_memory_store import LangGraphPostgresMemoryStore
 from services.observability_service import (
     configure_observability,
     shutdown_observability,
 )
-from services.postgres_clause_retrieval import PostgresHybridClauseRetriever
 from services.review_service import ReviewOrchestratorAgent
 from services.runtime_log_service import configure_runtime_logging, write_runtime_log
-from services.task_queue import WorkerHeartbeat
+from services.task_queue import (
+    ReviewTaskQueue,
+    WorkerHeartbeat,
+)
 
 
 def execute_review_job(task_id: str) -> dict:
@@ -28,12 +35,11 @@ def execute_review_job(task_id: str) -> dict:
         settings.runtime_log_level,
     )
     configure_observability(settings)
-    persistence = _build_persistence(settings)
     event_store = None
-    agent = None
     try:
-        event_store = ReviewEventStore(persistence)
-        event_store.load_persisted(clear_execution_leases=False)
+        runtime = initialize_review_worker_runtime(settings)
+        persistence = runtime.persistence
+        event_store = runtime.event_store
         state = event_store.get_task(task_id)
         if state is None:
             raise ValueError(f"task not found: {task_id}")
@@ -44,14 +50,13 @@ def execute_review_job(task_id: str) -> dict:
                 "executed": False,
             }
         content = persistence.load_upload(task_id)
-        agent = _build_agent(event_store, persistence, settings)
         write_runtime_log(
             "rq_job_started",
             task_id=task_id,
             queue=settings.rq_queue,
             job_timeout_seconds=settings.rq_job_timeout_seconds,
         )
-        agent.run(task_id, content)
+        runtime.review_agent.run(task_id, content)
         final_state = event_store.get_task(task_id)
         if final_state is None:
             raise RuntimeError(f"task disappeared after RQ execution: {task_id}")
@@ -75,12 +80,6 @@ def execute_review_job(task_id: str) -> dict:
                 error_type=persistence_error.__class__.__name__,
             )
         raise
-    finally:
-        try:
-            if agent is not None:
-                agent.close()
-        finally:
-            persistence.dispose()
 
 
 def main() -> int:
@@ -98,12 +97,31 @@ def main() -> int:
         name=f"review-agent-worker-{os.getpid()}",
     )
     heartbeat = WorkerHeartbeat(redis_client, settings.rq_queue)
-    heartbeat.start()
     try:
+        runtime_started = perf_counter()
+        runtime = initialize_review_worker_runtime(settings)
+        write_runtime_log(
+            "worker_runtime_ready",
+            warmup_ms=round((perf_counter() - runtime_started) * 1000),
+            embedding_model=settings.bge_embedding_model,
+            reranker_model=settings.bge_reranker_model,
+        )
+        _recover_pending_jobs(
+            settings,
+            redis_client,
+            runtime=runtime,
+        )
+        heartbeat.start()
         worker.work(with_scheduler=False)
     finally:
         heartbeat.stop()
-        shutdown_observability()
+        try:
+            shutdown_review_worker_runtime()
+        finally:
+            try:
+                shutdown_observability()
+            finally:
+                redis_client.close()
     return 0
 
 
@@ -123,52 +141,64 @@ def _build_agent(
     persistence: PostgresReviewPersistence,
     settings: Settings,
 ) -> ReviewOrchestratorAgent:
-    checkpoint_manager = ReviewCheckpointManager.postgres(settings.database_url)
-    related_clause_retriever = None
-    memory_store = None
+    return build_postgres_review_agent(
+        event_store,
+        persistence,
+        settings,
+        include_retriever=True,
+    )
+
+
+def _recover_pending_jobs(
+    settings: Settings,
+    redis_client: Redis,
+    *,
+    runtime: ReviewWorkerRuntime | None = None,
+) -> list[str]:
+    owns_persistence = runtime is None
+    persistence = runtime.persistence if runtime is not None else _build_persistence(settings)
     try:
-        embedding_provider = BGEEmbeddingProvider(settings)
-        related_clause_retriever = PostgresHybridClauseRetriever(
-            persistence.engine,
-            Redis.from_url(settings.redis_url),
-            settings,
-            embedding_provider=embedding_provider,
+        event_store = (
+            runtime.event_store
+            if runtime is not None
+            else ReviewEventStore(persistence)
         )
-        memory_store = LangGraphPostgresMemoryStore.postgres(
-            settings.database_url,
-            settings,
-            embedding_provider=embedding_provider,
+        event_store.load_persisted(clear_execution_leases=True)
+        task_queue = ReviewTaskQueue(
+            settings.redis_url,
+            settings.rq_queue,
+            job_timeout_seconds=settings.rq_job_timeout_seconds,
+            status_reserve_seconds=settings.rq_status_reserve_seconds,
+            redis_client=redis_client,
         )
-        return ReviewOrchestratorAgent(
-            event_store,
-            node_timeout_seconds=settings.node_timeout_seconds,
-            llm_max_concurrency=settings.llm_max_concurrency,
-            checkpoint_manager=checkpoint_manager,
-            related_clause_retriever=related_clause_retriever,
-            memory_store=memory_store,
-        )
-    except Exception:
-        resources = (
-            ("related_clause_retriever", related_clause_retriever),
-            ("memory_store", memory_store),
-            ("checkpoint_manager", checkpoint_manager),
-        )
-        for resource_name, resource in resources:
-            if resource is None:
+        recovered_task_ids = []
+        for state in event_store.pending_tasks():
+            if state.status == ReviewStatus.CANCEL_REQUESTED:
+                event_store.finalize_cancel(state.task_id)
                 continue
             try:
-                resource.close()
-            except Exception as cleanup_error:
-                try:
-                    write_runtime_log(
-                        "worker_resource_cleanup_failed",
-                        resource=resource_name,
-                        error_type=cleanup_error.__class__.__name__,
-                        error_message=str(cleanup_error)[:300],
-                    )
-                except Exception:
-                    pass
-        raise
+                persistence.load_upload(state.task_id)
+                event_store.record_recovery(state.task_id)
+                task_queue.enqueue(state.task_id, replace_existing=True)
+            except RecoveryError as exc:
+                event_store.update_task(
+                    state.task_id,
+                    ReviewStatus.NEED_MANUAL_REVIEW,
+                    str(exc),
+                    step_name="recovery_blocked",
+                )
+                continue
+            recovered_task_ids.append(state.task_id)
+        if recovered_task_ids:
+            write_runtime_log(
+                "rq_pending_jobs_recovered",
+                task_ids=recovered_task_ids,
+                count=len(recovered_task_ids),
+            )
+        return recovered_task_ids
+    finally:
+        if owns_persistence:
+            persistence.dispose()
 
 
 def _record_worker_failure(

@@ -160,6 +160,10 @@ class PostgresHybridClauseRetriever:
     def close(self) -> None:
         self.redis.close()
 
+    def warmup(self) -> None:
+        self.embedding_provider.warmup()
+        self.reranker.warmup()
+
     def _ensure_clause_embeddings(
         self,
         task_id: str,

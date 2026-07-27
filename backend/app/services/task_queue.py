@@ -71,14 +71,21 @@ class ReviewTaskQueue:
             )
         return health
 
-    def enqueue(self, task_id: str) -> Job:
+    def enqueue(self, task_id: str, *, replace_existing: bool = False) -> Job:
         normalized_task_id = str(task_id).strip()
         if not normalized_task_id:
             raise ValueError("task_id is required")
         job_id = f"review-{normalized_task_id}"
         existing = self._existing_job(job_id)
         if existing is not None:
-            return existing
+            if not replace_existing:
+                return existing
+            try:
+                existing.delete()
+            except RedisError as exc:
+                raise QueueDependencyError(
+                    "failed to replace existing review job"
+                ) from exc
         try:
             return self.queue.enqueue_call(
                 func="workers.review_worker.execute_review_job",
@@ -200,6 +207,34 @@ class QueuedReviewService:
                 ReviewStatus.TASK_ERROR,
                 f"Review task could not be queued: {exc}",
                 step_name="queue_failed",
+            )
+            raise
+        return state
+
+    def recover(
+        self,
+        task_id: str,
+        *,
+        resume_from: ReviewStatus | None,
+        operator_action: str,
+        reason: str,
+        review_agent,
+    ) -> AgentState:
+        self.task_queue.require_ready()
+        state = review_agent.prepare_manual_recovery(
+            task_id,
+            resume_from=resume_from,
+            operator_action=operator_action,
+            reason=reason,
+        )
+        try:
+            self.task_queue.enqueue(task_id, replace_existing=True)
+        except Exception as exc:
+            self.event_store.update_task(
+                task_id,
+                ReviewStatus.TASK_ERROR,
+                f"Recovered task could not be queued: {exc}",
+                step_name="recovery_queue_failed",
             )
             raise
         return state

@@ -5,14 +5,15 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Sequence
 
-from sqlalchemy import Connection, create_engine, inspect, select
+from sqlalchemy import Connection, create_engine, delete, inspect, select
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.engine import make_url
 
 from db.clause_text import clause_search_text
 from db.postgres_models import APP_SCHEMA, Base
+from models.memory import build_semantic_preference
 
 
 TABLE_ORDER = (
@@ -56,6 +57,11 @@ BOOLEAN_COLUMNS = {
 }
 TARGET_ONLY_COLUMNS = {
     "clauses": {"search_text"},
+}
+ADDITIONAL_MEMORY_TABLES = {
+    "memory_items",
+    "semantic_preferences",
+    "semantic_preference_embeddings",
 }
 
 
@@ -180,7 +186,14 @@ def compare_snapshots(
     if source.event_max_by_task != target.event_max_by_task:
         mismatches.append("event maximum sequence")
     if source.table_hashes != target.table_hashes:
-        mismatches.append("canonical table JSON hashes")
+        different_tables = sorted(
+            table_name
+            for table_name in TABLE_ORDER
+            if source.table_hashes[table_name] != target.table_hashes[table_name]
+        )
+        mismatches.append(
+            "canonical table JSON hashes (" + ", ".join(different_tables) + ")"
+        )
     if mismatches:
         raise MigrationValidationError(
             "PostgreSQL validation failed: " + ", ".join(mismatches)
@@ -211,14 +224,31 @@ def apply_sqlite_to_postgres(
     database_url: str,
     *,
     batch_size: int = 500,
+    additional_memory_sources: Sequence[str | Path] = (),
 ) -> dict[str, Any]:
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
-    source = read_sqlite_snapshot(source_path)
+    source = build_composite_snapshot(
+        read_sqlite_snapshot(source_path),
+        tuple(read_sqlite_snapshot(path) for path in additional_memory_sources),
+    )
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
         with engine.begin() as connection:
             _require_postgres_schema(connection)
+            if additional_memory_sources:
+                connection.execute(
+                    delete(
+                        Base.metadata.tables[
+                            f"{APP_SCHEMA}.semantic_preference_embeddings"
+                        ]
+                    )
+                )
+                connection.execute(
+                    delete(
+                        Base.metadata.tables[f"{APP_SCHEMA}.semantic_preferences"]
+                    )
+                )
             for table_name in TABLE_ORDER:
                 rows = source.rows_by_table[table_name]
                 for offset in range(0, len(rows), batch_size):
@@ -233,6 +263,10 @@ def apply_sqlite_to_postgres(
         "mode": "apply",
         "status": "validated",
         "source": str(Path(source_path).expanduser().resolve()),
+        "additional_memory_sources": [
+            str(Path(path).expanduser().resolve())
+            for path in additional_memory_sources
+        ],
         "target": make_url(database_url).render_as_string(hide_password=True),
         "validation": source.public_summary(),
     }
@@ -256,14 +290,126 @@ def read_postgres_snapshot(connection: Connection) -> MigrationSnapshot:
     return build_snapshot(rows_by_table)
 
 
-def dry_run_sqlite(source_path: str | Path) -> dict[str, Any]:
-    source = read_sqlite_snapshot(source_path)
+def dry_run_sqlite(
+    source_path: str | Path,
+    *,
+    additional_memory_sources: Sequence[str | Path] = (),
+) -> dict[str, Any]:
+    source = build_composite_snapshot(
+        read_sqlite_snapshot(source_path),
+        tuple(read_sqlite_snapshot(path) for path in additional_memory_sources),
+    )
     return {
         "mode": "dry-run",
         "status": "source_validated",
         "source": str(Path(source_path).expanduser().resolve()),
+        "additional_memory_sources": [
+            str(Path(path).expanduser().resolve())
+            for path in additional_memory_sources
+        ],
         "validation": source.public_summary(),
     }
+
+
+def build_composite_snapshot(
+    primary: MigrationSnapshot,
+    additional_memory: Sequence[MigrationSnapshot],
+) -> MigrationSnapshot:
+    if not additional_memory:
+        return primary
+
+    for index, snapshot in enumerate(additional_memory, start=1):
+        unexpected = {
+            table_name: count
+            for table_name, count in snapshot.row_counts.items()
+            if table_name not in ADDITIONAL_MEMORY_TABLES and count
+        }
+        if unexpected:
+            details = ", ".join(
+                f"{table_name}={count}"
+                for table_name, count in sorted(unexpected.items())
+            )
+            raise MigrationValidationError(
+                f"Additional Memory source {index} contains business rows: {details}"
+            )
+
+    rows_by_table = {
+        table_name: [dict(row) for row in primary.rows_by_table[table_name]]
+        for table_name in TABLE_ORDER
+    }
+    memory_by_id = {
+        str(row["memory_id"]): dict(row)
+        for row in rows_by_table["memory_items"]
+    }
+    idempotency_owners = {
+        str(row["idempotency_key"]): str(row["memory_id"])
+        for row in memory_by_id.values()
+        if row.get("idempotency_key")
+    }
+    for snapshot in additional_memory:
+        for row in snapshot.rows_by_table["memory_items"]:
+            memory_id = str(row["memory_id"])
+            existing = memory_by_id.get(memory_id)
+            if existing is not None and existing != row:
+                raise MigrationValidationError(
+                    f"Memory ID {memory_id} has conflicting source rows"
+                )
+            idempotency_key = str(row.get("idempotency_key") or "")
+            owner = idempotency_owners.get(idempotency_key)
+            if idempotency_key and owner not in (None, memory_id):
+                raise MigrationValidationError(
+                    f"Memory idempotency key {idempotency_key} belongs to "
+                    f"both {owner} and {memory_id}"
+                )
+            memory_by_id[memory_id] = dict(row)
+            if idempotency_key:
+                idempotency_owners[idempotency_key] = memory_id
+
+    all_snapshots = (primary, *additional_memory)
+    last_used_by_group: dict[tuple[str, str, str, str], str] = {}
+    for snapshot in all_snapshots:
+        for row in snapshot.rows_by_table["semantic_preferences"]:
+            group = _memory_group(row)
+            last_used_by_group[group] = max(
+                last_used_by_group.get(group, ""),
+                str(row.get("last_used_at") or ""),
+            )
+
+    grouped_memory: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    for row in memory_by_id.values():
+        grouped_memory.setdefault(_memory_group(row), []).append(row)
+
+    preferences = []
+    for group, memory_rows in sorted(grouped_memory.items()):
+        preference = build_semantic_preference(
+            memory_rows,
+            last_used_at=last_used_by_group.get(group, ""),
+        ).to_dict()
+        preference.pop("memory_type")
+        preference["source_memory_ids_json"] = preference.pop("source_memory_ids")
+        preference["variants_json"] = preference.pop("variants")
+        preferences.append(preference)
+
+    rows_by_table["memory_items"] = sorted(
+        memory_by_id.values(),
+        key=lambda row: str(row["memory_id"]),
+    )
+    rows_by_table["semantic_preferences"] = sorted(
+        preferences,
+        key=lambda row: str(row["preference_id"]),
+    )
+    # Embeddings are derived from preference content and must not survive a rebuild.
+    rows_by_table["semantic_preference_embeddings"] = []
+    return build_snapshot(rows_by_table)
+
+
+def _memory_group(row: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(row["contract_type"]),
+        str(row["clause_type"]),
+        str(row["risk_type"]),
+        str(row["review_position"]),
+    )
 
 
 def _open_read_only_sqlite(path: Path) -> sqlite3.Connection:
@@ -347,11 +493,23 @@ def main(argv: list[str] | None = None) -> int:
         default=os.getenv("REVIEW_AGENT_DATABASE_URL", ""),
         help="PostgreSQL SQLAlchemy URL; required for apply",
     )
+    parser.add_argument(
+        "--additional-memory-source",
+        action="append",
+        default=[],
+        help=(
+            "Additional SQLite source containing Memory rows only; may be repeated. "
+            "Semantic preferences are rebuilt and legacy embeddings are discarded."
+        ),
+    )
     parser.add_argument("--batch-size", type=int, default=500)
     args = parser.parse_args(argv)
 
     if args.mode == "dry-run":
-        result = dry_run_sqlite(args.source)
+        result = dry_run_sqlite(
+            args.source,
+            additional_memory_sources=args.additional_memory_source,
+        )
     else:
         if not args.database_url.strip():
             parser.error(
@@ -361,6 +519,7 @@ def main(argv: list[str] | None = None) -> int:
             args.source,
             args.database_url.strip(),
             batch_size=args.batch_size,
+            additional_memory_sources=args.additional_memory_source,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

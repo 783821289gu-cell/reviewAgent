@@ -95,6 +95,28 @@ class PostgresTaskRepository:
             ).mappings().first()
             return _task_payload(row) if row is not None else None
 
+    def get_execution_control(self, task_id: str) -> dict | None:
+        latest_event_id = (
+            select(func.coalesce(func.max(TaskEventRow.event_id), -1))
+            .where(TaskEventRow.task_id == task_id)
+            .scalar_subquery()
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(
+                select(
+                    ReviewTaskRow.status,
+                    ReviewTaskRow.execution_owner,
+                    latest_event_id.label("latest_event_id"),
+                ).where(ReviewTaskRow.task_id == task_id)
+            ).mappings().first()
+            if row is None:
+                return None
+            return {
+                "status": str(row["status"]),
+                "execution_owner": str(row["execution_owner"]),
+                "latest_event_id": int(row["latest_event_id"]),
+            }
+
     def mark_recovery(
         self,
         connection: Connection,
@@ -138,6 +160,15 @@ class PostgresTaskRepository:
                 )
                 .values(execution_owner="", updated_at=_utc_now())
             )
+
+    def is_execution_active(self, task_id: str) -> bool:
+        with self.engine.connect() as connection:
+            execution_owner = connection.execute(
+                select(ReviewTaskRow.execution_owner).where(
+                    ReviewTaskRow.task_id == task_id
+                )
+            ).scalar_one_or_none()
+            return bool(execution_owner)
 
     def clear_execution_leases(self) -> None:
         with self.engine.begin() as connection:

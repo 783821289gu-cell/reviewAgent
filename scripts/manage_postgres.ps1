@@ -19,9 +19,9 @@ if ($Port -le 0 -or $Port -gt 65535) {
     throw "Port must be between 1 and 65535."
 }
 
-$postgresRoot = Join-Path $runtimeRoot "postgresql\17"
-$dataDir = Join-Path $runtimeRoot "data\postgres"
-$logFile = Join-Path $runtimeRoot "logs\postgresql.log"
+$postgresRoot = Join-Path $runtimeRoot "postgresql-vector\Library"
+$dataDir = Join-Path $runtimeRoot "data\postgres-vector"
+$logFile = Join-Path $runtimeRoot "logs\postgresql-vector.log"
 $pgCtl = Join-Path $postgresRoot "bin\pg_ctl.exe"
 
 if (-not (Test-Path -LiteralPath $pgCtl)) {

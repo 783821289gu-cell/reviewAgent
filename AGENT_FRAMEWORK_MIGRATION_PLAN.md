@@ -3,7 +3,7 @@
 ## 1. 文档状态
 
 - 本文档是独立迭代计划，不覆盖此前的 `PLAN.md`、`NEXT_PLAN.md` 或 `AGENT_EVOLUTION_PLAN.md`。
-- 当前状态：执行中。
+- 当前状态：已完成（Docker 与外部 Langfuse/OTLP 服务按用户指令后置）。
 - 核心约束：遵守 `constitution.md`；每个阶段独立实现、审查、验证和提交。
 
 ## 2. 目标
@@ -199,6 +199,19 @@ Docker 相关工作按用户最新指令后置，当前不安装、不维护 Com
 - Code Review 补齐 FastAPI 生命周期中的 MCP Session Manager，并把 Agent、OpenTelemetry 与轮转日志按顺序纳入同一清理回调；即使 Agent 关闭失败，OTel flush 和日志句柄关闭也继续执行。Pydantic 模型不再全局裁剪字符串，避免合同原文和证据在外部工具边界被静默改写。
 - 34 个后端测试模块、305 项测试在每模块 300 秒限制下全部通过，总耗时 525.2 秒；Python 编译、`pip check`、差异空白检查、MCP `initialize` / `tools/list` 协议调用、14 个 StructuredTool 生成和 OTel 脱敏 Span 均已验证。没有连接外部 OTLP/Langfuse 服务；Docker 仍按用户指令后置，该运行环境验收保留到任务 10。
 
-### 下一个任务
+### 任务 10 完成记录
 
-下一项是任务 10：运行环境验收、默认入口直接切换、确认无引用后清理旧实现，并完成全量与真实服务验收。Docker 仍按用户指令后置，是否重新采用需在该任务开始时确认。
+- 默认 FastAPI 入口已一次性切换为 `PostgreSQL -> Redis/RQ -> LangGraph -> PostgreSQL`。API 只负责持久化任务并入队，RQ Worker 复用预热后的 BGE、Checkpoint、Memory Store 和 LangGraph Agent；SSE 从 PostgreSQL 读取严格递增事件，并以 Redis 通知减少轮询延迟。
+- PostgreSQL `app` schema 已成为任务、文档、条款、风险、日志、事件和审计数据的唯一生产真相源。应用启动时会同时检查 PostgreSQL、Redis 和 RQ Worker；运行中 PostgreSQL 失联时 `/health` 与新任务入口返回真实 `503`，不会创建无法执行的假成功任务。
+- 切换前建立 PostgreSQL custom-format 备份 `D:\demo-runtime\backups\pre-cutover-review-agent-20260727-201704.dump`，SHA-256 为 `F4C1A625E396BA0CD195A897E50E9396993D64DE74B715D1DB5F18D7AE1E433C`；上传文件归档 SHA-256 为 `E76753E838349456C10FA847D9AD0E7813557D32E59A5B57F7936344667CA044`。
+- 一次性迁移合并了仓库 SQLite 的 170 条 Memory 与 D 盘运行 SQLite 的 100 条 Memory，共恢复 19 个历史任务、270 条原始反馈和 5 条聚合偏好；重复执行迁移保持任务 ID、事件序号、规范化 JSON 哈希和行数一致。19 份历史上传文件均按记录哈希恢复，原 SQLite 只读保留为归档。
+- 旧的 2,081 行手写编排实现 `legacy_review_service.py` 已删除；LangGraph 继续复用抽离后的领域执行辅助，不再由第二套状态机控制流程。兼容 SQLite Repository 仅供旧数据迁移、隔离评估和依赖注入测试使用，生产 `main` 导入不会加载该包，也不会构造隐藏的全局 Agent。
+- Code Review 修复了三类切换风险：每次进度事件全量重载大型任务状态导致的性能退化、API 仅在启动时检查依赖导致运行中 PostgreSQL 断开仍接收任务、以及兼容 Agent 在 import 阶段隐式创建 SQLite 状态。当前执行控制只读取轻量状态/租约/最新事件号，跨进程写入使用 PostgreSQL advisory lock，完整状态仅在外部事件变化时刷新。
+- 切换前使用用户提供的 `Confidentiality Agreement.pdf` 完成真实 DeepSeek 验收：任务 `task_5f3f4586c979` 持续约 1,435.7 秒，解析 61 条条款、构建 29 个上下文、产生 195 个以上持久事件并进入人工复核，随后完成逐条反馈、Memory 更新和报告生成；长任务没有被累计运行时间误报超时。
+- 切换后使用同一 PDF 完成本地结构化模式验收：任务 `task_bba1eb76fcbb` 持续约 380.6 秒，解析 61 条条款、构建 29 个上下文、形成 5 条证据验证风险并到达 `EVIDENCE_VERIFIED`；过程事件持续可见，重启后可从 PostgreSQL 恢复。
+- 最终后端全量回归为 34 个模块、311 项测试，耗时 539.1 秒，全部通过且无模块超时。真实 PostgreSQL/Redis/RQ、Postgres Checkpointer 与 LangGraph Store 外部集成另有 29 项测试通过，耗时 25.2 秒；`alembic check`、`pip check`、Python 编译和 `git diff --check` 均通过。
+- Docker、Compose 和外部 Langfuse/OTLP 服务没有部署，也不作为本轮完成条件。MCP 与 OTLP 继续默认关闭；是否引入 Docker 或部署独立可观测服务属于后续独立计划，不得把本地 Span 测试写成外部服务已上线。
+
+### 迁移结论
+
+本计划的 10 个任务均已完成并经过独立验证。当前没有下一项未完成的 Agent 框架迁移任务；后续新增范围应创建新的独立 Plan，不覆盖本文件。

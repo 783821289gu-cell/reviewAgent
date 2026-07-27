@@ -2,6 +2,7 @@ from hashlib import sha256
 import ntpath
 from pathlib import Path
 
+from db.errors import RecoveryError
 from db.repositories.document_repository import DocumentRepository
 from db.repositories.event_repository import EventRepository
 from db.repositories.memory_repository import MemoryRepository
@@ -9,11 +10,6 @@ from db.repositories.review_result_repository import ReviewResultRepository
 from db.repositories.task_repository import TaskRepository
 from db.sqlite import connect
 from models.review import AgentState, LLMMode, ReviewPosition, ReviewStatus
-
-
-class RecoveryError(ValueError):
-    pass
-
 
 class ReviewPersistence:
     def __init__(self, db_path: str, upload_dir: str):

@@ -1,11 +1,13 @@
+from contextlib import contextmanager
 from hashlib import sha256
 import logging
 import ntpath
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine, make_url
 
+from db.errors import RecoveryError
 from db.postgres_models import APP_SCHEMA, Base
 from db.postgres_repositories import (
     PostgresDocumentRepository,
@@ -13,7 +15,6 @@ from db.postgres_repositories import (
     PostgresReviewResultRepository,
     PostgresTaskRepository,
 )
-from db.repositories import RecoveryError
 from models.review import AgentState, LLMMode, ReviewPosition, ReviewStatus
 
 
@@ -122,48 +123,35 @@ class PostgresReviewPersistence:
             self.task_repository.clear_execution_leases()
         persisted = []
         for task in self.task_repository.list_all():
-            try:
-                status = ReviewStatus(task["status"])
-                review_position = ReviewPosition(task["review_position"])
-                llm_mode = LLMMode(task["llm_mode"])
-            except ValueError as exc:
-                raise RecoveryError(
-                    f"task {task['task_id']} has invalid persisted enum data: {exc}"
-                ) from exc
             events = self.event_repository.list_for_task(task["task_id"])
-            state = AgentState(
-                task_id=task["task_id"],
-                trace_id=task["trace_id"],
-                status=status,
-                file_name=task["file_name"],
-                file_type=task["file_type"],
-                review_position=review_position,
-                message=task["message"],
-                llm_mode=llm_mode,
-                document=self.document_repository.get_document(task["task_id"]),
-                contract_classification=task["contract_classification"],
-                clauses=self.document_repository.get_clauses(task["task_id"]),
-                matched_rules=task["matched_rules"],
-                review_contexts=task["review_contexts"],
-                analysis_results=task["analysis_results"],
-                risk_findings=self.review_result_repository.get_risks(task["task_id"]),
-                evidence_results=task["evidence_results"],
-                report_file=task["report_file"],
-                logs=self.review_result_repository.get_logs(task["task_id"]),
-                events=[_event_without_task(event) for event in events],
-                recovery_count=task["recovery_count"],
-                recovery_from_status=task["recovery_from_status"],
-                retry_counts=task["retry_counts"],
-                recovery_history=task["recovery_history"],
-                cancel_requested_at=task["cancel_requested_at"],
-                cancelled_at=task["cancelled_at"],
-                cancel_reason=task["cancel_reason"],
-                execution_active=False,
-                last_timeout=task["last_timeout"],
-                progress=task["progress"],
-            )
-            persisted.append((state, events))
+            persisted.append((self._state_from_task(task, events), events))
         return persisted
+
+    def load_state(self, task_id: str) -> tuple[AgentState, list[dict]] | None:
+        task = self.task_repository.get(task_id)
+        if task is None:
+            return None
+        events = self.event_repository.list_for_task(task_id)
+        return self._state_from_task(task, events), events
+
+    def load_task_execution_control(self, task_id: str) -> dict | None:
+        return self.task_repository.get_execution_control(task_id)
+
+    @contextmanager
+    def task_mutation_lock(self, task_id: str):
+        normalized_task_id = str(task_id).strip()
+        if not normalized_task_id:
+            raise ValueError("task_id is required")
+        with self.engine.begin() as connection:
+            connection.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock("
+                    "hashtextextended(:task_id, 0)"
+                    ")"
+                ),
+                {"task_id": normalized_task_id},
+            )
+            yield
 
     def load_upload(self, task_id: str) -> bytes:
         upload = self.document_repository.get_upload(task_id)
@@ -187,6 +175,59 @@ class PostgresReviewPersistence:
 
     def dispose(self) -> None:
         self.engine.dispose()
+
+    def is_ready(self) -> bool:
+        try:
+            with self.engine.connect() as connection:
+                return connection.execute(text("SELECT 1")).scalar_one() == 1
+        except Exception:
+            return False
+
+    def _state_from_task(
+        self,
+        task: dict,
+        events: list[dict],
+    ) -> AgentState:
+        try:
+            status = ReviewStatus(task["status"])
+            review_position = ReviewPosition(task["review_position"])
+            llm_mode = LLMMode(task["llm_mode"])
+        except ValueError as exc:
+            raise RecoveryError(
+                f"task {task['task_id']} has invalid persisted enum data: {exc}"
+            ) from exc
+        task_id = str(task["task_id"])
+        return AgentState(
+            task_id=task_id,
+            trace_id=task["trace_id"],
+            status=status,
+            file_name=task["file_name"],
+            file_type=task["file_type"],
+            review_position=review_position,
+            message=task["message"],
+            llm_mode=llm_mode,
+            document=self.document_repository.get_document(task_id),
+            contract_classification=task["contract_classification"],
+            clauses=self.document_repository.get_clauses(task_id),
+            matched_rules=task["matched_rules"],
+            review_contexts=task["review_contexts"],
+            analysis_results=task["analysis_results"],
+            risk_findings=self.review_result_repository.get_risks(task_id),
+            evidence_results=task["evidence_results"],
+            report_file=task["report_file"],
+            logs=self.review_result_repository.get_logs(task_id),
+            events=[_event_without_task(event) for event in events],
+            recovery_count=task["recovery_count"],
+            recovery_from_status=task["recovery_from_status"],
+            retry_counts=task["retry_counts"],
+            recovery_history=task["recovery_history"],
+            cancel_requested_at=task["cancel_requested_at"],
+            cancelled_at=task["cancelled_at"],
+            cancel_reason=task["cancel_reason"],
+            execution_active=bool(task["execution_owner"]),
+            last_timeout=task["last_timeout"],
+            progress=task["progress"],
+        )
 
     def _write_upload(
         self,

@@ -7,7 +7,7 @@ from uuid import uuid4
 from langgraph.types import Command, interrupt
 
 from config import settings
-from db.repositories import RecoveryError
+from db.errors import RecoveryError
 from models.contract import clause_from_dict, contract_document_from_dict
 from models.log import StepLog
 from models.planner import PlannerAction, PlannerReasonCode
@@ -55,10 +55,10 @@ from services.retrieval_runtime import (
 from services.runtime_log_service import write_runtime_log
 from tools.registry import tool_registry
 
-from services.legacy_review_service import (
+from services.review_agent_support import (
     EXECUTION_INTERRUPTS,
     RECOVERABLE_STATUS_ORDER,
-    LegacyReviewOrchestratorAgent,
+    ReviewAgentSupport,
     _analysis_result_key,
     _append_critic_trace,
     _append_planner_trace,
@@ -110,7 +110,7 @@ class _ReviewRuntime:
     branch_results: dict[int, dict] = field(default_factory=dict)
 
 
-class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
+class ReviewOrchestratorAgent(ReviewAgentSupport):
     """LangGraph-backed orchestrator with the legacy public service contract."""
 
     def __init__(
@@ -131,8 +131,6 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
             super().__init__(**init_kwargs)
         else:
             super().__init__(event_store, **init_kwargs)
-        del self.task_timeout_seconds
-        del self.deepseek_task_timeout_seconds
         self._checkpoint_manager = (
             checkpoint_manager or ReviewCheckpointManager.in_memory()
         )
@@ -162,6 +160,10 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
     @property
     def memory_store(self) -> RelatedMemoryStore | None:
         return self._memory_store
+
+    def warmup(self) -> None:
+        if self._related_clause_retriever is not None:
+            self._related_clause_retriever.warmup()
 
     def close(self) -> None:
         with self._execution_futures_lock:
@@ -272,24 +274,13 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
             raise ValueError("manual recovery requires persistent task storage")
         execution_owner = self._acquire_execution(task_id)
         try:
-            current = self.event_store.get_task(task_id)
-            if current is None:
-                raise ValueError(f"task not found: {task_id}")
-            expected = _manual_recovery_checkpoint(current)
-            if resume_from is not None and resume_from != expected:
-                raise ValueError(
-                    f"recovery checkpoint must be {expected.value} "
-                    f"for {current.status.value}"
-                )
-            candidate = replace(current, status=expected)
-            _validate_recovery_checkpoint(candidate)
-            content = self.event_store.persistence.load_upload(task_id)
-            state = self.event_store.record_manual_recovery(
+            state = self.prepare_manual_recovery(
                 task_id,
-                resume_from=expected,
+                resume_from=resume_from,
                 operator_action=operator_action,
                 reason=reason,
             )
+            content = self.event_store.persistence.load_upload(task_id)
             self._submit_execution(
                 task_id,
                 content,
@@ -300,6 +291,35 @@ class ReviewOrchestratorAgent(LegacyReviewOrchestratorAgent):
         except Exception:
             self.event_store.release_execution(task_id, execution_owner)
             raise
+
+    def prepare_manual_recovery(
+        self,
+        task_id: str,
+        *,
+        resume_from: ReviewStatus | None,
+        operator_action: str,
+        reason: str,
+    ) -> AgentState:
+        if self.event_store.persistence is None:
+            raise ValueError("manual recovery requires persistent task storage")
+        current = self.event_store.get_task(task_id)
+        if current is None:
+            raise ValueError(f"task not found: {task_id}")
+        expected = _manual_recovery_checkpoint(current)
+        if resume_from is not None and resume_from != expected:
+            raise ValueError(
+                f"recovery checkpoint must be {expected.value} "
+                f"for {current.status.value}"
+            )
+        candidate = replace(current, status=expected)
+        _validate_recovery_checkpoint(candidate)
+        self.event_store.persistence.load_upload(task_id)
+        return self.event_store.record_manual_recovery(
+            task_id,
+            resume_from=expected,
+            operator_action=operator_action,
+            reason=reason,
+        )
 
     def resume_human_review(
         self,

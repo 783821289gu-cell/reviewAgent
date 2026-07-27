@@ -2,10 +2,10 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 from math import isfinite
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from config import settings
-from db.repositories.memory_repository import MemoryRepository
 from models.feedback import build_human_feedback
 from models.memory import (
     MemoryItem,
@@ -22,6 +22,9 @@ from services.memory_text import (
     build_memory_query_text,
     build_preference_embedding_text,
 )
+
+if TYPE_CHECKING:
+    from db.repositories.memory_repository import MemoryRepository
 
 
 DEFAULT_MEMORY_STALE_AFTER_DAYS = 365
@@ -140,6 +143,8 @@ def write_memory(tool_input: dict) -> dict:
             item.to_dict(),
             idempotency_key=idempotency_key,
         )
+
+    from db.repositories.memory_repository import MemoryRepository
 
     repository = MemoryRepository(str(tool_input.get("db_path") or settings.memory_db_path))
     return repository.save(
@@ -265,6 +270,8 @@ def _query_sqlite_preferences(
     embedding_cache: dict | None,
     embedding_call_records: list | None,
 ) -> list[dict]:
+    from db.repositories.memory_repository import MemoryRepository
+
     if embedding_cache is None:
         embedding_cache = {}
     if not isinstance(embedding_cache, dict):
@@ -415,7 +422,7 @@ def _ranked_preference_payloads(
 
 def _rank_preferences_by_embedding(
     *,
-    repository: MemoryRepository,
+    repository: "MemoryRepository",
     preferences: list[dict],
     contract_type: str,
     clause: dict,

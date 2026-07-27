@@ -146,6 +146,66 @@ class SqlitePostgresMigrationTest(unittest.TestCase):
             ):
                 compare_snapshots(source, target)
 
+    def test_additional_memory_source_rebuilds_preferences_without_business_rows(self):
+        with TemporaryDirectory() as temp_dir:
+            primary_path = Path(temp_dir) / "primary.sqlite3"
+            additional_path = Path(temp_dir) / "additional.sqlite3"
+            self._create_source(
+                primary_path,
+                matched_rules_json="[]",
+                event_payload_json='{"task_id":"task_1"}',
+            )
+            self._insert_memory(
+                primary_path,
+                memory_id="MEM-primary",
+                user_action="accept",
+                created_at="2026-07-24T00:00:00+00:00",
+            )
+            self._create_memory_source(
+                additional_path,
+                memory_id="MEM-additional",
+                user_action="ignore",
+                created_at="2026-07-25T00:00:00+00:00",
+            )
+
+            result = dry_run_sqlite(
+                primary_path,
+                additional_memory_sources=(additional_path,),
+            )
+
+            self.assertEqual(result["validation"]["row_counts"]["review_tasks"], 1)
+            self.assertEqual(result["validation"]["row_counts"]["memory_items"], 2)
+            self.assertEqual(
+                result["validation"]["row_counts"]["semantic_preferences"],
+                1,
+            )
+            self.assertEqual(
+                result["validation"]["row_counts"][
+                    "semantic_preference_embeddings"
+                ],
+                0,
+            )
+
+    def test_additional_memory_source_rejects_business_rows(self):
+        with TemporaryDirectory() as temp_dir:
+            primary_path = Path(temp_dir) / "primary.sqlite3"
+            additional_path = Path(temp_dir) / "additional.sqlite3"
+            for path in (primary_path, additional_path):
+                self._create_source(
+                    path,
+                    matched_rules_json="[]",
+                    event_payload_json='{"task_id":"task_1"}',
+                )
+
+            with self.assertRaisesRegex(
+                MigrationValidationError,
+                "contains business rows",
+            ):
+                dry_run_sqlite(
+                    primary_path,
+                    additional_memory_sources=(additional_path,),
+                )
+
     @staticmethod
     def _create_source(
         path: Path,
@@ -195,6 +255,68 @@ class SqlitePostgresMigrationTest(unittest.TestCase):
                     "",
                     "2026-07-24T00:00:00+00:00",
                     event_payload_json,
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _create_memory_source(
+        path: Path,
+        *,
+        memory_id: str,
+        user_action: str,
+        created_at: str,
+    ) -> None:
+        connection = connect(str(path))
+        connection.close()
+        SqlitePostgresMigrationTest._insert_memory(
+            path,
+            memory_id=memory_id,
+            user_action=user_action,
+            created_at=created_at,
+        )
+
+    @staticmethod
+    def _insert_memory(
+        path: Path,
+        *,
+        memory_id: str,
+        user_action: str,
+        created_at: str,
+    ) -> None:
+        connection = connect(str(path))
+        try:
+            connection.execute(
+                """
+                INSERT INTO memory_items (
+                    memory_id, memory_type, contract_type, clause_type, risk_type,
+                    review_position, user_action, original_severity,
+                    final_severity, original_suggestion, final_suggestion,
+                    ignore_reason, source_finding_id, source_clause_id,
+                    include_in_report, created_at, idempotency_key
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    memory_id,
+                    "human_feedback",
+                    "NDA",
+                    "定义",
+                    "保密信息范围过宽",
+                    "甲方",
+                    user_action,
+                    "中",
+                    "中",
+                    "原建议",
+                    "最终建议",
+                    "忽略原因" if user_action == "ignore" else "",
+                    "RISK-CL-001-NDA-R001",
+                    "CL-001",
+                    int(user_action != "ignore"),
+                    created_at,
+                    None,
                 ),
             )
             connection.commit()

@@ -106,6 +106,9 @@ class BGEEmbeddingProvider:
             cost_status="redis_cache_hit",
         )
 
+    def warmup(self) -> None:
+        self.embed(EmbeddingRequest(texts=["contract review embedding warmup"]))
+
     def _get_model(self):
         if self._model is not None:
             return self._model
@@ -154,6 +157,12 @@ class BGEReranker:
         if len(scores) != len(documents) or not all(isfinite(value) for value in scores):
             raise ValueError("BGE reranker returned invalid scores")
         return scores
+
+    def warmup(self) -> None:
+        self.score(
+            "contract review reranker warmup",
+            ["contract review reranker warmup"],
+        )
 
     def _get_model(self):
         if self._model is not None:

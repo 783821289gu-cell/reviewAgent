@@ -1,7 +1,7 @@
 from models.review import AgentState, LLMMode, ReviewPosition, ReviewStatus, ReviewTask, new_task
 from services.document_service import SUPPORTED_FILE_TYPES
 from services.event_service import ReviewEventStore
-from services.review_service import ReviewOrchestratorAgent, review_orchestrator_agent
+from services.review_service import ReviewOrchestratorAgent, get_default_review_agent
 
 
 SUPPORTED_REVIEW_POSITIONS = {position.value: position for position in ReviewPosition}
@@ -57,7 +57,7 @@ def start_review_task(
     content: bytes,
     review_position_value: str,
     llm_mode_value: str = LLMMode.LOCAL_STRUCTURED.value,
-    review_agent: ReviewOrchestratorAgent = review_orchestrator_agent,
+    review_agent: ReviewOrchestratorAgent | None = None,
 ) -> AgentState:
     return _run_review(
         file_name,
@@ -95,21 +95,7 @@ def recover_review_task(
     payload: dict,
     review_agent: ReviewOrchestratorAgent,
 ) -> dict:
-    reason = str(payload.get("reason", "")).strip()
-    operator_action = str(payload.get("operator_action", "manual_retry")).strip()
-    resume_from_value = str(payload.get("resume_from", "")).strip()
-    if not reason:
-        raise ValueError("recovery reason is required")
-    if len(reason) > 500:
-        raise ValueError("recovery reason must not exceed 500 characters")
-    if not operator_action or len(operator_action) > 100:
-        raise ValueError("operator_action is invalid")
-    resume_from = None
-    if resume_from_value:
-        try:
-            resume_from = ReviewStatus(resume_from_value)
-        except ValueError as exc:
-            raise ValueError(f"invalid recovery checkpoint: {resume_from_value}") from exc
+    reason, operator_action, resume_from = parse_recovery_request(payload)
     state = review_agent.recover_task(
         task_id,
         resume_from=resume_from,
@@ -124,13 +110,36 @@ def recover_review_task(
     }
 
 
+def parse_recovery_request(
+    payload: dict,
+) -> tuple[str, str, ReviewStatus | None]:
+    reason = str(payload.get("reason", "")).strip()
+    operator_action = str(
+        payload.get("operator_action", "manual_retry")
+    ).strip()
+    resume_from_value = str(payload.get("resume_from", "")).strip()
+    if not reason:
+        raise ValueError("recovery reason is required")
+    if len(reason) > 500:
+        raise ValueError("recovery reason must not exceed 500 characters")
+    if not operator_action or len(operator_action) > 100:
+        raise ValueError("operator_action is invalid")
+    resume_from = None
+    if resume_from_value:
+        try:
+            resume_from = ReviewStatus(resume_from_value)
+        except ValueError as exc:
+            raise ValueError(f"invalid recovery checkpoint: {resume_from_value}") from exc
+    return reason, operator_action, resume_from
+
+
 def _run_review(
     file_name: str,
     content: bytes,
     review_position_value: str,
     llm_mode_value: str,
     async_mode: bool,
-    review_agent: ReviewOrchestratorAgent = review_orchestrator_agent,
+    review_agent: ReviewOrchestratorAgent | None = None,
 ) -> AgentState:
     normalized_file_name = file_name.strip()
     file_type = _get_file_type(normalized_file_name)
@@ -142,15 +151,16 @@ def _run_review(
     if not content:
         raise ValueError("上传文件为空，无法解析。")
 
+    active_review_agent = review_agent or get_default_review_agent()
     if async_mode:
-        return review_agent.start(
+        return active_review_agent.start(
             file_name=normalized_file_name,
             file_type=file_type,
             content=content,
             review_position=review_position,
             llm_mode=llm_mode,
         )
-    return review_agent.run_sync(
+    return active_review_agent.run_sync(
         file_name=normalized_file_name,
         file_type=file_type,
         content=content,

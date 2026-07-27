@@ -1,4 +1,5 @@
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+from dataclasses import replace
 import os
 from pathlib import Path
 import sys
@@ -18,10 +19,22 @@ sys.path.insert(0, str(APP_DIR))
 
 from db.postgres_models import ReviewTaskRow
 from db.postgres_persistence import PostgresReviewPersistence
+from api.dependencies import require_accepting_tasks
+from api.errors import ApiError
+from api.routes.health import health
 from config import Settings
 from main import create_app
-from models.review import LLMMode, ReviewPosition, ReviewStatus
+from models.review import (
+    LLMMode,
+    ReviewPosition,
+    ReviewStatus,
+    TaskCancelledError,
+)
 from services.checkpoint_service import ReviewCheckpointManager
+from services.application_runtime import (
+    initialize_review_worker_runtime,
+    shutdown_review_worker_runtime,
+)
 from services.event_notification import PersistentEventStream, RedisEventNotifier
 from services.event_service import ReviewEventStore
 from services.task_queue import (
@@ -110,6 +123,78 @@ class PersistentEventStreamTest(unittest.TestCase):
 
         self.assertEqual(events[0]["event_id"], 2)
         self.assertEqual(subscription.wait_count, 0)
+
+
+class ExecutionControlRefreshTest(unittest.TestCase):
+    def test_local_executor_uses_control_row_until_external_event_changes(self):
+        store = ReviewEventStore()
+        created = store.create_task(
+            "control.pdf",
+            "pdf",
+            ReviewPosition.PARTY_A,
+            content=b"%PDF-control",
+            llm_mode=LLMMode.LOCAL_STRUCTURED,
+        )
+        persistence = Mock()
+        persistence.db_path = None
+        persistence.store_key = "postgresql://control"
+        persistence.task_mutation_lock.side_effect = lambda _task_id: nullcontext()
+        persistence.task_repository.try_acquire_execution.return_value = True
+        persistence.task_repository.release_execution.return_value = None
+        persistence.load_state = None
+        persistence.save_state_and_event.return_value = None
+        persistence.load_task_execution_control.return_value = {
+            "status": ReviewStatus.START.value,
+            "execution_owner": "worker-1",
+            "latest_event_id": 0,
+        }
+        store.persistence = persistence
+
+        self.assertTrue(store.try_acquire_execution(created.task_id, "worker-1"))
+        persistence.load_state = Mock(
+            side_effect=AssertionError("full task reload is not expected")
+        )
+        updated = store.update_task(
+            created.task_id,
+            ReviewStatus.UPLOAD_RECEIVED,
+            "queued",
+            step_name="upload_received",
+        )
+
+        self.assertEqual(updated.status, ReviewStatus.UPLOAD_RECEIVED)
+        persistence.load_state.assert_not_called()
+
+        persisted_cancelled = replace(
+            updated,
+            status=ReviewStatus.CANCEL_REQUESTED,
+            message="cancelled elsewhere",
+        )
+        cancel_event = {
+            "event_id": 2,
+            "task_id": created.task_id,
+            "status": ReviewStatus.CANCEL_REQUESTED.value,
+            "message": "cancelled elsewhere",
+            "step_name": "cancel_requested",
+            "tool_name": "",
+            "created_at": "2026-07-27T00:00:00+00:00",
+        }
+        persistence.load_task_execution_control.return_value = {
+            "status": ReviewStatus.CANCEL_REQUESTED.value,
+            "execution_owner": "worker-1",
+            "latest_event_id": 2,
+        }
+        persistence.load_state = Mock(
+            return_value=(persisted_cancelled, [*updated.events, cancel_event])
+        )
+
+        with self.assertRaises(TaskCancelledError):
+            store.update_task(
+                created.task_id,
+                ReviewStatus.DOCUMENT_PARSED,
+                "stale worker update",
+                step_name="document_parsed",
+            )
+        persistence.load_state.assert_called_once_with(created.task_id)
 
 
 class PersistentSseRouteTest(unittest.TestCase):
@@ -255,7 +340,48 @@ class QueuedReviewServiceTest(unittest.TestCase):
         event_store.create_task.assert_not_called()
 
 
+class ApplicationDependencyHealthTest(unittest.TestCase):
+    def test_postgres_outage_is_reported_before_new_tasks_are_accepted(self):
+        request = Mock()
+        request.app.state.runtime_dependency_error = ""
+        request.app.state.accepting_tasks = True
+        request.app.state.queued_review_service = Mock()
+        request.app.state.runtime = Mock()
+        request.app.state.runtime.persistence.is_ready.return_value = False
+
+        response = health(
+            request,
+            Settings(service_name="contract-review-agent"),
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn(b"postgresql-unavailable", response.body)
+        with self.assertRaises(ApiError) as raised:
+            require_accepting_tasks(request)
+        self.assertEqual(raised.exception.status_code, 503)
+        request.app.state.runtime.task_queue.require_ready.assert_not_called()
+
+
 class ReviewWorkerTest(unittest.TestCase):
+    def tearDown(self):
+        shutdown_review_worker_runtime()
+
+    def test_worker_runtime_is_warmed_once_and_reused(self):
+        settings = Settings(database_url="postgresql+psycopg://local/test")
+        runtime = Mock()
+
+        with patch(
+            "services.application_runtime._build_review_worker_runtime",
+            return_value=runtime,
+        ) as build_runtime:
+            first = initialize_review_worker_runtime(settings)
+            second = initialize_review_worker_runtime(settings)
+
+        self.assertIs(first, runtime)
+        self.assertIs(second, runtime)
+        build_runtime.assert_called_once_with(settings)
+        runtime.warmup.assert_called_once_with()
+
     def test_worker_agent_has_node_timeout_but_no_application_task_timer(self):
         settings = Settings(
             node_timeout_seconds=90,
@@ -272,9 +398,9 @@ class ReviewWorkerTest(unittest.TestCase):
             "postgres",
             return_value=checkpoint_manager,
         ), patch(
-            "workers.review_worker.PostgresHybridClauseRetriever"
+            "services.application_runtime.PostgresHybridClauseRetriever"
         ) as retriever_type, patch(
-            "workers.review_worker.LangGraphPostgresMemoryStore.postgres"
+            "services.application_runtime.LangGraphPostgresMemoryStore.postgres"
         ) as memory_store_factory:
             agent = _build_agent(Mock(), persistence, settings)
 
@@ -297,7 +423,7 @@ class ReviewWorkerTest(unittest.TestCase):
             "postgres",
             return_value=checkpoint_manager,
         ), patch(
-            "workers.review_worker.PostgresHybridClauseRetriever",
+            "services.application_runtime.PostgresHybridClauseRetriever",
             side_effect=RuntimeError("retriever unavailable"),
         ):
             with self.assertRaisesRegex(RuntimeError, "retriever unavailable"):
@@ -318,10 +444,10 @@ class ReviewWorkerTest(unittest.TestCase):
             "postgres",
             return_value=checkpoint_manager,
         ), patch(
-            "workers.review_worker.PostgresHybridClauseRetriever",
+            "services.application_runtime.PostgresHybridClauseRetriever",
             return_value=retriever,
         ), patch(
-            "workers.review_worker.LangGraphPostgresMemoryStore.postgres",
+            "services.application_runtime.LangGraphPostgresMemoryStore.postgres",
             side_effect=RuntimeError("memory store unavailable"),
         ):
             with self.assertRaisesRegex(
@@ -422,6 +548,48 @@ class PostgresRedisIntegrationTest(unittest.TestCase):
         persisted = self.persistence.event_repository.list_for_task(state.task_id)
         self.assertEqual([event["event_id"] for event in persisted], [0, 1])
         self.assertEqual(persisted[-1]["status"], ReviewStatus.UPLOAD_RECEIVED.value)
+
+    def test_cross_process_cancel_refreshes_state_before_worker_update(self):
+        state = self.store.create_task(
+            "cancel.pdf",
+            "pdf",
+            ReviewPosition.PARTY_A,
+            content=b"%PDF-1.4\ncancel",
+            llm_mode=LLMMode.LOCAL_STRUCTURED,
+        )
+        self.created_task_id = state.task_id
+        self.store.update_task(
+            state.task_id,
+            ReviewStatus.UPLOAD_RECEIVED,
+            "queued",
+            step_name="upload_received",
+        )
+        execution_owner = "integration-worker"
+        self.assertTrue(
+            self.store.try_acquire_execution(state.task_id, execution_owner)
+        )
+        second_store = ReviewEventStore(self.persistence)
+        second_store.load_persisted(clear_execution_leases=False)
+
+        cancelled = second_store.request_cancel(state.task_id, "integration")
+
+        self.assertEqual(cancelled.status, ReviewStatus.CANCEL_REQUESTED)
+        with self.assertRaises(TaskCancelledError):
+            self.store.update_task(
+                state.task_id,
+                ReviewStatus.DOCUMENT_PARSED,
+                "stale worker update",
+                step_name="document_parsed",
+            )
+        persisted = self.persistence.load_state(state.task_id)
+        self.assertIsNotNone(persisted)
+        persisted_state, events = persisted
+        self.assertEqual(
+            persisted_state.status,
+            ReviewStatus.CANCEL_REQUESTED,
+        )
+        self.assertEqual([event["event_id"] for event in events], [0, 1, 2])
+        self.store.release_execution(state.task_id, execution_owner)
 
 
 if __name__ == "__main__":

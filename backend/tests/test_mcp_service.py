@@ -166,15 +166,18 @@ class McpServiceTest(unittest.TestCase):
                     [tool["name"] for tool in listed.json()["result"]["tools"]],
                 )
 
-    def test_runtime_cleanup_continues_when_agent_close_fails(self):
-        review_agent = Mock()
-        review_agent.close.side_effect = RuntimeError("close failed")
+    def test_runtime_cleanup_continues_when_runtime_close_fails(self):
+        runtime = Mock()
+        runtime.close.side_effect = RuntimeError("close failed")
+        application = Mock()
+        application.state.runtime = runtime
+        application.state.review_agent = None
         with (
             patch("main.shutdown_observability") as shutdown_observability,
             patch("main.close_runtime_logging") as close_runtime_logging,
             self.assertRaisesRegex(RuntimeError, "close failed"),
         ):
-            _close_runtime_resources(review_agent)
+            _close_runtime_resources(application)
 
         shutdown_observability.assert_called_once_with()
         close_runtime_logging.assert_called_once_with()

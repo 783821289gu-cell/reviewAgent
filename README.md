@@ -2,7 +2,7 @@
 
 开发过程中实际遇到的问题、技术权衡和方案变更持续记录在 [DEVELOPMENT_DECISIONS.md](DEVELOPMENT_DECISIONS.md)。
 
-当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10、`UI_REDESIGN_PLAN.md` 的工作台界面迭代、`TASKS_AGENT.md` 的任务 10，以及 `EVIDENCE_MANUAL_REVIEW_PLAN.md` 的证据失败人工闭环。系统支持 AgentState、显式 Tool Registry、DeepSeek OpenAI-compatible Provider、受控 Planner/Router、一次检索修复、受控 Critic、确定性 Evidence 最终准入、Prompt Injection 阻断、真实 token 预算、Memory 生命周期、可恢复执行、流式状态事件和脱敏 Agent Trace。HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端；任务、上传文件、文档、条款、风险、日志和事件接入 SQLite 持久化。浏览器测试覆盖主流程、错误流、Agent 状态展示、三视口布局和基础可访问性。
+当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10、`UI_REDESIGN_PLAN.md` 的工作台界面迭代、`TASKS_AGENT.md` 的任务 10、`EVIDENCE_MANUAL_REVIEW_PLAN.md` 的证据失败人工闭环，以及 `AGENT_FRAMEWORK_MIGRATION_PLAN.md` 的任务 10。系统支持 AgentState、显式 Tool Registry、DeepSeek OpenAI-compatible Provider、受控 Planner/Router、一次检索修复、受控 Critic、确定性 Evidence 最终准入、Prompt Injection 阻断、真实 token 预算、Memory 生命周期、可恢复执行、流式状态事件和脱敏 Agent Trace。HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端；API 将审查任务写入 PostgreSQL 后交给 RQ Worker，Worker 使用 LangGraph、Postgres Checkpoint、pgvector/BGE 和 LangGraph Postgres Store 执行。Redis 只承担队列、通知和缓存，不是业务真相源。
 
 ## 当前已实现
 
@@ -17,14 +17,14 @@
 9. 基于 Docling Standard Pipeline 的中英文 PDF 解析，支持按需 OCR 和表格结构识别，保留页码、文本块顺序和边界坐标，并将条款位置回溯到对应 PDF 页和块。
 10. 条款编号、条款正文、条款类型、关键字段和原文位置结构化。
 11. 完整显式 `tool_registry` 字典和工具输入输出契约。
-12. 当前解析链路通过 `ReviewOrchestratorAgent` 调度，并只通过 `tool_registry` 调用工具。
+12. 当前解析链路由 LangGraph `ReviewOrchestratorAgent` 调度，并只通过 `tool_registry` 调用工具；风险子图通过 `Send` 受控并行并按原条款顺序稳定聚合。
 13. 后端通过 Server-Sent Events 输出任务状态事件。
 14. 前端实时展示状态进度和执行日志。
 15. 本地 JSON NDA Risk Playbook，覆盖第一版 8 类核心风险。
 16. `retrieve_playbook_rules` 已通过显式 `tool_registry` 调用，并按合同类型、条款类型、关键字段和审查立场检索规则。
 17. 前端展示命中的 Playbook 规则；未命中规则时不会生成正式风险。
-18. `retrieve_related_clauses` 已通过显式 `tool_registry` 调用；支持 `local_sparse` 离线测试模式和 `openai_compatible` 真实 Embedding 模式，在当前合同条款内合并关键词与 Embedding 候选、去重，并执行动态 Top-K 和可解释 rerank。
-19. `retrieve_memory` 已通过显式 `tool_registry` 调用；SQLite Memory 先按合同类型和审查立场硬过滤，再使用与 RAG 相同的 Embedding Provider、余弦相似度和精确字段因子排序。语义偏好向量按模型、维度和内容哈希持久化，内容变化后惰性刷新，不跨立场注入。
+18. `retrieve_related_clauses` 已通过显式 `tool_registry` 调用；生产路径使用 PostgreSQL/pgvector 混合召回、`BAAI/bge-m3` Embedding 和 `BAAI/bge-reranker-base` 重排。旧进程内检索只保留给隔离测试和历史评测，不参与默认 API/RQ 路径。
+19. `retrieve_memory` 已通过显式 `tool_registry` 调用；生产路径使用 LangGraph Postgres Store，先按合同类型和审查立场硬隔离，再结合 BGE 向量相似度与精确字段因子排序。聚合偏好按内容哈希惰性建立向量，不跨立场注入。
 20. 后端构建风险分析上下文，包含当前条款、命中规则、相关条款、相关 Memory 字段、输出约束和证据约束。
 21. `analyze_risk` 已通过显式 `tool_registry` 调用；新建审查可按任务选择 `local_structured` 或 `openai_compatible`，本地模式不会记录为真实外部 LLM 调用。
 22. `verify_evidence` 已通过显式 `tool_registry` 调用，校验 `clause_id`、`evidence_text`、风险原因与证据文本相关性，以及命中规则一致性。
@@ -34,7 +34,7 @@
 26. 用户可以在合同原文中框选文本并发起局部审查，局部审查结果与正式风险列表分开展示。
 27. 局部审查只返回当前框选文本的复核结果，不写入正式风险列表，不写入 Memory。
 28. 用户可以对风险候选执行采纳、忽略、修改等级、修改建议，或采用当前风险同条款的框选原文作为人工证据，并选择是否加入报告。
-29. 所有采纳、忽略和修改动作通过 `tool_registry["write_memory"]` 写入 SQLite Memory。
+29. 所有采纳、忽略和修改动作通过 `tool_registry["write_memory"]` 写入 LangGraph Postgres Store，并使用稳定幂等键避免重复 Episode。
 30. 后续相似审查会通过 `retrieve_memory` 召回相关 Memory；当 Memory 影响修改建议时，风险详情展示历史反馈引用。
 31. 用户可以基于正式风险证据触发局部重审，局部结果仍不写入正式风险列表。
 32. 用户可以导出 Markdown 审查报告，报告生成通过 `tool_registry["generate_report"]` 调用。
@@ -45,17 +45,17 @@
 37. 全部 HTTP API 已迁移到 FastAPI，请求模型使用 Pydantic 校验，文件上传使用 `UploadFile` 分块读取并校验大小、扩展名、MIME、文件签名、空文件和安全文件名。
 38. SSE 使用 `StreamingResponse`，保留 `review_event` 事件格式，并在终态、客户端断开或服务关闭时结束。
 39. 默认 CORS 不使用通配符；允许源由 `REVIEW_AGENT_ALLOWED_ORIGINS` 配置。
-40. SQLite 使用轻量 Repository 持久化任务、文档、条款、风险、执行日志和 SSE 事件；状态、结果和事件在同一事务中提交。
+40. PostgreSQL `app` schema 是任务、文档、条款、风险、执行日志和 SSE 事件的唯一业务真相源；状态、结果和事件在同一事务中提交。
 41. 上传文件保存到 `REVIEW_AGENT_UPLOAD_DIR` 受控目录，数据库只记录任务生成的相对文件名和 SHA-256，不保存客户端原始路径。
-42. 服务启动时加载历史任务；非终态任务校验上传文件和检查点后从最后完整节点继续，已成功节点不重复执行。
+42. 服务启动时恢复可执行的历史任务；RQ Worker 校验上传文件、PostgreSQL 业务状态和 LangGraph Checkpoint 后继续，已成功节点依靠业务检查点和稳定幂等键避免重复写入。
 43. 文件缺失、SHA-256 不一致或检查点数据缺失时，任务进入 `NEED_MANUAL_REVIEW` 并保留实际原因。
 44. 人工反馈 Memory 和报告生成使用稳定幂等键，重复请求不会重复写入 Memory 或生成多份同版本报告。
 45. 合同类型先执行确定性分类，仅在低置信度时调用 LLM；非 NDA 在 Playbook 检索前停止。
 46. 甲方、乙方审查立场会影响 Playbook 规则、风险重点、默认等级和修改建议。
 47. OpenAI-compatible Provider 通过环境变量配置 Base URL、API Key、模型和超时；超时、限流、临时错误和结构错误最多重试一次。
 48. 外部 LLM 日志记录模型、供应商请求 ID、prompt/completion token、调用耗时、错误类型和成本状态；未知价格显示“未配置”，本地模式显示 `no_external_llm`。
-49. Embedding 查询包含当前条款正文、条款类型、风险类型、Playbook 检查点和关键字段；合同条款向量在单次任务上下文构建期间缓存，恢复时使用相同模型和输入重建。
-50. 相关条款结果包含 Embedding 模式、模型、向量维度、余弦相似度、rerank 因子和最终分数；前端 Context Trace 展示模型、相似度和最终分数。
+49. Embedding 查询包含当前条款正文、条款类型、风险类型、Playbook 检查点和关键字段；合同条款向量按任务、模型、精确 revision 和内容哈希持久化到 PostgreSQL。
+50. 相关条款结果包含 BGE 模型、向量维度、向量/关键词排名、RRF 分数、rerank 分数和最终分数；前端 Context Trace 展示可追溯的检索信息。
 51. 外部 Embedding 调用日志记录模型、输入数量、向量维度、耗时、错误类型，以及供应商提供时的请求 ID；不记录 API Key 或完整合同文本，失败时进入 `RETRIEVAL_FAILED`，未启用静默词频降级。
 52. `samples/annotations/related_clauses.json` 提供 20 组人工相关条款标注，覆盖 8 类 NDA 风险；离线测试直接运行本地混合检索并计算 Recall@1，不使用语义命中 Stub 代替实际检索结果。
 53. `samples/annotations/` 提供 `effect-v3` 人工标注 schema，覆盖 23 份合同、174 条条款、65 条唯一风险条款、20 组相关条款、20 组带检索查询的 Memory 对照和 10 组 Prompt Injection；当前数据全部为项目内合成夹具。
@@ -81,11 +81,11 @@
 73. 已使用用户本机 Key 对固定的 2 份合成 NDA 子集完成两次真实 DeepSeek 稳定性运行。两轮均为 `completed_with_failures`；该结果只证明真实调用链已跑通，不代表 23 份完整标注集效果达标。
 74. Web Workbench 的执行记录可区分本地模式、DeepSeek 真实调用、Planner、一次检索修复、Critic、Evidence、Memory、Injection 阻断、取消、超时和人工恢复；高风险、证据失败和冲突结果持续显示人工复核提示。
 75. 新建审查入口提供任务级 DeepSeek 开关；任务选择、实际调用成功和调用失败分别显示，不把“已选择”伪装成“已调用”。
-76. 完整任务状态继续由 SQLite 保存；浏览器只保存当前任务 ID，刷新后通过任务查询接口恢复文档、条款、风险、反馈、日志和事件，后端重启后仍可读取。
-77. 条款字段、Playbook、上下文、风险分析和证据验证按工作项增量写入进度、部分结果和日志；关键字段、风险分析和证据候选可从 SQLite 已完成项继续，不在超时恢复时从阶段起点重复调用。
+76. 完整任务状态由 PostgreSQL 保存；浏览器只保存当前任务 ID，刷新后通过任务查询接口恢复文档、条款、风险、反馈、日志和事件，API 或 Worker 重启后仍可读取。
+77. 条款字段、Playbook、上下文、风险分析和证据验证按工作项增量写入进度、部分结果和日志；关键字段、风险分析和证据候选从 PostgreSQL 已完成项继续，不在恢复时从阶段起点重复调用。
 78. 工具超时线程复制任务上下文，本地任务不会因全局 DeepSeek 配置而越界调用外部模型。
 79. LangGraph 节点超时默认 90 秒，不再使用应用层累计任务时限；RQ 硬超时默认 7200 秒并预留 120 秒状态落库窗口。关键字段和首次风险分析使用默认 2、最大 4 的受控并发，运行日志另写入可轮转的本地文件。
-80. SQLite 使用 WAL 与 `synchronous=NORMAL` 支持高频增量进度事务；细粒度 SSE 进度不重复保存完整历史任务快照，业务节点事件仍完整持久化。
+80. SSE 从 PostgreSQL 按递增 `event_id` 查询持久事件，并使用 Redis 通知减少轮询延迟；Redis 通知丢失时仍以数据库重查结果为准。
 81. 14 个显式工具均绑定严格 Pydantic 输入/输出模型；`/api/tools` 同时返回机器可读 JSON Schema，LangChain `StructuredTool` 从同一 `tool_registry` 生成，不维护第二份工具清单。
 82. MCP 使用 Streamable HTTP 挂载在本地 `/mcp`，默认关闭；启用时要求 API 绑定 `127.0.0.1`，并再次校验请求来源。只暴露 11 个分析/检索工具，不暴露 `parse_document`、`write_memory` 和 `generate_report`。
 83. OpenTelemetry OTLP 工具 Trace 默认关闭，可直接发送到兼容 OTLP 的 Collector 或 Langfuse。Span 只记录任务、Trace、Step、工具、重试、状态和耗时，不记录合同正文、Prompt、证据、Memory、工具输入输出或凭据。
@@ -96,11 +96,11 @@
 
 1. 未使用 DeepSeek 对 23 份完整标注集完成两轮外部模型稳定性评测；当前真实运行只覆盖固定的 2 份合成 NDA 子集。
 2. 真实 DeepSeek 两轮的 Evidence span、Memory 一致性和结构化修复指标未全部达标，且两轮波动明显；不能声明 Agent 效果验收通过。
-3. 任务 9 Code Review 后的代码没有再次消耗 DeepSeek 复跑；现有外部结果对应 Review 前的未提交工作区，限制详见 `evaluation/release/agent-evolution-verification.md`。
+3. 外部 OTLP Collector/Langfuse 未部署和联调；当前只验证本地内存 Exporter 与字段脱敏，且 Docker 继续按用户指令后置。
 
 迭代技术方案、实施顺序和验收口径见 `NEXT_PLAN.md`、`TASKS_2.md`、`UI_REDESIGN_PLAN.md`、`AGENT_EVOLUTION_PLAN.md`、`TASKS_AGENT.md` 和 `DEEPSEEK_TIMEOUT_PLAN.md`；这些文件保留计划形成过程，当前完成状态以代码、测试和本 README 为准。
 
-当前基础评测只验证流程跑通，不声明生产级准确率。生产默认 Embedding 路径为 `openai_compatible`；`local_sparse` 仅用于显式离线回归。`BAAI/bge-m3` 已在固定 `effect-v3` 数据集上完成两轮真实外部 Embedding 评测，两轮检索指标一致且 Provider 调用全部成功；这仍不等于证明真实合同上的生产效果。真实 DeepSeek 子集运行验证了外部 LLM 调用链，也不等于证明模型效果稳定或达到生产要求。
+当前基础评测只验证流程跑通，不声明生产级准确率。默认生产检索使用本地固定 revision 的 BGE 模型和 pgvector；`local_sparse` 与 OpenAI-compatible Embedding 路径仅用于隔离回归和历史效果评测。`BAAI/bge-m3` 曾在固定 `effect-v3` 数据集上完成两轮真实外部 Embedding 评测，两轮检索指标一致且 Provider 调用全部成功；这仍不等于证明真实合同上的生产效果。真实 DeepSeek 子集运行验证了外部 LLM 调用链，也不等于证明模型效果稳定或达到生产要求。
 
 当前 `effect-v3` 包含 23 份合同、174 条条款、65 条唯一风险条款、20 组相关条款、20 组 Memory 检索/偏好对照和 10 组 Prompt Injection。量化结果以 `evaluation/release/model-embedding-memory-verification.md` 的实际运行记录为准；这些合成样本上的真实模型结果不能外推为真实合同或生产准确率。
 
@@ -110,8 +110,12 @@
 
 ```mermaid
 flowchart LR
-    Web["Web Workbench"] --> API["FastAPI + SSE"]
-    API --> Agent["ReviewOrchestratorAgent"]
+    Web["Web Workbench"] --> API["FastAPI + PostgreSQL SSE"]
+    API --> Queue["Redis / RQ"]
+    Queue --> Agent["LangGraph ReviewOrchestratorAgent"]
+    Agent --> DB["PostgreSQL app schema"]
+    Agent --> Checkpoint["Postgres Checkpointer"]
+    Agent --> Store["LangGraph Postgres Store"]
     Agent --> Registry["显式 tool_registry"]
     Registry --> Parse["Parser / Classifier"]
     Registry --> Retrieve["Playbook + Hybrid Retrieval + rerank"]
@@ -166,6 +170,10 @@ OCR 无法识别的低清扫描件和无有效文本文件不会进入合同类�
 10. `langchain-core`：从现有显式 Tool Registry 生成 `StructuredTool`，不负责工作流编排。
 11. `mcp`：提供默认关闭、仅本机可用的 Streamable HTTP MCP 端点。
 12. `opentelemetry-api/sdk` 与 OTLP HTTP Exporter：提供可选工具级 Trace；Langfuse 通过其原生 OTLP 接口接收，不要求应用依赖 Langfuse SDK。
+13. `SQLAlchemy`、`Alembic`、`psycopg` 与 `pgvector`：提供 PostgreSQL 业务仓储、迁移、Checkpoint/Store 连接和向量检索。
+14. `redis` 与 `rq`：提供跨进程任务队列、Worker 心跳、缓存和事件通知。
+15. `langgraph` 与 `langgraph-checkpoint-postgres`：提供主图、风险子图、人工中断/恢复和持久执行游标。
+16. `sentence-transformers`：运行固定 revision 的 BGE Embedding 与 reranker；模型缓存必须位于 `REVIEW_AGENT_RUNTIME_ROOT`。
 
 安装：
 
@@ -193,7 +201,7 @@ REVIEW_AGENT_LLM_MODEL=deepseek-v4-pro
 REVIEW_AGENT_LLM_MAX_CONCURRENCY=2
 ```
 
-Embedding 使用独立 Provider，配置在同一个项目根目录 `.env`，不要复用或猜测 DeepSeek 聊天模型的 Embedding 能力：
+默认 PostgreSQL 检索使用本地固定 revision 的 BGE，不复用或猜测 DeepSeek 聊天模型的 Embedding 能力。以下 OpenAI-compatible Embedding 配置只供历史效果评测和隔离 Provider 测试使用：
 
 ```dotenv
 REVIEW_AGENT_EMBEDDING_MODE=openai_compatible
@@ -203,10 +211,14 @@ REVIEW_AGENT_EMBEDDING_MODEL=<your-embedding-model>
 REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS=60
 ```
 
-配置完成后直接启动：
+配置完成后先启动 PostgreSQL、Redis 和唯一一个 RQ Worker，再启动 API：
 
 ```powershell
-python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
+.\scripts\manage_postgres.ps1 -Action start
+.\scripts\manage_redis.ps1 -Action start
+.\scripts\manage_worker.ps1 -Action start
+$python = Join-Path $env:REVIEW_AGENT_RUNTIME_ROOT "venv\Scripts\python.exe"
+& $python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
 ```
 
 需要临时覆盖 `.env` 时，可在 PowerShell 启动前设置当前进程环境：
@@ -216,7 +228,8 @@ $env:REVIEW_AGENT_LLM_MODE = "openai_compatible"
 $env:REVIEW_AGENT_LLM_BASE_URL = "https://api.deepseek.com"
 $env:REVIEW_AGENT_LLM_API_KEY = "<your-deepseek-key>"
 $env:REVIEW_AGENT_LLM_MODEL = "deepseek-v4-pro"
-python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
+$python = Join-Path $env:REVIEW_AGENT_RUNTIME_ROOT "venv\Scripts\python.exe"
+& $python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
 ```
 
 未配置 Key 时服务仍可启动；界面打开 DeepSeek 开关创建任务时会返回配置错误。默认代码配置是 `local_structured`，而 `.env.example` 有意展示 DeepSeek 外部模式。成本单价未配置时只记录 token 和“未配置”，不推测金额。
@@ -249,8 +262,14 @@ Langfuse 使用 `https://<langfuse-host>/api/public/otel/v1/traces`，并按 Lan
 ## 运行服务
 
 ```powershell
-python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
+.\scripts\manage_postgres.ps1 -Action start
+.\scripts\manage_redis.ps1 -Action start
+.\scripts\manage_worker.ps1 -Action start
+$python = Join-Path $env:REVIEW_AGENT_RUNTIME_ROOT "venv\Scripts\python.exe"
+& $python -m uvicorn main:app --app-dir backend/app --host 127.0.0.1 --port 8000
 ```
+
+API 不在进程内执行长任务。PostgreSQL、Redis 或活动 Worker 不可用时，健康检查会返回真实依赖状态，新建任务接口不会创建看似成功但无法执行的任务。
 
 页面：
 
@@ -306,13 +325,13 @@ http://127.0.0.1:8000/health
 
 默认上传请求大小上限为 10 MB，可通过 `REVIEW_AGENT_MAX_UPLOAD_BYTES` 调整。
 默认 CORS 不允许通配来源；可通过逗号分隔的 `REVIEW_AGENT_ALLOWED_ORIGINS` 配置明确来源。
-默认 SQLite 业务与 Memory 数据库路径为 `backend/app/data/review_agent_memory.sqlite3`，可通过 `REVIEW_AGENT_MEMORY_DB_PATH` 调整。
-默认上传目录为 `backend/app/data/uploads`，可通过 `REVIEW_AGENT_UPLOAD_DIR` 调整。
-默认报告目录为 `backend/app/reports`，可通过 `REVIEW_AGENT_REPORT_DIR` 调整；默认评测输出目录为 `evaluation`，可通过 `REVIEW_AGENT_EVALUATION_OUTPUT_DIR` 调整。
-新建审查默认选择 `local_structured`；界面打开 DeepSeek 开关后，该任务固定使用 `openai_compatible`。外部 Provider 的连接与凭据通过 `REVIEW_AGENT_LLM_BASE_URL`、`REVIEW_AGENT_LLM_API_KEY`、`REVIEW_AGENT_LLM_MODEL` 和 `REVIEW_AGENT_LLM_TIMEOUT_SECONDS` 配置，任务选择会随完整任务状态写入 SQLite。
+默认业务数据库由 `REVIEW_AGENT_DATABASE_URL` 指向 PostgreSQL；SQLite 文件只作为只读迁移归档和隔离测试数据源，不再参与默认 API/RQ 业务写入。
+默认上传目录由 `REVIEW_AGENT_UPLOAD_DIR` 指定；本机配置使用 `D:\demo-runtime\data\uploads`。
+默认报告和评测输出目录分别由 `REVIEW_AGENT_REPORT_DIR`、`REVIEW_AGENT_EVALUATION_OUTPUT_DIR` 指定；本机配置均位于 `D:\demo-runtime\data`。
+新建审查默认选择 `local_structured`；界面打开 DeepSeek 开关后，该任务固定使用 `openai_compatible`。外部 Provider 的连接与凭据通过 `REVIEW_AGENT_LLM_BASE_URL`、`REVIEW_AGENT_LLM_API_KEY`、`REVIEW_AGENT_LLM_MODEL` 和 `REVIEW_AGENT_LLM_TIMEOUT_SECONDS` 配置，任务选择会随完整任务状态写入 PostgreSQL。
 默认 LLM 上下文预算为 6000 tokens，可通过 `REVIEW_AGENT_LLM_CONTEXT_BUDGET_TOKENS` 调整；值必须是正整数。
 可通过 `REVIEW_AGENT_LLM_PROMPT_COST_PER_1M` 和 `REVIEW_AGENT_LLM_COMPLETION_COST_PER_1M` 配置每百万 token 单价；未配置时日志显示“未配置”。
-生产默认 Embedding 模式为 `openai_compatible`，通过 `REVIEW_AGENT_EMBEDDING_BASE_URL`、`REVIEW_AGENT_EMBEDDING_API_KEY`、`REVIEW_AGENT_EMBEDDING_MODEL` 和 `REVIEW_AGENT_EMBEDDING_TIMEOUT_SECONDS` 配置。`local_sparse` 只允许作为显式离线测试模式使用。
+生产默认检索模型由 `REVIEW_AGENT_BGE_*` 配置，模型与缓存位于 `REVIEW_AGENT_BGE_CACHE_DIR`。`openai_compatible` 和 `local_sparse` Embedding 只用于显式效果评测或隔离回归，不参与默认 PostgreSQL/RQ 检索路径。
 LangGraph Orchestrator 默认单节点超时为 90 秒，可通过 `REVIEW_AGENT_NODE_TIMEOUT_SECONDS` 调整；不再按任务累计运行时长判失败。RQ Worker 使用 `REVIEW_AGENT_RQ_JOB_TIMEOUT_SECONDS`（默认 7200 秒）作为进程外最终硬边界，并通过 `REVIEW_AGENT_RQ_STATUS_RESERVE_SECONDS`（默认 120 秒）预留状态落库窗口。`REVIEW_AGENT_LLM_MAX_CONCURRENCY` 控制彼此独立的关键字段和首次风险分析调用，默认 2、最大 4；同一风险内部的 Planner、Critic、修订和 Evidence 依赖链仍保持串行。解析、检索、LLM 输出、Evidence、节点超时和通用任务错误的人工恢复预算各为 2 次，服务重启不会重置。
 设置 `REVIEW_AGENT_RUNTIME_ROOT` 后，服务运行日志默认写入该根目录下的 `logs/review_agent.log`；未设置时才回退到 `backend/app/logs/review_agent.log`。可通过 `REVIEW_AGENT_RUNTIME_LOG_FILE` 和 `REVIEW_AGENT_RUNTIME_LOG_LEVEL` 调整。日志只记录脱敏任务、阶段、工具、耗时与错误摘要；业务 Trace 仍是产品内审计数据。
 
@@ -339,7 +358,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_backend_tests.ps1 -PerModul
 
 ## PostgreSQL 数据迁移
 
-Agent 框架迁移计划见 `AGENT_FRAMEWORK_MIGRATION_PLAN.md`。当前应用运行仓储仍是 SQLite；PostgreSQL schema 和数据迁移已经建立，但在最终直接切换前不会并行维护两套业务写入。
+Agent 框架迁移计划见 `AGENT_FRAMEWORK_MIGRATION_PLAN.md`。默认应用运行仓储已经直接切换到 PostgreSQL，不维护 SQLite 双写；原 SQLite 文件保留为只读归档。2026-07-27 的真实切换迁移了 19 个历史任务，并把仓库源和 D 盘运行源中的 270 条原始 Memory 合并到 LangGraph Postgres Store。
 
 本机便携 PostgreSQL 使用 `REVIEW_AGENT_RUNTIME_ROOT` 定位，不依赖 Docker。启停和状态检查：
 
@@ -358,11 +377,17 @@ if (-not $runtimeRoot) {
   $runtimeRoot = [Environment]::GetEnvironmentVariable("REVIEW_AGENT_RUNTIME_ROOT", "User")
 }
 & "$runtimeRoot\venv\Scripts\alembic.exe" -c alembic.ini upgrade head
-& "$runtimeRoot\venv\Scripts\python.exe" -m db.sqlite_migration --source backend\app\data\review_agent_memory.sqlite3 --mode dry-run
-& "$runtimeRoot\venv\Scripts\python.exe" -m db.sqlite_migration --source backend\app\data\review_agent_memory.sqlite3 --mode apply
+& "$runtimeRoot\venv\Scripts\python.exe" -m db.sqlite_migration `
+  --source backend\app\data\review_agent_memory.sqlite3 `
+  --additional-memory-source "$runtimeRoot\data\review_agent_memory.sqlite3" `
+  --mode dry-run
+& "$runtimeRoot\venv\Scripts\python.exe" -m db.sqlite_migration `
+  --source backend\app\data\review_agent_memory.sqlite3 `
+  --additional-memory-source "$runtimeRoot\data\review_agent_memory.sqlite3" `
+  --mode apply
 ```
 
-迁移器校验每张表的行数、任务 ID、每任务最大事件序号和规范化 JSON 哈希。重复 apply 使用 `ON CONFLICT DO NOTHING`，不会覆盖已有不同数据；任何目标差异都会使事务失败，不能写成迁移成功。
+主源提供完整业务表；附加源只允许贡献原始 Memory，若包含任务业务数据会拒绝迁移。迁移器校验每张表的行数、任务 ID、每任务最大事件序号和规范化 JSON 哈希，并从全部原始反馈重新聚合偏好。重复 apply 使用幂等写入，不会覆盖已有不同数据；任何目标差异都会使事务失败，不能写成迁移成功。
 
 ## pgvector 与本地 BGE 检索
 
@@ -372,11 +397,11 @@ RQ Worker 的 `retrieve_related_clauses` 工具使用 PostgreSQL 混合检索：
 
 模型文件不进入仓库。本机通过 `REVIEW_AGENT_BGE_CACHE_DIR` 指向 `D:\demo-runtime\models\huggingface`。数据库必须已安装 `vector` 和 `pg_trgm` 扩展并执行 Alembic 到 head；缺少扩展时迁移应明确失败，不能降级成看似成功的非向量检索。
 
-当前只有 PostgreSQL/RQ 路径使用该检索器；默认 FastAPI 入口仍使用 SQLite 兼容路径，任务 10 一次性切换后才删除旧检索实现。真实 61 条款 CPU 验收完成了向量持久化、混合召回和 BGE 重排，约 25.9 秒；该结果不等于 DeepSeek 效果或真实标注集召回率已达标。
+默认 FastAPI/RQ 路径使用该检索器。旧进程内检索辅助仍由隔离测试和历史评测引用，不参与生产任务；真实 61 条款 CPU 验收完成了向量持久化、混合召回和 BGE 重排，约 25.9 秒。该结果不等于 DeepSeek 效果或真实标注集召回率已达标。
 
 ## Redis、RQ 与跨进程事件流
 
-任务 3 已建立独立的 PostgreSQL/RQ 执行组件，但现有 FastAPI 默认入口仍保持 SQLite + 进程内执行，最终只在任务 10 一次性切换，不维护长期双写。便携 Redis、AOF、Worker 日志和 PID 文件都位于 `REVIEW_AGENT_RUNTIME_ROOT`：
+FastAPI 默认入口现在只负责验证依赖、创建 PostgreSQL 任务并入队；RQ Worker 执行 LangGraph 审查。便携 Redis、AOF、Worker 日志和 PID 文件都位于 `REVIEW_AGENT_RUNTIME_ROOT`：
 
 ```powershell
 .\scripts\manage_redis.ps1 -Action start
@@ -385,7 +410,7 @@ RQ Worker 的 `retrieve_related_clauses` 工具使用 PostgreSQL 混合检索：
 .\scripts\manage_worker.ps1 -Action status
 ```
 
-RQ 队列名默认 `review-agent`，只注册 1 个 Worker；任务硬超时为 7200 秒，旧编排器过渡路径在 7080 秒停止并预留 120 秒写入真实状态。RQ 不配置整任务重试，稳定 Job ID 为 `review-{task_id}`。
+RQ 队列名默认 `review-agent`，只注册 1 个 Worker；任务硬超时为 7200 秒并预留 120 秒写入真实状态。RQ 不配置整任务重试，节点只对明确的临时错误重试；稳定 Job ID 为 `review-{task_id}`。
 
 Worker 使用 `PostgresReviewPersistence` 保存任务、文档、条款、风险、日志和全部过程事件。事务提交后才发布 Redis 通知；SSE 先确认订阅，再查询 PostgreSQL，收到通知后重新查询。Redis 通知失败时轮询 PostgreSQL，因此 Redis 不承担不可恢复的任务数据。
 
@@ -411,7 +436,7 @@ $env:REVIEW_AGENT_RUN_EXTERNAL_TESTS = "1"
 python -m unittest backend.tests.test_langgraph_checkpoint.PostgresCheckpointIntegrationTest -v
 ```
 
-当前默认 FastAPI 入口仍是 SQLite 和进程内 Checkpointer；PostgreSQL、RQ 和 PostgresSaver 的默认切换在迁移任务 10 一次性完成，当前不双写业务数据。
+默认 FastAPI/RQ 路径已使用 PostgresSaver，不再实例化进程内 Checkpointer，也不双写业务数据。
 
 ## LangGraph Postgres Store Memory
 
@@ -428,4 +453,4 @@ $env:REVIEW_AGENT_RUN_EXTERNAL_TESTS = "1"
 python -m unittest backend.tests.test_langgraph_memory_store -v
 ```
 
-当前只有 PostgreSQL/RQ Agent 路径使用 Postgres Store；默认 FastAPI/SQLite 入口仍使用原 Memory Repository，任务 10 才一次性切换。现有验证证明持久化、迁移和向量召回路径可运行，不代表 Memory 已证明改善 DeepSeek 风险判断效果。
+默认 FastAPI/RQ Agent 路径使用 Postgres Store；旧 Memory Repository 只保留给只读迁移、隔离测试和历史评测。现有验证证明持久化、迁移和向量召回路径可运行，不代表 Memory 已证明改善 DeepSeek 风险判断效果。
