@@ -1,8 +1,6 @@
-from concurrent.futures import ThreadPoolExecutor
-from contextvars import copy_context
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Protocol, Sequence
 from uuid import uuid4
 
 from db.errors import RecoveryError
@@ -21,6 +19,7 @@ from models.review import (
 from services.context_builder import build_review_context
 from services.event_service import ReviewEventStore, review_event_store
 from services.log_service import ToolExecutionControl, invoke_tool
+from services.review_batch_executor import OrderedBatchExecutor
 from services.runtime_log_service import write_runtime_log
 from tools.registry import tool_registry
 
@@ -51,6 +50,14 @@ class _ToolOutcome:
     error: Exception | None
 
 
+class _LoggedOutcome(Protocol):
+    @property
+    def logs(self) -> Sequence[StepLog]: ...
+
+    @property
+    def error(self) -> Exception | None: ...
+
+
 class ReviewAgentSupport:
     """Shared execution mechanics; workflow control belongs to LangGraph."""
 
@@ -68,6 +75,7 @@ class ReviewAgentSupport:
         self.event_store = event_store
         self.node_timeout_seconds = node_timeout_seconds
         self.llm_max_concurrency = llm_max_concurrency
+        self._batch_executor = OrderedBatchExecutor()
 
     def run_sync(
         self,
@@ -205,18 +213,19 @@ class ReviewAgentSupport:
             except Exception as exc:
                 return _ToolOutcome(item, None, item_logs, exc)
 
-        if max_workers == 1 or len(items) <= 1:
-            return [execute(item) for item in items]
+        return self._batch_executor.map_ordered(
+            items,
+            execute,
+            max_workers=max_workers,
+        )
 
-        with ThreadPoolExecutor(
-            max_workers=min(max_workers, len(items)),
-            thread_name_prefix=f"review-batch-{step_name}",
-        ) as executor:
-            futures = [
-                executor.submit(copy_context().run, execute, item)
-                for item in items
-            ]
-            return [future.result() for future in futures]
+    @staticmethod
+    def _merge_batch_logs(
+        logs: list[StepLog],
+        outcomes: Sequence[_LoggedOutcome],
+    ) -> None:
+        for outcome in outcomes:
+            logs.extend(outcome.logs)
 
     def _batch_width(self, state: AgentState) -> int:
         if state.llm_mode != LLMMode.DEEPSEEK:

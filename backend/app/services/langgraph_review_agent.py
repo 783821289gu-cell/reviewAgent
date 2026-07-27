@@ -26,7 +26,6 @@ from providers.llm_provider import (
     bind_llm_mode,
     reset_llm_mode,
 )
-from services.context_builder import build_review_context
 from services.checkpoint_service import ReviewCheckpointManager
 from services.log_service import (
     ToolExecutionControl,
@@ -45,6 +44,10 @@ from services.review_workflow import (
     ReviewGraphState,
     build_review_control_graph,
     build_review_graph,
+)
+from services.review_context_pipeline import (
+    ReviewContextPipeline,
+    context_work_items,
 )
 from services.risk_critic import CriticOutputInvalidError
 from services.retrieval_runtime import (
@@ -136,6 +139,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         )
         self._related_clause_retriever = related_clause_retriever
         self._memory_store = memory_store
+        self._context_pipeline = ReviewContextPipeline(self._batch_executor)
         self._graph = build_review_graph(self, _ReviewRuntime)
         self._control_graph = build_review_control_graph(
             self,
@@ -757,8 +761,8 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
                         parent_step_id=context.logs[-1].step_id if context.logs else "",
                         max_workers=width,
                     )
+                    self._merge_batch_logs(context.logs, outcomes)
                     for outcome in outcomes:
-                        context.logs.extend(outcome.logs)
                         if outcome.error is not None:
                             raise outcome.error
                         completed_clauses.append(
@@ -826,51 +830,63 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
                     tool_name="retrieve_playbook_rules",
                     matched_rules=[],
                 )
-                for index, clause in enumerate(context.clauses):
-                    rules = invoke_tool(
+                width = self._batch_width(state)
+                for batch_start in range(0, total, width):
+                    batch = context.clauses[
+                        batch_start : min(batch_start + width, total)
+                    ]
+                    outcomes = self._invoke_independent_batch(
                         context.task_id,
-                        tool_registry,
-                        "retrieve_playbook_rules",
-                        {
+                        batch,
+                        tool_name="retrieve_playbook_rules",
+                        input_builder=lambda clause: {
                             "contract_type": context.contract_type,
                             "clause_type": clause.clause_type,
                             "key_fields": clause.key_fields,
                             "review_position": state.review_position.value,
                         },
-                        context.logs,
                         step_name="playbook_retrieval",
                         execution_control=context.execution_control,
-                    )
-                    matches.append(
-                        {
-                            "clause_id": clause.clause_id,
-                            "clause_type": clause.clause_type,
-                            "clause_title": clause.title,
-                            "matched_rules": rules,
-                        }
-                    )
-                    completed = index + 1
-                    next_item = (
-                        context.clauses[completed].clause_id
-                        if completed < total
-                        else ""
-                    )
-                    state = self._publish_progress(
-                        state,
-                        context.logs,
-                        stage="playbook_retrieval",
-                        stage_label="检索 Playbook 规则",
-                        completed=completed,
-                        total=total,
-                        current_item=next_item,
-                        message=(
-                            f"正在检索 {next_item} 的规则（{completed}/{total}）。"
-                            if next_item
-                            else f"Playbook 规则检索完成（{completed}/{total}）。"
+                        parent_step_id=(
+                            context.logs[-1].step_id if context.logs else ""
                         ),
-                        tool_name="retrieve_playbook_rules",
-                        matched_rules=matches,
+                        max_workers=width,
                     )
+                    self._merge_batch_logs(context.logs, outcomes)
+                    for outcome in outcomes:
+                        if outcome.error is not None:
+                            raise outcome.error
+                        clause = outcome.item
+                        matches.append(
+                            {
+                                "clause_id": clause.clause_id,
+                                "clause_type": clause.clause_type,
+                                "clause_title": clause.title,
+                                "matched_rules": outcome.output,
+                            }
+                        )
+                        completed = len(matches)
+                        next_item = (
+                            context.clauses[completed].clause_id
+                            if completed < total
+                            else ""
+                        )
+                        state = self._publish_progress(
+                            state,
+                            context.logs,
+                            stage="playbook_retrieval",
+                            stage_label="检索 Playbook 规则",
+                            completed=completed,
+                            total=total,
+                            current_item=next_item,
+                            message=(
+                                f"正在检索 {next_item} 的规则（{completed}/{total}）。"
+                                if next_item
+                                else f"Playbook 规则检索完成（{completed}/{total}）。"
+                            ),
+                            tool_name="retrieve_playbook_rules",
+                            matched_rules=matches,
+                        )
             except EXECUTION_INTERRUPTS:
                 raise
             except Exception as exc:
@@ -901,21 +917,18 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         if _before(state.status, ReviewStatus.CONTEXT_BUILT):
             try:
                 contexts = []
-                clauses_by_id = {
-                    clause["clause_id"]: clause
-                    for clause in context.clauses_payload
-                }
-                work_items = []
-                for rule_group in context.rule_matches:
-                    clause = clauses_by_id.get(rule_group["clause_id"])
-                    if clause is None:
-                        continue
-                    work_items.extend(
-                        (clause, rule) for rule in rule_group["matched_rules"]
-                    )
+                work_items = context_work_items(
+                    context.clauses_payload,
+                    context.rule_matches,
+                )
                 total = len(work_items)
                 current = (
-                    _context_progress_item(*work_items[0]) if work_items else ""
+                    _context_progress_item(
+                        work_items[0].clause,
+                        work_items[0].rule,
+                    )
+                    if work_items
+                    else ""
                 )
                 state = self._publish_progress(
                     state,
@@ -932,74 +945,58 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
                     ),
                     review_contexts=[],
                 )
-                for index, (clause, rule) in enumerate(work_items):
-                    related = invoke_tool(
-                        context.task_id,
-                        tool_registry,
-                        "retrieve_related_clauses",
-                        {
-                            "contract_type": context.contract_type,
-                            "current_clause": clause,
-                            "clauses": context.clauses_payload,
-                            "risk_type": rule["risk_type"],
-                            "playbook_check_point": rule["check_point"],
-                            "limit": 3,
-                            "embedding_cache": context.embedding_cache,
-                        },
-                        context.logs,
-                        step_name="related_clause_retrieval",
+                width = self._batch_width(state)
+                for batch_start in range(0, total, width):
+                    batch = work_items[
+                        batch_start : min(batch_start + width, total)
+                    ]
+                    outcomes = self._context_pipeline.build_batch(
+                        task_id=context.task_id,
+                        contract_type=context.contract_type,
+                        review_position=state.review_position.value,
+                        clauses=context.clauses_payload,
+                        work_items=batch,
                         execution_control=context.execution_control,
-                    )
-                    memory_input = {
-                        "contract_type": context.contract_type,
-                        "clause": clause,
-                        "risk_type": rule["risk_type"],
-                        "review_position": state.review_position.value,
-                        "memory_items": [],
-                        "limit": 3,
-                    }
-                    if self.event_store.db_path:
-                        memory_input["db_path"] = self.event_store.db_path
-                    memory = invoke_tool(
-                        context.task_id,
-                        tool_registry,
-                        "retrieve_memory",
-                        memory_input,
-                        context.logs,
-                        step_name="memory_retrieval",
-                        execution_control=context.execution_control,
-                    )
-                    contexts.append(
-                        build_review_context(
-                            contract_type=context.contract_type,
-                            review_position=state.review_position.value,
-                            current_clause=clause,
-                            matched_rule=rule,
-                            related_clauses=related,
-                            related_memory=memory,
-                        )
-                    )
-                    completed = index + 1
-                    next_item = (
-                        _context_progress_item(*work_items[completed])
-                        if completed < total
-                        else ""
-                    )
-                    state = self._publish_progress(
-                        state,
-                        context.logs,
-                        stage="context_build",
-                        stage_label="构建风险分析上下文",
-                        completed=completed,
-                        total=total,
-                        current_item=next_item,
-                        message=(
-                            f"正在构建 {next_item} 的上下文（{completed}/{total}）。"
-                            if next_item
-                            else f"风险分析上下文构建完成（{completed}/{total}）。"
+                        parent_step_id=(
+                            context.logs[-1].step_id if context.logs else ""
                         ),
-                        review_contexts=contexts,
+                        embedding_cache=context.embedding_cache,
+                        db_path=self.event_store.db_path,
+                        max_workers=width,
                     )
+                    self._merge_batch_logs(context.logs, outcomes)
+                    for outcome in outcomes:
+                        if outcome.error is not None:
+                            raise outcome.error
+                        if outcome.review_context is None:
+                            raise RuntimeError(
+                                "context pipeline returned no context"
+                            )
+                        contexts.append(outcome.review_context)
+                        completed = len(contexts)
+                        next_item = (
+                            _context_progress_item(
+                                work_items[completed].clause,
+                                work_items[completed].rule,
+                            )
+                            if completed < total
+                            else ""
+                        )
+                        state = self._publish_progress(
+                            state,
+                            context.logs,
+                            stage="context_build",
+                            stage_label="构建风险分析上下文",
+                            completed=completed,
+                            total=total,
+                            current_item=next_item,
+                            message=(
+                                f"正在构建 {next_item} 的上下文（{completed}/{total}）。"
+                                if next_item
+                                else f"风险分析上下文构建完成（{completed}/{total}）。"
+                            ),
+                            review_contexts=contexts,
+                        )
             except EXECUTION_INTERRUPTS:
                 raise
             except Exception as exc:

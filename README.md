@@ -2,7 +2,7 @@
 
 开发过程中实际遇到的问题、技术权衡和方案变更持续记录在 [DEVELOPMENT_DECISIONS.md](DEVELOPMENT_DECISIONS.md)。
 
-当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10、`UI_REDESIGN_PLAN.md` 的工作台界面迭代、`TASKS_AGENT.md` 的任务 10、`EVIDENCE_MANUAL_REVIEW_PLAN.md` 的证据失败人工闭环，以及 `AGENT_FRAMEWORK_MIGRATION_PLAN.md` 的任务 10。系统支持 AgentState、显式 Tool Registry、DeepSeek OpenAI-compatible Provider、受控 Planner/Router、一次检索修复、受控 Critic、确定性 Evidence 最终准入、Prompt Injection 阻断、真实 token 预算、Memory 生命周期、可恢复执行、流式状态事件和脱敏 Agent Trace。HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端；API 将审查任务写入 PostgreSQL 后交给 RQ Worker，Worker 使用 LangGraph、Postgres Checkpoint、pgvector/BGE 和 LangGraph Postgres Store 执行。Redis 只承担队列、通知和缓存，不是业务真相源。
+当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10、`UI_REDESIGN_PLAN.md` 的工作台界面迭代、`TASKS_AGENT.md` 的任务 10、`EVIDENCE_MANUAL_REVIEW_PLAN.md` 的证据失败人工闭环、`AGENT_FRAMEWORK_MIGRATION_PLAN.md` 的任务 10，以及独立记录本轮优化的 `AGENT_MODULARITY_PERFORMANCE_PLAN.md`。系统支持 AgentState、显式 Tool Registry、DeepSeek OpenAI-compatible Provider、受控 Planner/Router、一次检索修复、受控 Critic、确定性 Evidence 最终准入、Prompt Injection 阻断、真实 token 预算、Memory 生命周期、可恢复执行、流式状态事件和脱敏 Agent Trace。HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端；API 将审查任务写入 PostgreSQL 后交给 RQ Worker，Worker 使用 LangGraph、Postgres Checkpoint、pgvector/BGE 和 LangGraph Postgres Store 执行。Redis 只承担队列、通知和缓存，不是业务真相源。
 
 ## 当前已实现
 
@@ -17,7 +17,7 @@
 9. 基于 Docling Standard Pipeline 的中英文 PDF 解析，支持按需 OCR 和表格结构识别，保留页码、文本块顺序和边界坐标，并将条款位置回溯到对应 PDF 页和块。
 10. 条款编号、条款正文、条款类型、关键字段和原文位置结构化。
 11. 完整显式 `tool_registry` 字典和工具输入输出契约。
-12. 当前解析链路由 LangGraph `ReviewOrchestratorAgent` 调度，并只通过 `tool_registry` 调用工具；风险子图通过 `Send` 受控并行并按原条款顺序稳定聚合。
+12. 当前解析链路由 LangGraph `ReviewOrchestratorAgent` 调度，并只通过 `tool_registry` 调用工具；Agent 只负责状态、进度、持久化和恢复，通用有序并发由 `OrderedBatchExecutor` 负责，相关条款/Memory/Context 组合由 `ReviewContextPipeline` 负责。
 13. 后端通过 Server-Sent Events 输出任务状态事件。
 14. 前端实时展示状态进度和执行日志。
 15. 本地 JSON NDA Risk Playbook，覆盖第一版 8 类核心风险。
@@ -84,11 +84,12 @@
 76. 完整任务状态由 PostgreSQL 保存；浏览器只保存当前任务 ID，刷新后通过任务查询接口恢复文档、条款、风险、反馈、日志和事件，API 或 Worker 重启后仍可读取。
 77. 条款字段、Playbook、上下文、风险分析和证据验证按工作项增量写入进度、部分结果和日志；关键字段、风险分析和证据候选从 PostgreSQL 已完成项继续，不在恢复时从阶段起点重复调用。
 78. 工具超时线程复制任务上下文，本地任务不会因全局 DeepSeek 配置而越界调用外部模型。
-79. LangGraph 节点超时默认 90 秒，不再使用应用层累计任务时限；RQ 硬超时默认 7200 秒并预留 120 秒状态落库窗口。关键字段和首次风险分析使用默认 2、最大 4 的受控并发，运行日志另写入可轮转的本地文件。
+79. LangGraph 节点超时默认 90 秒，不再使用应用层累计任务时限；RQ 硬超时默认 7200 秒并预留 120 秒状态落库窗口。DeepSeek 的关键字段、Playbook、Context 工作项和风险分支使用默认 2、最大 4 的受控并发，本地模式保持串行；所有结果和状态写入仍按源顺序执行，运行日志另写入可轮转的本地文件。
 80. SSE 从 PostgreSQL 按递增 `event_id` 查询持久事件，并使用 Redis 通知减少轮询延迟；Redis 通知丢失时仍以数据库重查结果为准。
 81. 14 个显式工具均绑定严格 Pydantic 输入/输出模型；`/api/tools` 同时返回机器可读 JSON Schema，LangChain `StructuredTool` 从同一 `tool_registry` 生成，不维护第二份工具清单。
 82. MCP 使用 Streamable HTTP 挂载在本地 `/mcp`，默认关闭；启用时要求 API 绑定 `127.0.0.1`，并再次校验请求来源。只暴露 11 个分析/检索工具，不暴露 `parse_document`、`write_memory` 和 `generate_report`。
 83. OpenTelemetry OTLP 工具 Trace 默认关闭，可直接发送到兼容 OTLP 的 Collector 或 Langfuse。Span 只记录任务、Trace、Step、工具、重试、状态和耗时，不记录合同正文、Prompt、证据、Memory、工具输入输出或凭据。
+84. 并发执行器复制任务 `ContextVar`、限制活动工作项数量并稳定保持输入顺序；Context Pipeline 不写任务状态。批次失败时先保留全部已产生工具日志，再按源顺序报告首个错误。
 
 ## 当前未实现
 
@@ -113,6 +114,8 @@ flowchart LR
     Web["Web Workbench"] --> API["FastAPI + PostgreSQL SSE"]
     API --> Queue["Redis / RQ"]
     Queue --> Agent["LangGraph ReviewOrchestratorAgent"]
+    Agent --> Batch["OrderedBatchExecutor"]
+    Agent --> Context["ReviewContextPipeline"]
     Agent --> DB["PostgreSQL app schema"]
     Agent --> Checkpoint["Postgres Checkpointer"]
     Agent --> Store["LangGraph Postgres Store"]
@@ -124,6 +127,8 @@ flowchart LR
     Registry --> Planner["Controlled Planner"]
     Registry --> Critic["Controlled Critic"]
     Registry --> Evidence["Deterministic Evidence Verifier"]
+    Batch --> Registry
+    Context --> Registry
     Planner -->|"最多一次 RETRIEVE_AGAIN"| Retrieve
     Analyze --> Critic --> Evidence
     Evidence -->|"失败或冲突"| Human["Human Review"]
@@ -338,10 +343,11 @@ LangGraph Orchestrator 默认单节点超时为 90 秒，可通过 `REVIEW_AGENT
 ## 运行测试
 
 ```powershell
+$python = Join-Path $env:REVIEW_AGENT_RUNTIME_ROOT "venv\Scripts\python.exe"
 $env:REVIEW_AGENT_LOAD_DOTENV = "0"
 $env:REVIEW_AGENT_LLM_MODE = "local_structured"
 $env:REVIEW_AGENT_EMBEDDING_MODE = "local_sparse"
-python -m unittest discover -s backend\tests -p "test_*.py"
+& $python -m unittest discover -s backend\tests -p "test_*.py"
 pnpm test:e2e
 Remove-Item Env:REVIEW_AGENT_EMBEDDING_MODE
 Remove-Item Env:REVIEW_AGENT_LLM_MODE
@@ -353,8 +359,10 @@ Remove-Item Env:REVIEW_AGENT_LOAD_DOTENV
 当全量 `unittest discover` 无法在合理时间内结束时，使用逐模块超时入口定位具体模块；该脚本不会把超时当作通过：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\run_backend_tests.ps1 -PerModuleTimeoutSeconds 180
+powershell -ExecutionPolicy Bypass -File scripts\run_backend_tests.ps1 -PerModuleTimeoutSeconds 300
 ```
+
+2026-07-27 的 Agent 模块化与安全并行优化后，逐模块入口实际运行 35 个后端模块、314 项测试，耗时约 550 秒且无失败或模块超时。该结果验证代码回归，不等于真实 DeepSeek 延迟已经改善；本轮没有执行外部模型前后性能基准。
 
 ## PostgreSQL 数据迁移
 
