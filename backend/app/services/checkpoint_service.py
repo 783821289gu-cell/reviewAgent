@@ -1,13 +1,14 @@
-"""LangGraph Checkpointer 的创建和生命周期管理。
+"""这里给 LangGraph 准备“暂停书签”。
 
-本项目有两类 PostgreSQL 数据，职责不能混淆：
+例子：系统处理到人工复核后暂停。用户第二天回来时，LangGraph 要知道上次停在
+哪个节点。Checkpointer 就负责保存和读取这个位置。
 
-* ``app`` schema 由业务 Repository 管理，保存任务、合同、风险、事件和反馈，
-  是对外查询与恢复业务结果的唯一真相源。
-* ``langgraph`` schema 由 ``PostgresSaver`` 管理，只保存控制图的执行游标、
-  channel 值和 interrupt 信息。
+数据库中有两个独立区域：
 
-因此删除 Checkpoint 不应删除业务任务，业务状态更新也不能只写 Checkpoint。
+* ``app``：保存合同、风险和反馈，像任务档案柜。
+* ``langgraph``：保存暂停位置，像书签盒。
+
+书签丢了，不代表合同丢了。合同内容也不会塞进书签里。
 """
 
 from dataclasses import dataclass
@@ -26,40 +27,42 @@ CHECKPOINT_SCHEMA = "langgraph"
 
 @dataclass
 class ReviewCheckpointManager:
-    """把 Saver 与其连接池绑定在同一个可关闭对象中。
+    """管理书签存储，以及它占用的数据库连接。"""
 
-    LangGraph 只要求一个 ``BaseCheckpointSaver``。这里额外保存 backend 名称用于
-    状态展示，并保存连接池以确保 Agent 关闭时能释放 PostgreSQL 连接。
-    """
-
+    # saver 是 LangGraph 真正调用的书签读写器。
     saver: BaseCheckpointSaver
+    # backend 只用于说明当前书签放在内存还是 PostgreSQL。
     backend: str
+    # _pool 保存可复用的数据库连接。内存模式没有连接池。
     _pool: ConnectionPool | None = None
 
     @classmethod
     def in_memory(cls) -> "ReviewCheckpointManager":
-        """为单元测试和无持久化场景创建进程内 Checkpointer。
+        """把书签放在内存里，只适合测试。
 
-        进程退出后内容会丢失，所以它不能证明“服务重启后仍可恢复”。
+        程序一关闭，书签就消失。因此不能用它测试重启恢复。
         """
 
         return cls(saver=InMemorySaver(), backend="memory")
 
     @classmethod
     def postgres(cls, database_url: str) -> "ReviewCheckpointManager":
-        """创建可跨 Worker 重启恢复的 PostgreSQL Checkpointer。"""
+        """把书签放进 PostgreSQL，服务重启后仍能读取。"""
 
+        # normalized_url：去掉配置两端的空格。
         normalized_url = str(database_url).strip()
         if not normalized_url:
             raise ValueError("PostgreSQL database URL is required for checkpointing")
+        # conninfo：psycopg 能直接使用的数据库连接字符串。
         url = make_url(normalized_url).set(drivername="postgresql")
         conninfo = url.render_as_string(hide_password=False)
-        # PostgresSaver.setup() 会创建自己的表。先创建独立 schema，再通过每个
-        # 连接的 search_path 把这些表隔离到 langgraph schema。
+        # schema 可以理解成 PostgreSQL 里的文件夹。
+        # 先创建 langgraph 文件夹，避免书签表和业务表混在一起。
         with Connection.connect(conninfo, autocommit=True) as connection:
             connection.execute(
                 f'CREATE SCHEMA IF NOT EXISTS "{CHECKPOINT_SCHEMA}"'
             )
+        # 最少保留 1 条连接，最多使用 2 条。人工恢复不需要大连接池。
         pool = ConnectionPool(
             conninfo=conninfo,
             min_size=1,
@@ -74,9 +77,10 @@ class ReviewCheckpointManager:
             check=ConnectionPool.check_connection,
         )
         try:
+            # 确认连接池可用，再把它交给官方 PostgresSaver。
             pool.wait()
             saver = PostgresSaver(pool)
-            # setup() 是幂等初始化，负责 checkpoints/checkpoint_blobs 等内部表。
+            # 首次启动时创建书签表。重复调用不会重复创建。
             saver.setup()
         except Exception:
             pool.close()
@@ -88,7 +92,7 @@ class ReviewCheckpointManager:
         )
 
     def close(self) -> None:
-        """关闭 Manager 拥有的连接池；内存 Saver 无需处理。"""
+        """Agent 关闭时释放数据库连接。内存模式不需要处理。"""
 
         if self._pool is not None:
             self._pool.close()
@@ -96,7 +100,7 @@ class ReviewCheckpointManager:
 
 
 def _configure_connection(connection: Connection) -> None:
-    """确保连接池中的每条连接都把 LangGraph 内部表写入独立 schema。"""
+    """让每条连接默认在 langgraph 区域中查找和创建书签表。"""
 
     connection.execute(
         f'SET search_path TO "{CHECKPOINT_SCHEMA}", public'

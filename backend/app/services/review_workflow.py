@@ -1,14 +1,20 @@
-"""LangGraph 图结构定义。
+"""先从这个文件学习 LangGraph，不需要先懂项目的其他代码。
 
-建议先读本文件，再读 ``langgraph_review_agent.py`` 中同名的节点方法：
+把 LangGraph 想成一张合同审查流程图：
 
-1. ``build_review_graph`` 定义一次合同审查的业务主流程。
-2. ``_build_risk_graph`` 定义单个风险上下文的分析子图。
-3. ``build_review_control_graph`` 只负责 Checkpoint 和人工中断/恢复。
+* State 是流程中传递的“工作单”，记录目前有哪些数据。
+* Node 是一个处理步骤，例如“解析合同”。
+* Edge 是箭头，规定一个步骤完成后去哪里。
+* ``compile()`` 把画好的流程图变成可以执行的程序。
 
-这里刻意把“图的拓扑”与“节点的业务实现”分开。拓扑回答下一步去哪里，
-节点方法回答这一步具体做什么。修改流程顺序或路由时应优先检查本文件；修改
-解析、检索或风险分析行为时，应修改节点实现而不是在图构建代码中塞业务逻辑。
+这个项目有三张图：
+
+1. 主图：从上传合同一直走到汇总风险。
+2. 风险子图：只处理一条风险，必要时可以重新检索。
+3. 控制图：审查需要人工处理时暂停，处理后继续。
+
+阅读顺序：先看 ``ReviewGraphState``，再看 ``build_review_graph``，最后看
+``_dispatch_risk_items``。看懂这三处，就掌握了本项目最重要的 LangGraph 用法。
 """
 
 from operator import add
@@ -19,52 +25,66 @@ from langgraph.types import Send
 
 
 class ReviewGraphState(TypedDict, total=False):
-    """主图和风险子图之间传递的短生命周期执行状态。
+    """这张“工作单”跟着主图和风险子图一起流转。
 
-    这不是数据库中的完整任务对象。合同、条款、日志和风险等业务真相由
-    ``AgentState``/``ReviewEventStore`` 持久化；本状态只保存图路由和并行归并
-    所需的最小数据，因此主业务图无需 Checkpointer。
+    例如，合同命中 3 条规则后，工作单可能是：
 
-    ``total=False`` 允许不同节点只返回自己修改的字段。LangGraph 会把节点返回
-    的字典合并回当前状态，而不要求每个节点重复返回所有字段。
+    ``{"task_id": "task_123", "risk_items": [风险1, 风险2, 风险3]}``
+
+    每个 Node 都会收到这张工作单。Node 只返回自己新增或修改的字段。
+    ``total=False`` 的意思也是“不是每次都必须填写所有字段”。
+
+    注意：这里不保存完整合同。完整任务保存在数据库的 ``AgentState`` 中。
     """
 
-    # 一次图执行的稳定关联键，也是控制图使用的 thread_id。
+    # 当前审查任务的编号。它把图执行、数据库记录和日志关联起来。
+    # 示例："task_123"。
     task_id: str
-    # 前置节点发生业务终止时置 True，后续 guarded edge 会直接走 END。
+    # 是否应该立刻停止。解析失败或合同类型不支持时会变成 True。
     terminal: bool
-    # build_context 产生的全部待分析项，供 Send 动态扇出。
+    # 所有待分析风险。命中 3 条规则时，这里通常有 3 项。
     risk_items: list[dict]
-    # Send 给单个风险分支的输入；每个分支只处理一个 risk_item。
+    # 当前风险分支正在处理的那一项。每个并行分支看到的值不同。
     risk_item: dict
-    # ``add`` 是 reducer：并行分支各返回一个列表，LangGraph 将列表相加归并。
-    # 若没有 reducer，多个并行分支同时写同一字段会产生并发更新冲突。
+    # 每个分支完成后都返回一项结果。
+    # ``add`` 告诉 LangGraph：不要互相覆盖，要把多个列表拼到一起。
     risk_results: Annotated[list[dict], add]
-    # 风险子图节点计算出的下一跳，由 _branch_route 读取。
+    # 当前风险下一步去哪。示例："criticize_risk" 或 "finalize_risk"。
     branch_route: str
-    # 单个风险分支的工作区，保存 finding、证据、重试次数和分支日志。
+    # 当前风险的临时处理记录，包括模型结论、证据和重试次数。
     branch_payload: dict
 
 
 class ReviewControlState(TypedDict, total=False):
-    """可被 Checkpointer 保存的紧凑控制状态。
+    """控制图保存的“书签”。
 
-    控制图只需要知道任务处于执行、人工复核还是完成阶段。完整合同正文和风险
-    结果不进入 Checkpoint，避免 PostgreSQL 业务表与 LangGraph Checkpoint 各保存
-    一份可相互漂移的业务数据。
+    人工复核可能持续几分钟甚至几天。程序只要记住任务编号、当前阶段和哪些
+    风险还没处理，就能从暂停位置继续。合同正文仍然从业务数据库读取。
     """
 
+    # 哪个任务。
     task_id: str
+    # 当前阶段："execute"、"human_review" 或 "complete"。
     phase: str
+    # 前端看到的业务状态，例如 HUMAN_REVIEW_PENDING。
     status: str
+    # 还没有被采纳、忽略或修改的风险编号。
     pending_risk_ids: list[str]
+    # 这个任务已经人工恢复过几次。
     recovery_count: int
 
 
+# 测试用这个集合确认 Checkpoint 没有偷偷保存合同正文或完整风险。
 CONTROL_STATE_KEYS = frozenset(ReviewControlState.__annotations__)
 
 
 class ReviewWorkflowHandlers(Protocol):
+    """主图要求传入对象必须提供哪些方法。
+
+    ``Protocol`` 只是类型检查清单，不会执行这些方法。
+    真正的实现是 ``ReviewOrchestratorAgent`` 中的同名方法。
+    """
+
     def bootstrap(self, state: ReviewGraphState, runtime) -> dict: ...
 
     def parse_document(self, state: ReviewGraphState, runtime) -> dict: ...
@@ -93,11 +113,14 @@ class ReviewWorkflowHandlers(Protocol):
 
 
 class ReviewControlHandlers(Protocol):
+    """控制图需要的两个实际处理方法。"""
+
     def checkpoint_phase(self, state: ReviewControlState, runtime) -> dict: ...
 
     def await_human_review(self, state: ReviewControlState, runtime) -> dict: ...
 
 
+# 这两个常量把节点顺序列出来，便于测试验证图没有漏步骤。
 MAIN_NODE_ORDER = (
     "bootstrap",
     "parse_document",
@@ -120,24 +143,29 @@ RISK_NODE_ORDER = (
 
 
 def build_review_graph(handlers: ReviewWorkflowHandlers, context_schema: type):
-    """编译业务主图，并把单风险子图作为一个主图节点接入。
+    """把合同审查步骤连接成一张可执行的主图。
 
-    ``handlers`` 通常就是 ``ReviewOrchestratorAgent``；因此图中注册的是该对象的
-    绑定方法。``context_schema`` 是 ``_ReviewRuntime``，通过 ``runtime.context``
-    向节点提供数据库、合同对象和执行控制等依赖，它与可归并的 Graph State 是
-    两个概念。
+    两个参数可以这样理解：
+
+    * ``handlers`` 是“干活的人”，里面有解析、分类和检索方法。
+    * ``context_schema`` 是“工具箱的规格”，工具箱里有数据库和合同内容。
+
+    State 是步骤之间传递的数据。context 是每个步骤都能使用的工具箱。
     """
 
+    # 先造好“处理一条风险”的小流程，主图后面会反复调用它。
     risk_graph = _build_risk_graph(handlers, context_schema)
 
     def run_risk_subgraph(state: ReviewGraphState, runtime) -> dict:
-        # 每次 Send 都会以一个 risk_item 调用这里。子图完成后只把可归并的
-        # risk_results 交还主图，不把 branch_payload 泄漏到其他并行分支。
+        # 假设有 3 条风险，这个函数会被调用 3 次。
+        # 每次拿到不同的 risk_item，但都使用同一套风险处理步骤。
         result = risk_graph.invoke(state, context=runtime.context)
         return {"risk_results": list(result.get("risk_results") or [])}
 
+    # 第 1 步：创建一张空白流程图，并声明工作单类型。
     graph = StateGraph(ReviewGraphState, context_schema=context_schema)
-    # Node 名称会出现在 LangGraph 调试信息中；处理函数是真正的业务实现。
+    # 第 2 步：登记所有处理站点。
+    # 左边是流程图中的名字，右边是实际执行的 Python 方法。
     graph.add_node("bootstrap", handlers.bootstrap)
     graph.add_node("parse_document", handlers.parse_document)
     graph.add_node("classify_contract", handlers.classify_contract)
@@ -147,9 +175,10 @@ def build_review_graph(handlers: ReviewWorkflowHandlers, context_schema: type):
     graph.add_node("risk_subgraph", run_risk_subgraph)
     graph.add_node("aggregate_risks", handlers.aggregate_risks)
 
+    # 第 3 步：用箭头连接节点。START 表示入口。
     graph.add_edge(START, "bootstrap")
-    # 线性阶段也使用条件边，因为任一节点都可能返回 terminal=True。这样错误
-    # 状态一旦已真实落库，图会立即结束，不会继续执行依赖无效输入的后续节点。
+    # guarded edge 的意思是“先看 terminal”。
+    # terminal=False 就去下一步；terminal=True 就直接结束。
     _add_guarded_edge(graph, "bootstrap", "parse_document")
     _add_guarded_edge(graph, "parse_document", "classify_contract")
     _add_guarded_edge(graph, "classify_contract", "structure_clauses")
@@ -160,11 +189,12 @@ def build_review_graph(handlers: ReviewWorkflowHandlers, context_schema: type):
         _dispatch_risk_items,
         ["risk_subgraph", "aggregate_risks", END],
     )
-    # 所有 Send 分支完成并通过 reducer 合并后，LangGraph 才进入统一聚合节点。
+    # 每条风险子流程完成后都来到 aggregate_risks。
+    # LangGraph 会等同一批分支全部结束，再执行汇总。
     graph.add_edge("risk_subgraph", "aggregate_risks")
     graph.add_edge("aggregate_risks", END)
-    # 主业务图不传 checkpointer。恢复业务进度依靠各节点写入的 AgentState；
-    # 只有下方控制图需要保存 interrupt 游标。
+    # 第 4 步：compile 检查图是否完整，并生成可执行对象。
+    # 主图的结果每一步都写数据库，所以这里不额外保存 Checkpoint。
     return graph.compile()
 
 
@@ -173,12 +203,15 @@ def build_review_control_graph(
     context_schema: type,
     checkpointer,
 ):
-    """编译负责人工复核暂停/恢复的控制图。
+    """创建一张专门负责“暂停和继续”的小图。
 
-    首次执行时，``checkpoint_phase`` 根据 phase 决定是否进入人工复核节点。
-    ``await_human_review`` 中的 ``interrupt()`` 会让图暂停并由 checkpointer 保存
-    游标。收到人工反馈后，调用方用 ``Command(resume=...)`` 从同一 thread_id
-    继续；如果仍有未处理风险，则再次 interrupt，否则走 END。
+    例子：系统发现 3 条风险，需要人处理。
+
+    1. ``await_human_review`` 暂停图。
+    2. Checkpointer 记住暂停位置。
+    3. 用户采纳第 1 条后，程序继续运行。
+    4. 还有 2 条未处理，所以再次暂停。
+    5. 全部处理后走到 END。
     """
 
     graph = StateGraph(ReviewControlState, context_schema=context_schema)
@@ -203,18 +236,20 @@ def build_review_control_graph(
         ),
         ["await_human_review", END],
     )
-    # interrupt 只有在编译图时配置 Checkpointer 才能跨调用恢复。
+    # 把 checkpointer 交给 compile 后，interrupt 才能在服务重启后继续。
     return graph.compile(checkpointer=checkpointer)
 
 
 def _build_risk_graph(handlers: ReviewWorkflowHandlers, context_schema: type):
-    """构建处理一个风险上下文的可循环子图。
+    """创建“只处理一条风险”的小流程。
 
-    正常路径为：
-    prepare -> analyze -> critic -> verify -> finalize。
+    正常路线：
+    准备数据 -> 模型分析 -> Critic 复核 -> 验证证据 -> 整理结果。
 
-    检索不足或证据无效时，条件边可进入 repair，再回到 analyze。是否允许修复
-    由节点内的 Planner 白名单决策和重试计数约束，不是让 LLM 任意选择节点。
+    如果证据不够，路线会变成：
+    重新检索 -> 再分析 -> 再复核 -> 再验证。
+
+    最多重试几次由节点代码控制，模型不能随便跳到任意函数。
     """
 
     graph = StateGraph(ReviewGraphState, context_schema=context_schema)
@@ -238,7 +273,8 @@ def _build_risk_graph(handlers: ReviewWorkflowHandlers, context_schema: type):
         "verify_evidence": ["repair_retrieval", "finalize_risk"],
         "repair_retrieval": ["analyze_risk", "finalize_risk"],
     }
-    # 每个节点把下一跳写入 branch_route；路由函数只读取这个受控值。
+    # routes 是“每个站点允许去哪里”的白名单。
+    # 例如 verify_evidence 只能去 repair_retrieval 或 finalize_risk。
     for node_name, destinations in routes.items():
         graph.add_conditional_edges(
             node_name,
@@ -250,7 +286,10 @@ def _build_risk_graph(handlers: ReviewWorkflowHandlers, context_schema: type):
 
 
 def _add_guarded_edge(graph: StateGraph, source: str, target: str) -> None:
-    """增加一条会尊重 terminal 标记的主图条件边。"""
+    """连接两个步骤，但在前一步失败时直接结束。
+
+    ``source`` 是当前节点名，``target`` 是正常情况下的下一节点名。
+    """
 
     graph.add_conditional_edges(
         source,
@@ -260,11 +299,15 @@ def _add_guarded_edge(graph: StateGraph, source: str, target: str) -> None:
 
 
 def _dispatch_risk_items(state: ReviewGraphState):
-    """把风险项动态扇出为多个 ``risk_subgraph`` 调用。
+    """把多条风险拆成多份相同的小任务。
 
-    ``Send`` 适合运行时才知道数量的 map 场景。并行度不在这里硬编码，而是在
-    调用 ``graph.stream`` 时通过 ``max_concurrency`` 配置，因此 DeepSeek 可限制
-    为 2，本地确定性模式可限制为 1。
+    假设 ``risk_items`` 有 3 项，这里就返回 3 个 ``Send``：
+
+    * Send 1：让 risk_subgraph 处理风险 1。
+    * Send 2：让 risk_subgraph 处理风险 2。
+    * Send 3：让 risk_subgraph 处理风险 3。
+
+    这就是本项目的并行来源。DeepSeek 模式最多同时跑 2 份。
     """
 
     if state.get("terminal"):
@@ -274,10 +317,13 @@ def _dispatch_risk_items(state: ReviewGraphState):
         return "aggregate_risks"
     return [
         Send(
+            # 第一个参数：把任务送到哪个节点。
             "risk_subgraph",
             {
+                # 第二个参数：这次调用能看到的 State。
                 "task_id": state["task_id"],
                 "risk_item": risk_item,
+                # 每个分支从空结果开始，完成后由 add 合并。
                 "risk_results": [],
             },
         )
@@ -286,6 +332,6 @@ def _dispatch_risk_items(state: ReviewGraphState):
 
 
 def _branch_route(state: ReviewGraphState) -> str:
-    """返回单风险子图的受控下一跳；缺失时保守进入 finalize。"""
+    """读取当前风险的下一步；没写下一步时直接整理结果。"""
 
     return str(state.get("branch_route") or "finalize_risk")

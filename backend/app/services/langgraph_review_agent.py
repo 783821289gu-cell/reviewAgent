@@ -1,16 +1,20 @@
-"""LangGraph 审查节点实现与执行入口。
+"""这里是流程图中每个步骤真正执行的代码。
 
-配合 ``review_workflow.py`` 阅读：
+先记住几个反复出现的变量：
 
-* ``review_workflow.py`` 定义 Node、Edge、条件路由和 Send 并行拓扑。
-* 本文件实现每个 Node 的业务动作，以及图如何被 stream/resume。
-* ``checkpoint_service.py`` 创建控制图使用的 Saver。
-* ``models/review.py`` 定义真正持久化并对用户可见的业务状态。
+* ``graph_state``：LangGraph 传来的临时工作单。
+* ``runtime``：LangGraph 提供的运行环境。
+* ``context = runtime.context``：本次任务的工具箱和中间数据。
+* ``state = context.state``：从数据库读取的完整任务状态。
+* ``payload``：只属于当前一条风险的处理记录。
+* ``finding``：风险分析模型给出的结论。
+* ``evidence``：证据校验器给出的结果。
 
-项目不是让多个自由 Agent 相互聊天，而是由一个 Orchestrator 驱动受控的
-Analyzer、Planner、Critic 和 Evidence Verifier 工具。LangGraph 负责确定性的
-执行顺序、并行归并和人工中断；每个模型可执行的动作仍受 Tool Registry、结构化
-Schema、路由白名单和重试上限约束。
+建议先读 ``run``，了解一份合同如何启动。然后读 ``analyze_risk``、
+``criticize_risk`` 和 ``verify_evidence``，了解一条风险如何产生。
+
+这里的 Analyzer、Planner 和 Critic 不是三个自由聊天的程序。
+它们是主控流程在固定位置调用的工具，下一步只能从白名单中选择。
 """
 
 from concurrent.futures import Future, ThreadPoolExecutor, wait
@@ -112,42 +116,40 @@ _INITIAL_CONTROL_INPUT = object()
 
 @dataclass
 class _ReviewRuntime:
-    """一次合同审查调用共享的运行时依赖，不属于 Graph State。
+    """一份合同从开始到结束共用的“工具箱”。
 
-    LangGraph 的 ``context_schema`` 会把这个对象作为 ``runtime.context`` 传给
-    每个节点。它适合保存内容字节、EventStore、执行控制器和已加载的领域对象；
-    这些值不参与 State reducer，也不会由 Checkpointer 序列化。
-
-    并行风险分支自己的 finding、证据和分支日志放在 ``branch_payload`` 中。
-    ``branch_results`` 只在主线程消费流式更新时用于展示连续进度。
+    Graph State 适合传少量流程数据。这个工具箱保存体积更大的内容，例如文件
+    字节、解析后的合同和数据库状态。节点通过 ``runtime.context`` 取得它。
     """
 
+    # 当前执行这些步骤的 Agent 对象。
     agent: "ReviewOrchestratorAgent"
+    # 当前任务编号和原始上传文件。
     task_id: str
     content: bytes
+    # 数据库里的完整任务，以及本次执行产生的日志。
     state: AgentState
     logs: list[StepLog]
+    # 负责检查取消和单节点超时。
     execution_control: ToolExecutionControl
+    # 下列字段按主流程顺序逐步填写。
     document: object | None = None
     contract_type: str = ""
     clauses: list[object] = field(default_factory=list)
     clauses_payload: list[dict] = field(default_factory=list)
     rule_matches: list[dict] = field(default_factory=list)
     review_contexts: list[dict] = field(default_factory=list)
+    # 避免同一段文本在一次任务里重复计算向量。
     embedding_cache: dict = field(default_factory=dict)
+    # key 是原始顺序，value 是已经完成的风险分支结果。
     branch_results: dict[int, dict] = field(default_factory=dict)
 
 
 class ReviewOrchestratorAgent(ReviewAgentSupport):
-    """LangGraph 编排器，同时保持原有服务层公开接口兼容。
+    """整个审查流程的总负责人。
 
-    它持有两张已编译图：
-
-    * ``_graph``：无 Checkpointer 的业务主图，节点结果显式写入 EventStore。
-    * ``_control_graph``：带 Checkpointer 的紧凑控制图，负责 interrupt/resume。
-
-    这种拆分避免把合同正文和完整风险列表复制进 LangGraph Checkpoint，同时仍能
-    在 Worker 重启后恢复人工复核游标。
+    ``_graph`` 负责实际审查。``_control_graph`` 负责人工复核的暂停和继续。
+    两张图分开后，Checkpoint 只保存暂停位置，不复制整份合同。
     """
 
     def __init__(
@@ -174,8 +176,8 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         self._related_clause_retriever = related_clause_retriever
         self._memory_store = memory_store
         self._context_pipeline = ReviewContextPipeline(self._batch_executor)
-        # Agent 实例创建时编译图，执行任务时复用已编译对象。handlers 传 self，
-        # 所以 review_workflow.py 注册的节点最终会回调本类的同名方法。
+        # 把 self 传进去，表示图中的 parse_document 节点会调用
+        # self.parse_document，其他同名节点也是如此。
         self._graph = build_review_graph(self, _ReviewRuntime)
         self._control_graph = build_review_control_graph(
             self,
@@ -366,11 +368,11 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         task_id: str,
         resume_payload: dict,
     ) -> AgentState:
-        """用 ``Command(resume=...)`` 恢复已 interrupt 的控制图。
+        """用户处理一条风险后，尝试继续之前暂停的流程。
 
-        先通过相同 thread_id 读取 snapshot，确认确实存在待恢复 interrupt。没有
-        interrupt 时直接返回当前业务状态，使重复请求保持幂等；存在时才获取执行
-        lease 并进入 ``run`` 的恢复分支。
+        ``snapshot`` 是 LangGraph 保存的暂停现场。
+        如果现场里没有 ``interrupt``，说明流程没有暂停，直接返回即可。
+        如果有，就用 ``Command(resume=...)`` 唤醒同一个任务。
         """
 
         current = self.event_store.get_task(task_id)
@@ -410,20 +412,22 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         execution_acquired: bool = False,
         control_input=_INITIAL_CONTROL_INPUT,
     ) -> None:
-        """执行或恢复一个审查任务。
+        """一份合同的总执行入口。
 
-        首次执行分为三段：
+        新任务会这样走：
 
-        1. 让控制图记录 ``phase=execute``；
-        2. 执行业务主图，并由每个节点把真实结果写入 EventStore；
-        3. 根据未处理风险进入 ``human_review`` interrupt，或写入 complete。
+        1. 从数据库取出任务。
+        2. 创建本次执行的工具箱 ``runtime``。
+        3. 运行合同审查主图。
+        4. 有风险待人工处理就暂停，否则结束。
 
-        人工反馈后的调用传入 ``Command(resume=...)``，只恢复控制图。反馈接口已经
-        更新 PostgreSQL 中的风险/Memory，因此恢复过程无需重新解析原合同。
+        人工反馈后再次进入这里时，``control_input`` 是 Command。
+        这时只继续暂停的控制图，不会重新解析合同。
         """
 
+        # resolved_owner 是本次执行的唯一编号。
+        # 同一任务已有执行者时，新的执行请求会直接返回，避免重复调用模型。
         resolved_owner = execution_owner or f"exec_{uuid4().hex}"
-        # execution lease 防止同一个 task_id 被 API 恢复、Worker 重投等路径并发执行。
         if not execution_acquired and not self.event_store.try_acquire_execution(
             task_id,
             resolved_owner,
@@ -449,8 +453,8 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
             logs=[StepLog(**item) for item in (state.logs or [])],
             execution_control=execution_control,
         )
-        # 这些 bind_* 使用 ContextVar 把“本任务”的 LLM 模式、超时控制、检索器
-        # 和 Memory Store 传入更深层工具调用；finally 中必须按 token 成对 reset。
+        # bind_* 让深层工具知道当前任务使用哪个模型、检索器和 Memory。
+        # 返回的 token 用于 finally 中恢复原值，避免不同任务互相串配置。
         llm_mode_token = bind_llm_mode(state.llm_mode.value)
         control_token = bind_execution_control(execution_control)
         retrieval_token = bind_related_clause_retriever(
@@ -472,10 +476,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         )
         try:
             if isinstance(control_input, Command):
-                # Command(resume=...) 只能交给保存过 interrupt 的控制图。
+                # 这是人工反馈后的调用：从书签位置继续。
                 self._stream_control(runtime, control_input)
             else:
-                # 先写控制 Checkpoint，再运行不携带完整业务载荷的主图。
+                # 这是第一次执行：先记录“正在执行”，再跑完整主图。
                 self._stream_control(
                     runtime,
                     self._control_state(runtime.state, "execute"),
@@ -493,7 +497,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
                     and pending_risk_ids
                     else "complete"
                 )
-                # 若仍有未处理风险，该调用会在 await_human_review 中 interrupt。
+                # 仍有风险没处理时，下一行会暂停在 await_human_review。
                 self._stream_control(
                     runtime,
                     self._control_state(current, phase),
@@ -584,22 +588,22 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         graph_state: ReviewControlState,
         runtime,
     ) -> dict:
-        """控制图的显式 Checkpoint 节点。
+        """让控制图经过一个可以保存书签的步骤。
 
-        节点无需修改状态；经过该 Node 本身就会让 Checkpointer 记录一个稳定边界，
-        后续条件边再根据输入 phase 决定结束或进入人工复核。
+        返回空字典表示不修改 State。LangGraph 仍会记录这个步骤已经执行。
         """
 
         return {}
 
     def _execute_business_graph(self, context: _ReviewRuntime) -> None:
-        """以 updates 流模式运行主图并把分支完成进度实时写入业务状态。
+        """运行合同审查主图，并边运行边接收节点更新。
 
-        ``max_concurrency`` 是 Send 分支的并发上限。DeepSeek 模式通常为 2，本地
-        确定性模式由 ``_batch_width`` 限制为 1。stream 返回的是逐 Node 更新，
-        因而可以在全部分支聚合前持续发布已完成分支的进度。
+        ``initial_state`` 是交给第一个节点的初始工作单。
+        ``stream_mode="updates"`` 表示每完成一个节点就返回一次变化。
+        因此前端不用等整份合同结束，能逐步看到风险处理数量。
         """
 
+        # 主图启动时只需要任务编号、停止标记和空结果列表。
         initial_state: ReviewGraphState = {
             "task_id": context.task_id,
             "terminal": False,
@@ -611,8 +615,8 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
             config={"max_concurrency": self._batch_width(context.state)},
             stream_mode="updates",
         ):
-            # 这里只关心动态 Send 产生的风险分支更新；其他节点已经在内部通过
-            # EventStore 发布了更具体的阶段进度。
+            # update 的 key 是刚完成的节点名。
+            # 这里只读取 risk_subgraph，因为它能提供“第几条风险完成”的进度。
             risk_update = update.get("risk_subgraph")
             if not isinstance(risk_update, dict):
                 continue
@@ -624,11 +628,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         graph_state: ReviewControlState,
         runtime,
     ) -> dict:
-        """在仍有待处理风险时暂停控制图，等待人工反馈后恢复。
+        """有未处理风险时暂停，等用户在界面上处理。
 
-        ``interrupt(payload)`` 会把 payload 暴露给调用方，并依赖当前 thread_id
-        保存恢复位置。``Command(resume=...)`` 到达后，LangGraph 会从 interrupt
-        返回处继续执行，所以必须重新查询 EventStore，而不能沿用暂停前的快照。
+        ``interrupt`` 类似“保存并退出”。传入的字典告诉外部正在等哪些风险。
+        用户提交反馈后，``Command(resume=...)`` 会让这个方法重新执行。
         """
 
         context = runtime.context
@@ -645,8 +648,8 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
                     "recovery_count": current.recovery_count,
                 }
             )
-            # 恢复值本身不是业务真相；人工反馈接口已先更新数据库。重新读取可确保
-            # 部分反馈、重复恢复和跨进程恢复都以最新风险状态为准。
+            # 用户反馈已经先写入数据库，所以继续后必须重新读取任务。
+            # 不能使用暂停前的 current，否则看不到刚处理的风险。
             current = self.event_store.get_task(context.task_id)
             if current is None:
                 raise ValueError(
@@ -661,7 +664,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         }
 
     def bootstrap(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """规范化任务起始状态，为后续 guarded edge 提供 terminal=False。"""
+        """主图的起点：确认任务已进入“上传完成”状态。"""
 
         context = runtime.context
         if context.state.status == ReviewStatus.START:
@@ -674,10 +677,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"terminal": False}
 
     def parse_document(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """解析上传文件，并把文档模型作为第一个可恢复业务检查点落库。
+        """把 PDF/DOCX 变成程序可以处理的文档对象。
 
-        ``_before`` 让节点具备幂等恢复语义：任务已达到 DOCUMENT_PARSED 时不重复
-        调用解析工具，而是从 AgentState 还原领域对象。
+        ``_before`` 用来判断这一步以前是否完成。
+        已完成时直接使用数据库结果，恢复任务不会重复解析文件。
         """
 
         context = runtime.context
@@ -731,7 +734,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"terminal": False}
 
     def classify_contract(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """识别合同类型；不支持的类型通过 terminal=True 提前结束主图。"""
+        """判断上传文件是不是目前支持的 NDA 合同。
+
+        不是 NDA 时返回 ``terminal=True``。后面的条款和风险节点就不会执行。
+        """
 
         context = runtime.context
         state = context.state
@@ -815,7 +821,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"terminal": False}
 
     def structure_clauses(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """把文档拆成稳定 clause_id 的条款，为检索和证据定位建立共同主键。"""
+        """把整份合同拆成一条条带编号的条款。
+
+        后面的检索、风险和证据都使用同一个 ``clause_id`` 指向原文。
+        """
 
         context = runtime.context
         state = context.state
@@ -903,7 +912,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"terminal": False}
 
     def retrieve_playbook(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """检索与合同条款匹配的 Playbook 规则并持久化匹配结果。"""
+        """为每条合同条款查找需要遵守的 Playbook 审查规则。"""
 
         context = runtime.context
         state = context.state
@@ -1011,11 +1020,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"terminal": False}
 
     def build_context(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """构建风险分析上下文，并准备主图的 Send 输入。
+        """把“当前条款 + 命中规则 + 相关条款 + Memory”装成模型输入。
 
-        本节点内部的批处理用于并行构建上下文；完成后 ``risk_items`` 交给
-        ``_dispatch_risk_items``，后者再通过 LangGraph Send 并行执行风险子图。
-        两层并行都受同一个 ``_batch_width`` 上限约束。
+        每组输入叫一个 ``review_context``。
+        完成后再把它们转成 ``risk_items``，交给 Send 分别处理。
         """
 
         context = runtime.context
@@ -1125,8 +1133,8 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
             context.review_contexts = list(state.review_contexts or [])
 
         risk_items = self._build_risk_items(context)
-        # risk_item 包含 index 和已持久化结果前缀。恢复任务时，已完成项会直接在
-        # prepare_risk 路由到 finalize，不会重新消耗 LLM。
+        # 每个 risk_item 都记住原始顺序和以前保存的结果。
+        # 恢复任务时，已完成的项可以跳过模型调用。
         total = len(risk_items)
         completed_items = [item for item in risk_items if item["completed"]]
         if completed_items:
@@ -1182,24 +1190,33 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"terminal": False, "risk_items": risk_items}
 
     def prepare_risk(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """初始化单风险分支，并决定第一跳。
+        """拿到一条 risk_item，准备它的处理记录并选择下一步。
 
-        路由规则是确定性的：已完成项直接 finalize；检索不足先让 Planner 在白名单
-        中决定是否修复；已有分析结果按状态进入 critic 或 finalize；其余进入
-        analyze。LLM 不会返回任意 Python 函数名作为下一跳。
+        * 从没分析过：去 ``analyze_risk``。
+        * 已确认没有风险：去 ``finalize_risk``。
+        * 有模型结论：去 ``criticize_risk``。
+        * 相关条款不足：先去 ``repair_retrieval``。
         """
 
         context = runtime.context
         item = graph_state["risk_item"]
+        # payload 是这一条风险专用的文件夹。
+        # 之后的分析、复核和证据节点都在这个字典中继续填写。
         payload = {
+            # index 用于并行结束后恢复合同中的原始顺序。
             "index": item["index"],
+            # review_context 是模型分析需要的完整输入。
             "review_context": dict(item["review_context"]),
+            # finding 是 Analyzer 的结论；恢复时可能已经存在。
             "finding": item.get("existing_finding"),
             "final_finding": item.get("existing_final_finding"),
+            # 保存每次证据校验结果，便于解释为什么转人工。
             "evidence_results": list(item.get("existing_evidence_results") or []),
             "logs": [],
+            # Planner 或 Critic 不放心时，把风险交给人。
             "planner_requested_human": False,
             "critic_requested_human": False,
+            # 每条风险最多重新校验证据 1 次。
             "evidence_retry_count": 0,
             "retrieval_repair_count": _planner_retry_count(
                 [item["review_context"]]
@@ -1278,11 +1295,12 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"branch_payload": payload, "branch_route": route}
 
     def analyze_risk(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """调用 Risk Analyzer 产生结构化 finding，再处理低置信度分支。
+        """让风险分析模型判断当前条款有没有风险。
 
-        输出必须通过 Tool Registry 的 Schema 校验，且 finding 身份必须与当前
-        context_id 一致。低置信度时 Planner 只能选择重新分析、请求人工或终止等
-        受控动作。
+        ``invoke_tool("analyze_risk", ...)`` 返回的字典叫 ``finding``。
+        它包含风险类型、等级、理由、证据文本和置信度。
+
+        如果置信度太低，Planner 只能选择：再分析一次、交给人、停止。
         """
 
         context = runtime.context
@@ -1302,6 +1320,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
                 execution_control=context.execution_control,
                 parent_step_id=context.logs[-1].step_id if context.logs else "",
             )
+            # 防止并行时把 A 条款的模型结果误放到 B 条款。
             if _analysis_result_key(finding) != payload["review_context"]["context_id"]:
                 raise ValueError(
                     "risk finding identity does not match review context"
@@ -1374,11 +1393,15 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
             return {"branch_payload": payload, "branch_route": "finalize_risk"}
 
     def criticize_risk(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """让 Critic 独立检查风险结论，再生成修改建议。
+        """让第二个角色 Critic 检查 Analyzer 的结论。
 
-        Critic 不创建新证据，只检查 finding 是否受当前条款和规则支持，并负责阻断
-        Prompt Injection。只有 PASS 的候选才自动生成修改建议；其余候选保留给
-        人工复核。
+        Analyzer 负责“提出风险”。Critic 负责“挑错”：
+
+        * 理由是否真的来自当前条款。
+        * 是否符合命中的 Playbook 规则。
+        * 合同文本里是否混入了诱导模型的指令。
+
+        Critic 通过后才自动生成修改建议。没有通过就交给人。
         """
 
         context = runtime.context
@@ -1474,11 +1497,11 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"branch_payload": payload, "branch_route": "finalize_risk"}
 
     def verify_evidence(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """验证 finding 的条款证据，并最多触发一次检索修复循环。
+        """确认风险引用的证据确实存在于合同原文。
 
-        证据有效时进入 finalize。证据缺失时 Planner 可授权一次
-        repair -> analyze -> critic -> verify 循环；超过上限或未授权时，不伪造
-        “已验证”结果，而是物化为人工复核候选。
+        验证成功：保存原文位置，然后整理结果。
+        验证失败：Planner 可以批准重新检索一次。
+        再失败：保留风险，但标记为需要人工补证据。
         """
 
         context = runtime.context
@@ -1498,6 +1521,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
                 step_name="evidence_verification",
                 execution_control=context.execution_control,
             )
+            # evidence["is_valid"] 是证据是否通过的最终布尔值。
             payload["evidence_results"].append(evidence)
             if evidence["is_valid"]:
                 if evidence.get("source_location"):
@@ -1568,7 +1592,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"branch_payload": payload, "branch_route": "finalize_risk"}
 
     def repair_retrieval(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """按 Planner 给出的受控 query_adjustments 重建上下文并回到 Analyzer。"""
+        """证据不足时换一组检索词，再构建一次模型输入。
+
+        修复成功后回到 ``analyze_risk``。这条路线最多执行一次。
+        """
 
         context = runtime.context
         payload = graph_state["branch_payload"]
@@ -1600,10 +1627,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
             return {"branch_payload": payload, "branch_route": "finalize_risk"}
 
     def finalize_risk(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """把一个分支规范化为恰好一个可归并结果。
+        """把当前风险整理成统一格式，交回主图。
 
-        本节点不直接修改整份任务。它返回 ``risk_results=[result]``，由
-        ReviewGraphState 上的 ``add`` reducer 汇入其他 Send 分支结果。
+        每个并行分支都返回 ``risk_results=[一条结果]``。
+        State 中的 ``add`` 会把这些单项列表拼成完整列表。
         """
 
         payload = graph_state["branch_payload"]
@@ -1641,11 +1668,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"risk_results": [result], "branch_route": "finalize_risk"}
 
     def aggregate_risks(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """稳定排序全部分支结果，并一次性写入最终业务状态。
+        """等所有风险分支结束，再生成整份合同的风险列表。
 
-        Send 分支完成顺序不稳定，因此先按源条款 index 排序，并校验结果数量严格
-        等于上下文数量。只有在这里才汇总分析、证据、日志和正式风险，避免并行
-        分支竞争写同一个 AgentState。
+        并行任务完成顺序可能是 3、1、2，所以先按 ``index`` 排回 1、2、3。
+        然后把模型结论、证据和日志一次写入数据库。
         """
 
         context = runtime.context
@@ -1943,10 +1969,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
             self._execution_futures.discard(future)
 
     def _control_config(self, task_id: str, state: AgentState) -> dict:
-        """构造 LangGraph 调用配置。
+        """告诉 LangGraph 这次运行属于哪个任务。
 
-        ``thread_id == task_id`` 是恢复协议的一部分：首次 interrupt、服务重启后的
-        get_state 和 Command(resume=...) 必须使用同一个值，才能找到同一条执行线。
+        ``thread_id`` 像书签上的书号。暂停和继续必须使用同一个 task_id，
+        否则 LangGraph 会把它当成另一份新任务。
         """
 
         return {
@@ -1959,7 +1985,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         context: _ReviewRuntime,
         control_input,
     ) -> None:
-        """运行控制图；消费 updates 是为了确保图真正推进到 END 或 interrupt。"""
+        """运行控制图，直到它结束或停在人工复核处。"""
 
         for _update in self._control_graph.stream(
             control_input,
@@ -1974,7 +2000,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         state: AgentState,
         phase: str,
     ) -> ReviewControlState:
-        """从完整 AgentState 投影出允许进入 Checkpoint 的最小字段集合。"""
+        """从完整任务中挑出书签真正需要的 5 个字段。"""
 
         return {
             "task_id": state.task_id,
@@ -1986,7 +2012,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
 
     @staticmethod
     def _pending_risk_ids(state: AgentState) -> list[str]:
-        """返回尚未有人工动作的风险 ID，用于决定是否继续 interrupt。"""
+        """找出还没被用户采纳、忽略或修改的风险编号。"""
 
         return [
             str(risk.get("risk_id", ""))

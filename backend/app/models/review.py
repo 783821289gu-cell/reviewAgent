@@ -1,14 +1,13 @@
-"""审查任务的业务状态模型。
+"""这里保存“一个审查任务现在是什么样”。
 
-学习 LangGraph 时要先区分三层“状态”：
+项目里有三个名字都带 State 的类，最容易混淆：
 
-1. 本文件的 ``AgentState`` 是完整业务状态，由 PostgreSQL 业务表持久化，并通过
-   REST/SSE 暴露给前端。
-2. ``ReviewGraphState`` 是一次主图调用中的短生命周期路由数据。
-3. ``ReviewControlState`` 是 Checkpointer 保存的紧凑 interrupt/恢复数据。
+* ``AgentState``：完整任务档案。刷新页面后还能看到的数据都在这里。
+* ``ReviewGraphState``：LangGraph 手里的临时工作单。图结束后就不用了。
+* ``ReviewControlState``：人工复核的暂停书签。
 
-三者名称相近但用途不同。新增用户可见字段时应进入业务状态及其持久化路径，
-不能只放进 LangGraph State；新增临时路由字段则不应污染业务数据模型。
+记忆方法：AgentState 给人和数据库看，GraphState 给流程图看，
+ControlState 给“暂停后继续”看。
 """
 
 from dataclasses import asdict, dataclass
@@ -17,10 +16,10 @@ from uuid import uuid4
 
 
 class ReviewStatus(StrEnum):
-    """用户可观察、可持久化的业务状态机状态。
+    """任务进度的所有合法取值。
 
-    LangGraph Node 名称描述“正在执行哪个处理步骤”，这里的值描述“该任务已经
-    可靠完成到哪一步或以何种原因停止”。两者不要求一一同名。
+    例如 ``DOCUMENT_PARSED`` 表示文档已经解析并保存成功。
+    它不是函数名，而是前端和数据库都能看到的进度标签。
     """
 
     START = "START"
@@ -79,12 +78,13 @@ class TaskExecutionTimeoutError(TimeoutError):
 
 @dataclass(frozen=True)
 class ReviewTask:
-    """事件存储对外返回的不可变任务快照。
+    """给 API 和 SSE 读取的任务快照。
 
-    不可变快照适合 API/SSE 读取：调用方不能在未经过 EventStore 的情况下修改
-    共享业务状态。
+    ``frozen=True`` 表示拿到快照后不能直接改字段。
+    要修改任务，必须调用 EventStore，让修改同时写入数据库和事件流。
     """
 
+    # 任务基本信息。
     task_id: str
     status: ReviewStatus
     file_name: str
@@ -92,6 +92,7 @@ class ReviewTask:
     review_position: ReviewPosition
     message: str
     llm_mode: LLMMode = LLMMode.LOCAL_STRUCTURED
+    # 主流程每完成一步，就把结果填到对应字段。
     document: dict | None = None
     contract_classification: dict | None = None
     clauses: list[dict] | None = None
@@ -102,6 +103,7 @@ class ReviewTask:
     evidence_results: list[dict] | None = None
     report_file: dict | None = None
     logs: list[dict] | None = None
+    # 追踪和失败恢复信息。
     trace_id: str = ""
     recovery_count: int = 0
     recovery_from_status: str = ""
@@ -112,6 +114,7 @@ class ReviewTask:
     cancel_reason: str = ""
     execution_active: bool = False
     last_timeout: dict | None = None
+    # 前端进度条使用的数据，例如当前完成 2/10 条风险。
     progress: dict | None = None
 
     def to_dict(self) -> dict:
@@ -120,13 +123,16 @@ class ReviewTask:
 
 @dataclass
 class AgentState:
-    """Agent 执行期间使用的可变业务状态聚合。
+    """Worker 执行审查时使用的完整任务对象。
 
-    节点不会依赖 LangGraph 自动保存这些字段，而是通过 ``ReviewEventStore``
-    显式更新并落库。这样 API 查询、Worker 重启恢复和 SSE 推送看到的是同一份
-    数据，不会出现“图已经走完但用户界面仍是旧状态”的双真相源问题。
+    可以把它理解成数据库中这条任务记录的 Python 版本。
+    解析节点会填写 ``document``，条款节点会填写 ``clauses``，
+    风险汇总节点会填写 ``risk_findings``。
+
+    节点通过 EventStore 保存它。服务重启后，Worker 也从数据库恢复它。
     """
 
+    # 任务是谁、当前走到哪里。
     task_id: str
     status: ReviewStatus
     file_name: str
@@ -134,6 +140,7 @@ class AgentState:
     review_position: ReviewPosition
     message: str
     llm_mode: LLMMode = LLMMode.LOCAL_STRUCTURED
+    # 合同从上传到风险输出的阶段结果。
     document: dict | None = None
     contract_classification: dict | None = None
     clauses: list[dict] | None = None
@@ -144,7 +151,9 @@ class AgentState:
     evidence_results: list[dict] | None = None
     report_file: dict | None = None
     logs: list[dict] | None = None
+    # SSE 事件只在运行时对象中存在，ReviewTask 快照不重复携带它。
     events: list[dict] | None = None
+    # 调试、恢复、取消和超时信息。
     trace_id: str = ""
     recovery_count: int = 0
     recovery_from_status: str = ""
@@ -155,20 +164,21 @@ class AgentState:
     cancel_reason: str = ""
     execution_active: bool = False
     last_timeout: dict | None = None
+    # 当前阶段的细粒度进度，前端用它显示“正在处理第几条”。
     progress: dict | None = None
 
     def to_dict(self) -> dict:
-        """生成去除内部恢复字段的用户可见负载。"""
+        """转成可以返回给前端的字典，并隐藏内部恢复字段。"""
 
         return _public_task_payload(self.to_runtime_dict())
 
     def to_runtime_dict(self) -> dict:
-        """生成持久化/进程恢复需要的完整负载。"""
+        """转成完整字典，供数据库保存和 Worker 恢复。"""
 
         return _serialize_task(self)
 
     def to_review_task(self) -> ReviewTask:
-        """把执行期状态冻结为只读任务快照。"""
+        """复制出一份只读快照，防止 API 调用方直接修改任务。"""
 
         return ReviewTask(
             task_id=self.task_id,
