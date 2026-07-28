@@ -1,9 +1,28 @@
+"""审查任务的业务状态模型。
+
+学习 LangGraph 时要先区分三层“状态”：
+
+1. 本文件的 ``AgentState`` 是完整业务状态，由 PostgreSQL 业务表持久化，并通过
+   REST/SSE 暴露给前端。
+2. ``ReviewGraphState`` 是一次主图调用中的短生命周期路由数据。
+3. ``ReviewControlState`` 是 Checkpointer 保存的紧凑 interrupt/恢复数据。
+
+三者名称相近但用途不同。新增用户可见字段时应进入业务状态及其持久化路径，
+不能只放进 LangGraph State；新增临时路由字段则不应污染业务数据模型。
+"""
+
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from uuid import uuid4
 
 
 class ReviewStatus(StrEnum):
+    """用户可观察、可持久化的业务状态机状态。
+
+    LangGraph Node 名称描述“正在执行哪个处理步骤”，这里的值描述“该任务已经
+    可靠完成到哪一步或以何种原因停止”。两者不要求一一同名。
+    """
+
     START = "START"
     UPLOAD_RECEIVED = "UPLOAD_RECEIVED"
     DOCUMENT_PARSED = "DOCUMENT_PARSED"
@@ -60,6 +79,12 @@ class TaskExecutionTimeoutError(TimeoutError):
 
 @dataclass(frozen=True)
 class ReviewTask:
+    """事件存储对外返回的不可变任务快照。
+
+    不可变快照适合 API/SSE 读取：调用方不能在未经过 EventStore 的情况下修改
+    共享业务状态。
+    """
+
     task_id: str
     status: ReviewStatus
     file_name: str
@@ -95,6 +120,13 @@ class ReviewTask:
 
 @dataclass
 class AgentState:
+    """Agent 执行期间使用的可变业务状态聚合。
+
+    节点不会依赖 LangGraph 自动保存这些字段，而是通过 ``ReviewEventStore``
+    显式更新并落库。这样 API 查询、Worker 重启恢复和 SSE 推送看到的是同一份
+    数据，不会出现“图已经走完但用户界面仍是旧状态”的双真相源问题。
+    """
+
     task_id: str
     status: ReviewStatus
     file_name: str
@@ -126,12 +158,18 @@ class AgentState:
     progress: dict | None = None
 
     def to_dict(self) -> dict:
+        """生成去除内部恢复字段的用户可见负载。"""
+
         return _public_task_payload(self.to_runtime_dict())
 
     def to_runtime_dict(self) -> dict:
+        """生成持久化/进程恢复需要的完整负载。"""
+
         return _serialize_task(self)
 
     def to_review_task(self) -> ReviewTask:
+        """把执行期状态冻结为只读任务快照。"""
+
         return ReviewTask(
             task_id=self.task_id,
             status=self.status,
