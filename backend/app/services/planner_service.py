@@ -1,24 +1,4 @@
-"""Planner 角色：流程出现指定异常时，从白名单中选择下一步。
-
-Planner 不是风险分析者，也不是整个 LangGraph 的总指挥。正常路径
-``Analyzer -> Critic -> Evidence Verifier`` 不需要它；只有低置信度、证据缺失、
-检索不足等代码已经识别出的异常，节点才会调用 ``plan_review_action``。
-
-它的权限可以概括为“提建议，不执行”：
-
-* 可以选择 RETRIEVE_AGAIN、ANALYZE_AGAIN、REQUEST_HUMAN_REVIEW、TERMINATE。
-* 不能直接调用检索或 Analyzer，也不能跳转到任意 LangGraph 节点。
-* 返回后仍由节点代码检查白名单、重试预算和目标条款，再决定是否执行。
-
-Planner 专属提示词原文位于 ``prompt_service._OPERATION_INSTRUCTIONS``：
-
-    Choose exactly one allowed planner action for the supplied trigger. Do not
-    call tools, create findings, change Playbook rules, or target a clause
-    outside the whitelist.
-
-Analyzer、Critic、Planner 共用 DeepSeek Provider 和系统安全规则，但通过不同
-``operation`` 获得不同角色提示词、不同输入数据和不同 JSON 输出结构。
-"""
+"""Planner 角色：流程出现指定异常时，从白名单中建议下一步。"""
 
 from models.planner import PlannerAction, PlannerDecision, PlannerReasonCode
 from models.review import ReviewStatus
@@ -101,47 +81,11 @@ class PlannerOutputInvalidError(LLMOutputInvalidError):
 
 
 def plan_review_action(tool_input: dict) -> dict:
-    """让 Planner 对一次已识别异常给出受控决定。
-
-    ``tool_input`` 来自发生异常的 LangGraph 节点，而不是完整合同上下文：
-
-    * ``trigger_reason``：为什么现在需要 Planner。
-    * ``current_status``：异常发生时任务处于哪个业务状态。
-    * ``target_clause_id``：本次只能处理哪条条款。
-    * ``contract_clause_ids``：当前合同真实存在的条款 ID 白名单。
-    * ``retry_count``：这条风险已经修复过几次。
-    * ``failure_reason``：给 Planner 看的简短失败摘要，最多保留 160 字。
-    * ``_llm_call_records``：工具执行器附带的调用审计列表。
-
-    示例输入 A::
-
-        {
-            "trigger_reason": "EVIDENCE_MISSING",
-            "current_status": "RISK_ANALYZED",
-            "target_clause_id": "CL-002",
-            "contract_clause_ids": ["CL-001", "CL-002"],
-            "retry_count": 0,
-            "failure_reason": "证据文本不在当前条款中"
-        }
-
-    允许输出 B::
-
-        {
-            "action": "RETRIEVE_AGAIN",
-            "reason_code": "EVIDENCE_MISSING",
-            "target_clause_id": "CL-002",
-            "query_adjustments": {
-                "additional_keywords": ["原文证据", "相关条款"],
-                "top_k": 5
-            },
-            "confidence": 0.9
-        }
-
-    B 不会自己执行。调用它的 LangGraph 节点看到 ``RETRIEVE_AGAIN`` 后，才把
-    ``query_adjustments`` 写入分支状态并路由到 ``repair_retrieval``。
-    """
+    """让 Planner 对一次已识别异常给出受控决定。"""
 
     # 第 1 步：先在调用模型前验证触发原因、业务状态、条款范围和重试次数。
+    # 节点传入的不是完整合同，而是类似：
+    # EVIDENCE_MISSING + RISK_ANALYZED + CL-002 + retry_count=0。
     planner_input = _validated_planner_input(tool_input)
 
     # LLM 调用审计列表不进入 Planner 业务判断。
@@ -162,7 +106,9 @@ def plan_review_action(tool_input: dict) -> dict:
                 llm_calls=llm_calls,
             )
 
-            # 模型只负责提出候选决定；代码再次执行完整权限校验。
+            # 模型只负责提出候选决定，例如：
+            # RETRIEVE_AGAIN + {"additional_keywords": ["原文证据"], "top_k": 5}
+            # 它不会在这里执行检索；调用方通过校验后才决定是否路由。
             return _validate_decision(candidate, planner_input).to_dict()
         except LLMProviderError as exc:
             last_error = exc
@@ -180,15 +126,18 @@ def _validated_planner_input(tool_input: dict) -> dict:
 
     if not isinstance(tool_input, dict):
         raise ValueError("planner input must be a dict")
+    # 触发原因先转成枚举。任意新字符串都不能临时创造一种 Planner 用法。
     try:
         reason_code = PlannerReasonCode(str(tool_input.get("trigger_reason", "")))
     except ValueError as exc:
         raise ValueError("planner trigger_reason is not allowed") from exc
 
+    # 同一个原因只允许出现在指定业务阶段，例如证据缺失发生在风险分析后。
     current_status = str(tool_input.get("current_status", "")).strip()
     if current_status not in ALLOWED_STATUSES_BY_REASON[reason_code]:
         raise ValueError("planner trigger is not allowed in current_status")
 
+    # target_clause_id 是本次目标；contract_clause_ids 是当前合同的真实白名单。
     target_clause_id = str(tool_input.get("target_clause_id", "")).strip()
     contract_clause_ids = tool_input.get("contract_clause_ids")
     if not isinstance(contract_clause_ids, list) or not contract_clause_ids:
@@ -201,6 +150,7 @@ def _validated_planner_input(tool_input: dict) -> dict:
     if target_clause_id not in normalized_clause_ids:
         raise ValueError("planner target_clause_id is outside the current contract")
 
+    # 自动修复最多一次。输入已经超出预算时，甚至不会询问模型。
     retry_count = _non_negative_int(tool_input.get("retry_count"), "retry_count")
     if retry_count > MAX_PLANNER_RETRIES:
         raise ValueError("planner retry_count exceeds retry budget")
@@ -210,6 +160,8 @@ def _validated_planner_input(tool_input: dict) -> dict:
     allowed_actions = sorted(
         action.value for action in ALLOWED_ACTIONS_BY_REASON[reason_code]
     )
+    # A: 节点给出原始异常数据。
+    # B: 返回给模型的是裁剪后的输入，并额外带上允许动作和允许调整字段。
     return {
         "trigger_reason": reason_code.value,
         "current_status": current_status,
@@ -224,10 +176,7 @@ def _validated_planner_input(tool_input: dict) -> dict:
 
 
 def _local_decision(planner_input: dict) -> dict:
-    """本地模式的保守策略：有预算就重检索，否则转人工。
-
-    它不会因为“看起来可以”就无限循环。一次预算用完后，不再批准自动修复。
-    """
+    """本地模式的保守策略：有预算就重检索，否则转人工。"""
 
     reason_code = PlannerReasonCode(planner_input["trigger_reason"])
     retry_count = planner_input["retry_count"]
@@ -255,18 +204,16 @@ def _local_decision(planner_input: dict) -> dict:
 
 
 def _validate_decision(candidate: dict, planner_input: dict) -> PlannerDecision:
-    """验证模型没有越权，并转换成不可变的 ``PlannerDecision``。
+    """验证模型没有越权，并转换成不可变的 ``PlannerDecision``。"""
 
-    这里是 Planner 真正的权限边界：提示词只是告诉模型应该怎么做，本函数负责
-    保证模型即使不听话也无法越过动作、原因、条款和重试预算白名单。
-    """
-
+    # 第 1 关：只能返回 Schema 声明的五个字段，多一个 tool_call 也会失败。
     if not isinstance(candidate, dict):
         raise ValueError("planner decision must be a dict")
     expected_fields = set(PLANNER_OUTPUT_SCHEMA["properties"])
     if set(candidate) != expected_fields:
         raise ValueError("planner decision fields do not match the output whitelist")
 
+    # 第 2 关：动作和原因都必须属于代码枚举。
     try:
         action = PlannerAction(str(candidate.get("action", "")))
     except ValueError as exc:
@@ -276,23 +223,27 @@ def _validate_decision(candidate: dict, planner_input: dict) -> PlannerDecision:
     except ValueError as exc:
         raise ValueError("planner reason_code is not allowed") from exc
 
+    # 第 3 关：模型不能改写触发原因，也不能为该原因选择未授权动作。
     expected_reason = PlannerReasonCode(planner_input["trigger_reason"])
     if reason_code != expected_reason:
         raise ValueError("planner reason_code does not match trigger_reason")
     if action not in ALLOWED_ACTIONS_BY_REASON[reason_code]:
         raise ValueError("planner action is not allowed for reason_code")
 
+    # 第 4 关：模型不能把 CL-002 改成另一条款，更不能指向合同外 ID。
     target_clause_id = str(candidate.get("target_clause_id", "")).strip()
     if target_clause_id != planner_input["target_clause_id"]:
         raise ValueError("planner target_clause_id changed the requested clause")
     if target_clause_id not in planner_input["contract_clause_ids"]:
         raise ValueError("planner target_clause_id is outside the current contract")
 
+    # 第 5 关：自动动作必须还有重试预算。
     retry_count = planner_input["retry_count"]
     if action in {PlannerAction.RETRIEVE_AGAIN, PlannerAction.ANALYZE_AGAIN}:
         if retry_count >= planner_input["retry_budget"]:
             raise ValueError("planner retry budget is exhausted")
 
+    # 第 6 关：只有 RETRIEVE_AGAIN 可以保留检索参数，其余动作强制变成空字典。
     raw_query_adjustments = candidate.get("query_adjustments")
     if not isinstance(raw_query_adjustments, dict):
         raise ValueError("planner query_adjustments must be a dict")
@@ -302,6 +253,7 @@ def _validate_decision(candidate: dict, planner_input: dict) -> PlannerDecision:
         else {}
     )
 
+    # 第 7 关：Planner 对自己决定的置信度也必须是 0..1 数字。
     confidence = candidate.get("confidence")
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
         raise ValueError("planner confidence must be a number")
@@ -321,11 +273,13 @@ def _validated_query_adjustments(value, require_adjustment: bool) -> dict:
 
     if not isinstance(value, dict):
         raise ValueError("planner query_adjustments must be a dict")
+    # 先拒绝额外字段，例如 index_name 或任意 SQL。
     unexpected = set(value) - ALLOWED_QUERY_ADJUSTMENTS
     if unexpected:
         raise ValueError("planner query_adjustments contains unsupported fields")
 
     normalized = {}
+    # 再逐项限制关键词数量、长度并去重。
     if "additional_keywords" in value:
         keywords = value["additional_keywords"]
         if (
@@ -341,6 +295,7 @@ def _validated_query_adjustments(value, require_adjustment: bool) -> dict:
         ):
             raise ValueError("planner additional_keywords contains an invalid value")
         normalized["additional_keywords"] = list(dict.fromkeys(normalized_keywords))
+    # top_k 只能取 1..5，防止模型把一次修复扩大成无界检索。
     if "top_k" in value:
         top_k = value["top_k"]
         if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 5:

@@ -1,16 +1,4 @@
-"""LLM Provider：在本地确定性模式和真实 DeepSeek 请求之间切换。
-
-角色服务不会直接发送 HTTP。它们先创建 ``LLMRequest``，再由这里完成：
-
-1. 选择本地或 DeepSeek Provider。
-2. 拼装并计算提示词 token。
-3. 在发送前检查配置和上下文预算。
-4. 请求 ``/chat/completions``，强制 JSON object、temperature=0。
-5. 解析响应，记录 token、费用、耗时和错误类型。
-
-Provider 只保证“传输和基础 JSON 合法”；Analyzer/Critic/Planner 各自的领域
-字段、白名单和权限校验仍在对应 service 中执行。
-"""
+"""在本地确定性模式和真实 DeepSeek 请求之间提供统一调用接口。"""
 
 import json
 from contextvars import ContextVar, Token
@@ -115,12 +103,10 @@ class LLMOutputInvalidError(ValueError):
 
 
 def llm_call_records_from_tool_input(tool_input: dict) -> list[LLMCallMetadata] | None:
-    """取出 ``invoke_tool`` 注入的审计列表。
+    """取出 ``invoke_tool`` 注入的模型调用审计列表。"""
 
-    该列表不会进入 Prompt。Provider 完成后向同一列表追加 Metadata，工具日志
-    因而能记录模型、token、耗时和成本。
-    """
-
+    # 这是运行时附加字段，不属于 input_payload，因此不会进入 Prompt。
+    # Provider 向同一列表追加 Metadata，invoke_tool 随后就能写入 StepLog。
     records = tool_input.get(LLM_CALL_RECORDS_INPUT_KEY)
     return records if isinstance(records, list) else None
 
@@ -135,12 +121,9 @@ def mark_latest_llm_call_schema_error(
 
 
 def bind_llm_mode(llm_mode: str) -> Token:
-    """把当前任务选择的模型模式绑定到 ContextVar。
+    """把当前任务选择的模型模式绑定到并发上下文。"""
 
-    并发任务各自拥有上下文值，避免一个任务切到 DeepSeek 后影响另一个任务。
-    返回的 Token 用于任务结束时恢复旧值。
-    """
-
+    # ContextVar 让两个并发任务各自保留模式；返回 Token 供结束时恢复旧值。
     if llm_mode not in {"local_structured", "openai_compatible"}:
         raise ValueError(f"unsupported task llm_mode: {llm_mode}")
     return _LLM_MODE_OVERRIDE.set(llm_mode)
@@ -210,36 +193,27 @@ class OpenAICompatibleProvider:
         request: LLMRequest,
         call_records: list[LLMCallMetadata] | None = None,
     ) -> LLMResponse:
-        """完成一次真实结构化模型调用。
-
-        主要限制顺序：
-
-        1. 校验 URL、Key、模型、超时和价格配置。
-        2. 根据 operation 构建角色专属 Prompt。
-        3. 用固定 tokenizer 检查 Prompt 没有超预算。
-        4. 以 temperature=0、json_object 模式请求 DeepSeek。
-        5. 检查 HTTP、响应外形、JSON 对象和 token 用量。
-        6. 记录 Metadata；领域 service 再继续做角色白名单校验。
-        """
+        """完成一次真实 DeepSeek 结构化调用并记录审计信息。"""
 
         start = perf_counter()
         request_id = ""
         prompt_report = None
         try:
-            # 限制 1：配置不完整时禁止产生一个看似成功的模型结果。
+            # 第 1 步：配置不完整时立即失败，不能产生看似成功的模型结果。
             self._validate_settings()
 
-            # 限制 2：operation 决定角色指令、可见数据和输出 Schema。
+            # 第 2 步：operation 决定角色指令；input_payload 决定可见数据；
+            # output_schema 决定允许返回的 JSON 形状。
             prompt = build_prompt_package(
                 request.operation,
                 request.input_payload,
                 request.output_schema,
             )
-            # 限制 3：请求发送前先用固定 tokenizer 计算并校验预算。
+            # 第 3 步：发送前用固定 tokenizer 计算预算。超预算不会发 HTTP。
             prompt_report = prompt_token_report(prompt)
             self._validate_prompt_budget(prompt_report)
 
-            # 限制 4：真正发送 HTTP；请求体由 _post 固定关键生成参数。
+            # 第 4 步：真正发送 HTTP；_post 固定 temperature=0 和 json_object。
             response = self._post(prompt)
             request_id = response.headers.get("x-request-id", "")
             if response.status_code >= 400:
@@ -250,10 +224,11 @@ class OpenAICompatibleProvider:
             body_request_id = body.get("id")
             if not request_id and body_request_id is not None:
                 request_id = str(body_request_id)
-            # 限制 5：这里只接受 choices[0].message.content 中的 JSON 对象。
+            # 第 5 步：把 choices[0].message.content 从 JSON 字符串变成普通 dict。
+            # 数组、Markdown 或非法 JSON 都在这里失败。
             output = _structured_output(body)
             prompt_tokens, completion_tokens = _usage(body)
-            # 审计：记录实际 token、估算 token、耗时、成本和 Prompt 版本。
+            # 第 6 步：记录实际/估算 token、耗时、成本和 Prompt 版本。
             metadata = self._metadata(
                 request,
                 request_id,
@@ -264,6 +239,8 @@ class OpenAICompatibleProvider:
                 prompt_report,
             )
             _record_call(metadata, call_records)
+            # 返回的 output 还不是最终 RiskFinding/PlannerDecision；
+            # 对应角色 service 会继续执行字段白名单和领域约束。
             return LLMResponse(output=output, metadata=metadata)
         except LLMProviderError as exc:
             self._record_error(
@@ -361,11 +338,7 @@ class OpenAICompatibleProvider:
             )
 
     def _post(self, prompt: PromptPackage) -> httpx.Response:
-        """向 OpenAI 兼容端点发送固定参数的请求。
-
-        ``temperature=0`` 降低角色判断波动；``json_object`` 要求服务端返回 JSON；
-        真正的字段级限制仍由 Schema 提示词和返回后的 Python 校验共同完成。
-        """
+        """向 OpenAI 兼容端点发送固定参数的请求。"""
 
         base_url = self.settings.llm_base_url.rstrip("/")
         with httpx.Client(
@@ -380,7 +353,9 @@ class OpenAICompatibleProvider:
                 },
                 json={
                     "model": self.settings.llm_model,
+                    # 降低角色判断波动，但不代表结果一定正确。
                     "temperature": 0,
+                    # 服务端要求 JSON；字段级权限仍由 Schema 和 Python 校验保证。
                     "response_format": {"type": "json_object"},
                     "messages": prompt.messages,
                 },

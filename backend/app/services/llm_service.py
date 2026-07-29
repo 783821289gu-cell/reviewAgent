@@ -1,18 +1,4 @@
-"""把各角色的业务输入交给统一 LLM Provider，并规定结构化输出。
-
-本文件回答“是不是给了不同提示词”这个问题：
-
-* Analyzer 使用 ``operation="analyze_risk"``。
-* Critic 使用 ``operation="criticize_risk"``。
-* Planner 使用 ``operation="plan_review_action"``。
-* ``operation`` 传到 PromptService 后选择不同角色指令。
-* ``output_schema`` 决定该角色允许返回哪些 JSON 字段。
-* 三者最后都经过 ``_generate_structured``，共用同一个 Provider 配置。
-
-所以角色差异不是三个模型，而是“专属 operation + 专属输入 + 专属 schema +
-各服务自己的校验”。``openai_compatible`` 模式会请求 DeepSeek；
-``local_structured`` 模式则由 Provider 直接返回 ``local_output``。
-"""
+"""把各角色的业务输入交给统一 LLM Provider，并规定结构化输出。"""
 
 from config import settings
 from models.risk import (
@@ -179,15 +165,9 @@ def generate_structured_risk(
     attempt: int = 1,
     llm_calls: list[LLMCallMetadata] | None = None,
 ) -> dict:
-    """准备 Analyzer 请求。
+    """准备 Analyzer 的结构化请求。"""
 
-    ``review_context`` 是当前条款、规则、关联条款、Memory 和证据约束；
-    ``attempt`` 表示当前第几次结构化生成，测试时可用它选择模拟输出；
-    ``llm_calls`` 是 Provider 追加记录的审计列表，不会写进提示词。
-
-    ``operation="analyze_risk"`` 是选择 Analyzer 专属提示词的关键。
-    """
-
+    # 上游已扫描合同中的指令特征。命中后在 Provider 之前终止，不发送正文。
     prompt_security = review_context.get("prompt_security")
     if isinstance(prompt_security, dict) and prompt_security.get("detected") is True:
         signal_codes = prompt_security.get("signal_codes") or []
@@ -196,12 +176,15 @@ def generate_structured_risk(
             f"({','.join(str(item) for item in signal_codes)})"
         )
 
+    # 测试可按 attempt 提供第 1/2 次模拟输出；正常运行则计算本地基线。
     debug_outputs = review_context.get("debug_llm_outputs")
     if isinstance(debug_outputs, list) and attempt <= len(debug_outputs):
         local_output = dict(debug_outputs[attempt - 1])
     else:
         local_output = _local_structured_risk(review_context)
 
+    # 这四个参数共同定义 Analyzer 角色：
+    # operation 选提示词，review_context 是可见数据，schema 是输出权限。
     return _generate_structured(
         operation="analyze_risk",
         input_payload=review_context,
@@ -217,12 +200,9 @@ def generate_structured_revision(
     local_revision: str,
     llm_calls: list[LLMCallMetadata] | None = None,
 ) -> dict:
-    """准备修改建议请求，并将输出限制为一个建议字符串。
+    """准备修改建议请求，并将输出限制为一个建议字符串。"""
 
-    ``finding`` 和 ``preferred_position`` 会进入提示词；``local_revision`` 只在
-    本地模式使用；``llm_calls`` 只记录调用。operation 会选择修改建议专属指令。
-    """
-
+    # finding/立场进入模型；local_revision 仅供本地模式直接返回。
     return _generate_structured(
         operation="generate_revision",
         input_payload={
@@ -240,12 +220,9 @@ def generate_structured_key_fields(
     local_output: dict,
     llm_calls: list[LLMCallMetadata] | None = None,
 ) -> dict:
-    """准备条款关键字段提取请求。
+    """准备条款关键字段提取请求。"""
 
-    该方法不是三角色协作节点，但与它们共用 Provider；Schema 限制模型只能返回
-    预先声明的关键字段数组。
-    """
-
+    # 它不是三角色协作节点，但复用同一 Provider 和 Schema 约束方式。
     return _generate_structured(
         operation="extract_key_fields",
         input_payload={"clause": clause},
@@ -276,12 +253,9 @@ def generate_structured_planner(
     local_output: dict,
     llm_calls: list[LLMCallMetadata] | None = None,
 ) -> dict:
-    """准备 Planner 请求。
+    """准备 Planner 的结构化请求。"""
 
-    ``planner_input`` 只含异常原因、条款白名单和重试预算；``local_output`` 是
-    本地模式直接采用的保守决定。专属 operation 和 schema 限制它不能输出风险。
-    """
-
+    # planner_input 不含合同正文；PLANNER_OUTPUT_SCHEMA 也没有风险结论字段。
     return _generate_structured(
         operation="plan_review_action",
         input_payload=planner_input,
@@ -296,12 +270,9 @@ def generate_structured_critic(
     local_output: dict,
     llm_calls: list[LLMCallMetadata] | None = None,
 ) -> dict:
-    """准备 Critic 请求。
+    """准备 Critic 的结构化请求。"""
 
-    ``critic_input`` 只含 finding、当前条款和规则；``local_output`` 是确定性
-    复核基线。专属 operation 和 schema 把输出限制为决定与原因码。
-    """
-
+    # critic_input 只有 finding/当前条款/规则；schema 只有决定与原因码。
     return _generate_structured(
         operation="criticize_risk",
         input_payload=critic_input,
@@ -318,25 +289,14 @@ def _generate_structured(
     local_output: dict,
     llm_calls: list[LLMCallMetadata] | None,
 ) -> dict:
-    """三个角色共用的 Provider 出口。
+    """通过当前任务选定的 Provider 生成一个结构化对象。"""
 
-    * ``operation``：选择角色提示词，例如 ``criticize_risk``。
-    * ``input_payload``：这个角色本次真正能看到的数据。
-    * ``output_schema``：这个角色允许返回的 JSON 形状。
-    * ``local_output``：不开 DeepSeek 时返回的确定性结果。
-    * ``llm_calls``：只用于追加 token、耗时和错误等审计信息。
-
-    DeepSeek 模式的数据流：
-
-    A ``operation + input_payload + output_schema``
-    -> B ``PromptService.build_prompt_package``
-    -> C ``system/user 两条消息``
-    -> D ``DeepSeek HTTP 请求``
-    -> E ``response.output``。
-    """
-
-    # 模型模式由任务运行上下文决定，不允许某个角色自行选择模型。
+    # 第 1 步：模型模式来自任务上下文，不允许 Analyzer/Critic/Planner 自己切换。
     provider = create_llm_provider(settings, llm_mode=effective_llm_mode())
+
+    # 第 2 步：把角色名、可见数据、输出 Schema 和本地基线装进统一请求。
+    # openai_compatible 会继续拼 Prompt 并请求 DeepSeek；
+    # local_structured 会直接复制 local_output。
     response = provider.generate_structured(
         LLMRequest(
             operation=operation,
@@ -346,6 +306,7 @@ def _generate_structured(
         ),
         call_records=llm_calls,
     )
+    # 第 3 步：这里只拿到基础 JSON。角色自己的 service 还会继续做领域校验。
     return response.output
 
 

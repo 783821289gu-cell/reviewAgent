@@ -1,8 +1,4 @@
-"""风险、证据和 Critic 输出的领域模型与最终字段校验。
-
-提示词和 JSON Schema 负责引导模型，本文件负责最后强制执行。模型返回的普通
-dict 只有通过这里，才会变成下游可以信任的不可变对象。
-"""
+"""风险、证据和 Critic 输出的领域模型与最终字段校验。"""
 
 from dataclasses import asdict, dataclass
 from enum import StrEnum
@@ -117,16 +113,14 @@ class CriticResult:
 
 
 def validate_critic_result(payload: dict) -> CriticResult:
-    """执行 Critic 返回值的最后一道校验。
+    """执行 Critic 返回值的最后一道校验。"""
 
-    顺序是：必须为 dict -> 字段必须刚好两个 -> 值必须属于枚举 ->
-    decision/reason_code 必须是允许组合。任何额外解释或错误配对都会被拒绝。
-    """
-
+    # 第 1 步：外形必须刚好是 decision + reason_code，额外解释字段也不接收。
     if not isinstance(payload, dict):
         raise ValueError("critic result must be a dict")
     if set(payload) != {"decision", "reason_code"}:
         raise ValueError("critic result fields do not match the output whitelist")
+    # 第 2 步：把两个字符串分别转换为固定枚举。
     try:
         decision = CriticDecision(payload["decision"])
     except (TypeError, ValueError) as exc:
@@ -135,24 +129,16 @@ def validate_critic_result(payload: dict) -> CriticResult:
         reason_code = CriticReasonCode(payload["reason_code"])
     except (TypeError, ValueError) as exc:
         raise ValueError("critic reason_code is not allowed") from exc
+    # 第 3 步：检查组合，例如 PASS 不能搭配 EVIDENCE_UNSUPPORTED。
     if reason_code not in CRITIC_REASONS_BY_DECISION[decision]:
         raise ValueError("critic reason_code is not allowed for decision")
     return CriticResult(decision=decision, reason_code=reason_code)
 
 
 def validate_risk_finding(payload: dict) -> RiskFinding:
-    """执行 Analyzer 风险对象的完整领域校验。
+    """执行 Analyzer 风险对象的完整领域校验。"""
 
-    主要限制：
-
-    * 所有必填字段必须存在。
-    * 风险类型、严重度、状态和审查立场必须来自固定集合。
-    * confidence 必须是有限的 0..1 数字，布尔值不算数字。
-    * 规则 ID 必须是非空字符串列表。
-    * 理由、条款 ID、关注点和修改建议不能为空。
-    * 没有 risk_id 时只按条款 ID 与规则 ID 生成稳定 ID，不让模型随意省略。
-    """
-
+    # 第 1 步：先确认对象和所有必填字段都存在。
     if not isinstance(payload, dict):
         raise ValueError("risk finding must be a dict")
     required_fields = {
@@ -172,7 +158,7 @@ def validate_risk_finding(payload: dict) -> RiskFinding:
     if missing_fields:
         raise ValueError(f"risk finding missing fields: {', '.join(sorted(missing_fields))}")
 
-    # 先完成类型和非空检查，再验证枚举范围。
+    # 第 2 步：读取字符串、置信度和规则 ID，并完成基础类型检查。
     risk_type = _required_string(payload, "risk_type")
     severity = _required_string(payload, "severity")
     review_status = _required_string(payload, "review_status")
@@ -184,7 +170,8 @@ def validate_risk_finding(payload: dict) -> RiskFinding:
     confidence = float(confidence_value)
     matched_rule_ids = payload["matched_rule_ids"]
 
-    # 模型即使返回语义相近的新名称，也不能绕过产品定义的枚举。
+    # 第 3 步：校验固定枚举和数值范围。
+    # 模型即使返回语义相近的新名称，也不能扩展产品定义。
     if risk_type not in VALID_RISK_TYPES:
         raise ValueError(f"invalid risk_type: {risk_type}")
     if severity not in VALID_SEVERITIES:
@@ -204,6 +191,7 @@ def validate_risk_finding(payload: dict) -> RiskFinding:
     ):
         raise ValueError("matched_rule_ids must contain non-empty strings")
 
+    # 第 4 步：校验剩余文本；evidence_text 允许空字符串表示没有证据。
     risk_reason = _required_string(payload, "risk_reason")
     clause_id = _required_string(payload, "clause_id")
     evidence_text = payload["evidence_text"]
@@ -216,7 +204,8 @@ def validate_risk_finding(payload: dict) -> RiskFinding:
     ):
         raise ValueError("risk_id must be a non-empty string when provided")
 
-    # 所有检查通过后才创建不可变领域对象。
+    # 第 5 步：所有检查通过后才从普通 dict 变成不可变领域对象。
+    # 没有 risk_id 时，用 clause_id + 首个 rule_id 生成稳定 ID。
     return RiskFinding(
         risk_id=risk_id_value.strip() if risk_id_value is not None else _risk_id(payload),
         risk_type=risk_type,

@@ -349,12 +349,10 @@ def _invoke_planner(
     retry_count: int,
     failure_reason: str,
 ) -> dict:
-    """把 LangGraph 节点发现的异常转换为 Planner 工具输入。
+    """把 LangGraph 节点发现的异常转换为 Planner 工具输入。"""
 
-    Planner 看不到完整合同，只收到触发原因、当前状态、目标条款、合同条款 ID
-    白名单、重试次数和失败摘要。随后仍通过 ``invoke_tool`` 获得审计和超时控制。
-    """
-
+    # A：节点持有 clauses 的完整对象。
+    # B：Planner 只收到 clause_id 白名单，不会收到合同正文。
     return invoke_tool(
         task_id,
         tool_registry,
@@ -381,12 +379,9 @@ def _append_planner_trace(
     decision: dict,
     retry_count: int,
 ) -> None:
-    """把 Planner 决定追加到当前分支 Trace，并更新自动修复次数。
+    """把 Planner 决定追加到当前分支 Trace，并更新自动修复次数。"""
 
-    只有 RETRIEVE_AGAIN/ANALYZE_AGAIN 会消耗一次预算；转人工和终止不增加计数。
-    Trace 只记录调整字段名，不复制完整查询内容。
-    """
-
+    # 复制旧列表再追加，避免修改从 Graph State 取出的同一个列表对象。
     trace = list(review_context.get("planner_trace") or [])
     trace.append(
         {
@@ -399,6 +394,7 @@ def _append_planner_trace(
         }
     )
     review_context["planner_trace"] = trace
+    # 只有真正自动执行的动作消耗预算；转人工和终止不增加计数。
     if decision["action"] in {
         PlannerAction.RETRIEVE_AGAIN.value,
         PlannerAction.ANALYZE_AGAIN.value,
@@ -528,12 +524,9 @@ def _materialize_manual_review_candidates(
     *,
     default_failure_reason: str = "",
 ) -> list[dict]:
-    """在异常终止时合并候选、证据和已有风险，生成可供人处理的列表。
+    """合并候选、证据和已有风险，生成可供人处理的列表。"""
 
-    已通过证据校验的候选保留验证结果；未通过的候选转为人工状态；数据库已有
-    反馈的风险优先保留，避免恢复过程覆盖人的处理结果。
-    """
-
+    # 第 1 步：同一 risk_id 只保留最新证据结果，便于后面 O(1) 查找。
     latest_evidence = {}
     for result in evidence_results:
         if not isinstance(result, dict):
@@ -542,6 +535,7 @@ def _materialize_manual_review_candidates(
         if risk_id:
             latest_evidence[risk_id] = result
 
+    # 第 2 步：数据库已有风险可能含人工反馈，优先级高于重新计算的候选。
     existing_by_id = {
         str(risk.get("risk_id", "")): dict(risk)
         for risk in (existing_risks or [])
@@ -549,6 +543,7 @@ def _materialize_manual_review_candidates(
     }
     candidates = []
     included_ids = set()
+    # 第 3 步：逐条把 Analyzer 候选转换成“自动验证”或“待人工”风险。
     for finding in analysis_results:
         if not isinstance(finding, dict) or finding.get("review_status") == "NO_RISK":
             continue
@@ -556,10 +551,12 @@ def _materialize_manual_review_candidates(
         if not risk_id or risk_id in included_ids:
             continue
         if risk_id in existing_by_id:
+            # A：已有人工处理结果 -> B：原样保留，不被恢复流程覆盖。
             candidate = existing_by_id[risk_id]
         else:
             evidence_result = latest_evidence.get(risk_id)
             if evidence_result and evidence_result.get("is_valid"):
+                # A：候选 + 有效证据 -> B：带 AUTO_VERIFIED 摘要的正式候选。
                 candidate = dict(finding)
                 candidate["evidence_verification"] = _evidence_verification_summary(
                     evidence_result
@@ -567,6 +564,7 @@ def _materialize_manual_review_candidates(
                 if evidence_result.get("source_location"):
                     candidate["evidence_location"] = evidence_result["source_location"]
             else:
+                # A：候选 + 缺失/无效证据 -> B：NEED_MANUAL_REVIEW。
                 candidate = _manual_review_candidate(
                     finding,
                     evidence_result,
@@ -676,12 +674,9 @@ def _rebuild_review_context(
     embedding_cache: dict,
     retry_count: int,
 ) -> dict:
-    """执行 Planner 批准的一次重新检索，并重建 Analyzer 输入。
+    """执行 Planner 批准的一次重新检索，并重建 Analyzer 输入。"""
 
-    原条款、规则、立场和 Memory 保持不变；只有 related_clauses 根据受限的
-    query_adjustments 更新。Planner/Critic Trace 会复制到新上下文。
-    """
-
+    # 第 1 步：当前条款和规则保持不变，只把受限 query_adjustments 交给检索工具。
     current_clause = review_context["current_clause"]
     matched_rule = review_context["matched_rule"]
     related_clauses = invoke_tool(
@@ -702,6 +697,7 @@ def _rebuild_review_context(
         logs,
         step_name="planner_related_clause_retrieval",
     )
+    # 第 2 步：用新的 related_clauses 重建上下文；立场、规则和 Memory 沿用旧值。
     rebuilt = build_review_context(
         contract_type=review_context["contract_type"],
         review_position=review_context["review_position"],
@@ -710,6 +706,7 @@ def _rebuild_review_context(
         related_clauses=related_clauses,
         related_memory=list(review_context.get("related_memory") or []),
     )
+    # 第 3 步：重建只替换检索结果，已有 Planner/Critic Trace 继续向后传。
     rebuilt["planner_trace"] = list(review_context.get("planner_trace") or [])
     rebuilt["planner_retry_count"] = retry_count
     rebuilt["critic_trace"] = list(review_context.get("critic_trace") or [])

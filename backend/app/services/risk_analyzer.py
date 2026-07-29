@@ -1,23 +1,4 @@
-"""Analyzer 角色：根据“当前条款 + Playbook 规则”提出候选风险。
-
-先把它理解成合同审查里的“初审员”，而不是一个独立 Agent：
-
-* LangGraph 的 ``analyze_risk`` 节点决定什么时候调用本文件。
-* 本文件只完成一次结构化判断，没有自己的状态、记忆或工具选择循环。
-* DeepSeek 模式下，它和 Critic、Planner 共用同一个 LLM Provider，但
-  ``operation="analyze_risk"`` 会让 PromptService 使用 Analyzer 专属提示词。
-* 本地模式下不会请求 DeepSeek，而是返回 ``llm_service`` 生成的确定性结果；
-  后面的字段校验完全相同。
-
-Analyzer 专属提示词原文位于 ``prompt_service._OPERATION_INSTRUCTIONS``：
-
-    Analyze only the current clause against the supplied Playbook rule and
-    evidence constraint. A formal risk must quote evidence from the current clause.
-
-意思是：只分析当前条款，不得扩大到合同外；正式风险必须引用当前条款原文。
-最终发给 DeepSeek 的并不只有这一句话，还会自动拼上共用系统规则、输入数据和
-``RISK_OUTPUT_SCHEMA``。完整拼装过程见 ``prompt_service.build_prompt_package``。
-"""
+"""Analyzer 角色：把当前条款和命中的 Playbook 规则转换成候选风险。"""
 
 from models.risk import validate_risk_finding
 from providers.llm_provider import (
@@ -36,46 +17,12 @@ from services.prompt_service import PROMPT_VERSION
 
 
 def analyze_risk(tool_input: dict) -> dict:
-    """执行一次 Analyzer 判断，返回经过校验的 ``RiskFinding`` 字典。
-
-    ``tool_input`` 不是用户手写的提示词，而是 Tool Registry 传入的工具参数。
-    业务上真正需要的是 ``tool_input["review_context"]``；工具执行器还可能附加
-    ``_llm_call_records``，用于记录本次 DeepSeek 调用耗时、token 和错误。
-
-    ``review_context`` 的核心数据来自前面节点：
-
-    * ``current_clause``：当前正在审查的合同条款。
-    * ``matched_rule``：Playbook 检索命中的一条规则。
-    * ``review_position``：甲方或乙方审查立场。
-    * ``related_clauses``：检索到的关联条款。
-    * ``related_memory``：可以参考但不能覆盖 Playbook 的历史反馈。
-    * ``evidence_constraints``：证据必须来自哪里等硬约束。
-
-    简化示例：
-
-    输入 A::
-
-        {
-            "current_clause": {"clause_id": "CL-002", "text": "保密义务持续1年"},
-            "matched_rule": {"rule_id": "NDA-R01", "risk_type": "保密期限不足"},
-            "review_position": "甲方"
-        }
-
-    DeepSeek 候选输出 B::
-
-        {
-            "clause_id": "CL-002",
-            "risk_type": "保密期限不足",
-            "evidence_text": "保密义务持续1年",
-            "risk_reason": "期限低于规则要求",
-            ...
-        }
-
-    B 只有通过字段白名单、RiskFinding 类型校验和审查立场校验后才会返回给
-    LangGraph；否则抛出 ``LLMOutputInvalidError``，不会把半合法结果向后传。
-    """
+    """执行一次风险分析，返回通过全部校验的 ``RiskFinding`` 字典。"""
 
     # 第 1 步：只取 Analyzer 的业务输入。缺少 review_context 时不调用模型。
+    # 这里的数据由前面的 LangGraph 节点组装，例如：
+    # current_clause={"clause_id": "CL-002", "text": "保密义务持续1年"}
+    # matched_rule={"rule_id": "NDA-R01", "risk_type": "保密期限不合理"}
     review_context = tool_input.get("review_context")
     if not isinstance(review_context, dict):
         raise ValueError("review_context must be a dict")
@@ -85,8 +32,8 @@ def analyze_risk(tool_input: dict) -> dict:
     # 自行改变风险类型、规则 ID、审查立场和 Playbook 给出的修改方向。
     review_context = _with_authoritative_output_constraints(review_context)
 
-    # 这不是模型输入内容，而是工具执行器提供的审计列表。Provider 每调用一次
-    # DeepSeek，都会向列表追加一条 LLMCallMetadata。
+    # 第 3 步：取出工具执行器临时放入的审计列表。
+    # 它不会写进 Prompt；Provider 调一次 DeepSeek，就向其中追加一条调用记录。
     llm_calls = llm_call_records_from_tool_input(tool_input)
 
     last_error = None
@@ -94,7 +41,7 @@ def analyze_risk(tool_input: dict) -> dict:
     # 重试与这里的“重新生成一次结构化结果”是不同层次。
     for attempt in (1, 2):
         try:
-            # 第 3 步：进入 llm_service。它用 operation="analyze_risk" 选择
+            # 第 4 步：进入 llm_service。它用 operation="analyze_risk" 选择
             # Analyzer 专属提示词，并要求输出严格符合 RISK_OUTPUT_SCHEMA。
             candidate = generate_structured_risk(
                 review_context,
@@ -102,11 +49,13 @@ def analyze_risk(tool_input: dict) -> dict:
                 llm_calls=llm_calls,
             )
 
-            # 第 4 步：先拒绝模型偷偷增加的字段，再覆盖不能由模型决定的字段。
+            # 此时 candidate 仍只是模型给出的普通 dict，例如：
+            # {"clause_id": "CL-002", "evidence_text": "保密义务持续1年", ...}
+            # 第 5 步：先拒绝模型偷偷增加的字段，再覆盖不能由模型决定的字段。
             _validate_output_fields(candidate, RISK_OUTPUT_SCHEMA, "risk finding")
             candidate = _apply_authoritative_fields(candidate, review_context)
 
-            # 第 5 步：把普通 dict 变成领域模型做完整校验，再确认结论仍属于
+            # 第 6 步：把普通 dict 变成领域模型做完整校验，再确认结论仍属于
             # 当前条款、当前规则和当前审查立场。
             finding = validate_risk_finding(candidate)
             _validate_position_basis(finding.to_dict(), review_context)
@@ -123,14 +72,12 @@ def analyze_risk(tool_input: dict) -> dict:
 
 
 def _apply_authoritative_fields(candidate: dict, review_context: dict) -> dict:
-    """用 Playbook 权威值覆盖模型无权决定的建议方向。
-
-    DeepSeek 仍被要求输出这些字段，是为了得到固定 JSON 结构；真正返回前，
-    ``risk_focus`` 和 ``revision_suggestion`` 会以 Playbook 配置为准。
-    """
+    """用 Playbook 权威值覆盖模型无权决定的建议方向。"""
 
     normalized = dict(candidate)
     authoritative = _authoritative_fields(review_context)
+    # A: 模型可能写 risk_focus="建议延长期限"
+    # B: 返回前改成 position_config 中为当前甲/乙方配置的固定 risk_focus。
     normalized["risk_focus"] = authoritative["risk_focus"]
     normalized["revision_suggestion"] = authoritative["revision_suggestion"]
     return normalized
@@ -148,15 +95,9 @@ def _with_authoritative_output_constraints(review_context: dict) -> dict:
 
 
 def _authoritative_fields(review_context: dict) -> dict:
-    """从可信业务数据中提取 Analyzer 不得自行改变的字段。
+    """从可信业务数据中提取 Analyzer 不得自行改变的字段。"""
 
-    数据来源：
-
-    * 条款 ID 来自 ``current_clause``。
-    * 风险类型和规则 ID 来自 ``matched_rule``。
-    * 风险关注点和修改模板来自该规则当前立场的 ``position_config``。
-    """
-
+    # 审查立场来自任务创建时的选择，不允许模型把“甲方”改成“乙方”。
     review_position = str(review_context.get("review_position", "")).strip()
     if not review_position:
         raise ValueError("review_context review_position is required")
@@ -169,6 +110,9 @@ def _authoritative_fields(review_context: dict) -> dict:
     current_clause = review_context.get("current_clause")
     if not isinstance(current_clause, dict):
         raise ValueError("review_context current_clause must be a dict")
+    # 三处来源在这里合并：
+    # current_clause 提供条款 ID；matched_rule 提供规则/风险类型；
+    # position_config 提供当前立场下的关注点和修改模板。
     return {
         "risk_type": str(matched_rule.get("risk_type", "")),
         "clause_id": str(current_clause.get("clause_id", "")),
@@ -214,20 +158,11 @@ def _validate_position_basis(finding: dict, review_context: dict) -> None:
 
 
 def generate_revision(tool_input: dict) -> dict:
-    """在 Critic 通过后生成修改建议，并再次限制审查立场。
-
-    输入来自 ``criticize_risk`` LangGraph 节点：
-
-    * ``finding`` 是已经通过 Critic 的候选风险。
-    * ``preferred_position`` 是任务固定的甲方/乙方立场。
-    * ``_llm_call_records`` 是可选审计列表。
-
-    代码先确认 finding 没有偷换审查立场，再用
-    ``operation="generate_revision"`` 调用专属提示词。模型只能返回
-    ``revision_suggestion``；相关规则 ID、立场和 Memory 引用由代码补回。
-    """
+    """在 Critic 通过后生成修改建议，并再次限制审查立场。"""
 
     # 第 1 步：模型调用前确认输入完整，并阻止跨立场生成建议。
+    # A: finding.review_position="甲方", preferred_position="甲方" -> 继续
+    # B: 两者不一致 -> 直接报错，不让模型替另一方生成建议
     finding = tool_input.get("finding")
     preferred_position = str(tool_input.get("preferred_position", "")).strip()
     if not isinstance(finding, dict):
@@ -303,14 +238,12 @@ def _validate_revision_candidate(candidate: dict) -> str:
 
 
 def _validate_output_fields(candidate: dict, output_schema: dict, label: str) -> None:
-    """拒绝模型输出 Schema 白名单以外的字段。
-
-    JSON Schema 会在提示词里约束模型；这里再做一次程序校验，避免模型增加
-    ``tool_call``、伪造证据等应用没有声明的内容。
-    """
+    """拒绝模型输出 Schema 白名单以外的字段。"""
 
     if not isinstance(candidate, dict):
         raise ValueError(f"{label} must be a dict")
+    # Prompt 中的 Schema 负责引导；这里的集合差才是程序强制边界。
+    # 例如 candidate 多出 tool_call，就会出现在 unexpected_fields 中并被拒绝。
     allowed_fields = set((output_schema.get("properties") or {}).keys())
     unexpected_fields = set(candidate) - allowed_fields
     if unexpected_fields:
@@ -321,17 +254,14 @@ def _validate_output_fields(candidate: dict, output_schema: dict, label: str) ->
 
 
 def _memory_references(related_memory: list) -> list[dict]:
-    """从历史 Memory 中最多选择一条可影响建议的语义偏好。
-
-    只有 ``semantic_preference``、允许影响建议、且未因 token 预算被裁剪的
-    Memory 才会进入返回值。函数不写 Memory，也不改变原列表。
-    """
+    """从历史 Memory 中最多选择一条可影响建议的语义偏好。"""
 
     references = []
     for item in related_memory:
         if not isinstance(item, dict):
             continue
         injection = item.get("memory_injection") or {}
+        # 逐条筛选：类型不对、未授权影响建议、或已被 token 预算裁掉，均跳过。
         if item.get("memory_type") != "semantic_preference":
             continue
         if not item.get("can_influence_suggestion"):
@@ -352,5 +282,6 @@ def _memory_references(related_memory: list) -> list[dict]:
                 "trimmed": False,
             }
         )
+        # 这里只补充一个历史参考，避免多个偏好叠加后盖过 Playbook。
         break
     return references

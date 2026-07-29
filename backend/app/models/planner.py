@@ -29,6 +29,7 @@ class PlannerDecision:
 
     action: PlannerAction
     reason_code: PlannerReasonCode
+    # 目标条款和检索调整都已在 PlannerService 中通过白名单校验。
     target_clause_id: str
     query_adjustments: dict
     confidence: float
@@ -37,6 +38,7 @@ class PlannerDecision:
         """转换为 LangGraph 节点可以读取的字符串字典。"""
 
         payload = asdict(self)
+        # dataclass 中保留枚举便于代码判断；传给 LangGraph 时转换为普通字符串。
         payload["action"] = self.action.value
         payload["reason_code"] = self.reason_code.value
         return payload

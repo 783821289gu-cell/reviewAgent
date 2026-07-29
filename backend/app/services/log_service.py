@@ -150,27 +150,14 @@ def invoke_tool(
     parent_step_id: str | None = None,
     node_timeout_seconds: float | None = None,
 ):
-    """通过显式 Tool Registry 调用角色工具，并统一处理控制与审计。
+    """通过显式 Tool Registry 调用工具，并统一处理控制与审计。"""
 
-    Analyzer 节点调用时，关键数据流是：
-
-    A ``tool_name="analyze_risk", tool_input={"review_context": ...}``
-    -> B 确认工具已在 ``tool_registry`` 注册
-    -> C 复制输入并注入空的 ``_llm_call_records`` 审计列表
-    -> D 调用 ``risk_analyzer.analyze_risk(runtime_tool_input)``
-    -> E Provider 向审计列表追加 token/耗时/成本
-    -> F 本函数写入脱敏 StepLog，再把角色输出返回 LangGraph 节点。
-
-    Critic 和 Planner 使用相同外壳，只是 ``tool_name``、业务输入和工具实现不同。
-    ``_llm_call_records`` 不会进入模型提示词；角色 service 会单独取出并传给
-    Provider。原始 ``tool_input`` 不被修改，因此日志摘要也不会泄露运行字段。
-    """
-
-    # 限制 1：只能调用显式注册工具，模型不能传入任意 Python 函数名。
+    # 第 1 步：只能调用显式注册工具，模型不能传入任意 Python 函数名。
+    # 示例 A：tool_name="analyze_risk" + {"review_context": ...}
     if tool_name not in tool_registry:
         raise ValueError(f"未注册工具：{tool_name}")
 
-    # 为这次工具调用建立稳定 Trace、重试序号和幂等键。
+    # 第 2 步：为这次调用建立 Trace、重试序号和幂等键。
     execution_control = execution_control or _EXECUTION_CONTROL.get()
     resolved_step_name = step_name or tool_name
     trace_id = trace_id_for_task(task_id)
@@ -193,11 +180,13 @@ def invoke_tool(
     runtime_tool_input = tool_input
     contract = tool_contracts.get(tool_name)
     embedding_tools = {"retrieve_related_clauses", "retrieve_memory"}
-    # 只有需要运行时审计字段时才复制输入；不会污染 LangGraph 保存的原数据。
+    # 第 3 步：只有需要运行时审计字段时才复制输入。
+    # 原 tool_input 保持不变，所以 LangGraph 保存的业务数据不会混入审计列表。
     if (contract is not None and contract.calls_llm) or tool_name in embedding_tools:
         runtime_tool_input = dict(tool_input)
     if contract is not None and contract.calls_llm:
-        # 传入的是列表引用，不是提示词。Provider 会把每次调用 Metadata 追加进来。
+        # B：复制后的输入多出 _llm_call_records=[]。
+        # 它是列表引用，不是提示词；Provider 会把 token/耗时/成本追加进来。
         runtime_tool_input[LLM_CALL_RECORDS_INPUT_KEY] = llm_calls
     if tool_name in embedding_tools:
         runtime_tool_input[EMBEDDING_CALL_RECORDS_INPUT_KEY] = embedding_calls
@@ -211,7 +200,7 @@ def invoke_tool(
         retry_index=retry_index,
     )
     try:
-        # 限制 2：执行前检查取消和超时；执行期间由控制器监督节点时限。
+        # 第 4 步：执行前检查取消和超时；执行期间由控制器监督节点时限。
         if execution_control is not None:
             execution_control.before_step(resolved_step_name)
         with trace_tool_call(
@@ -222,7 +211,8 @@ def invoke_tool(
             tool_name=tool_name,
             retry_index=retry_index,
         ):
-            # 真正进入 Analyzer/Critic/Planner service 的位置。
+            # 第 5 步：这里才真正进入 Analyzer/Critic/Planner service。
+            # C：analyze_risk(runtime_tool_input) -> D：返回校验后的 RiskFinding dict。
             operation = lambda: tool_registry[tool_name](runtime_tool_input)
             operation_started = True
             output = (
@@ -242,7 +232,7 @@ def invoke_tool(
                     node_timeout_seconds,
                 )
     except Exception as exc:
-        # 失败也生成脱敏日志和调用摘要，然后原样抛给 LangGraph 节点分类处理。
+        # 第 6a 步：失败也生成脱敏日志和调用摘要，再抛给 LangGraph 分类处理。
         status = _exception_status(exc)
         token_summary = _token_cost_summary(
             tool_name,
@@ -291,7 +281,8 @@ def invoke_tool(
         )
         raise
 
-    # 成功后把角色输出摘要和 Provider Metadata 写入 StepLog，但不记录合同全文。
+    # 第 6b 步：成功后把输出摘要和 Provider Metadata 写入 StepLog。
+    # E：LangGraph 收到原 output；日志只保存摘要，不保存合同全文。
     token_summary = _token_cost_summary(tool_name, llm_calls, embedding_calls)
     success_log = StepLog(
             task_id=task_id,

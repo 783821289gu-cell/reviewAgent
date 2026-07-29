@@ -1,23 +1,4 @@
-"""Critic 角色：复核 Analyzer 的候选风险是否站得住。
-
-Critic 可以理解成“复核员”。它不重新审合同，也不生成另一份风险，只回答：
-Analyzer 的结论是否同时得到当前条款原文和当前 Playbook 规则支持。
-
-它和 Analyzer 的区别不是换了一个 DeepSeek 账号，而是四层边界都不同：
-
-* 输入更少：只看候选 finding、当前条款和命中规则。
-* 提示词不同：``operation="criticize_risk"`` 选择 Critic 专属指令。
-* 输出更少：只能返回 ``decision`` 和 ``reason_code``。
-* 权限更小：不能创建证据、规则、修改建议或调用工具。
-
-Critic 专属提示词原文位于 ``prompt_service._OPERATION_INSTRUCTIONS``：
-
-    Check whether the Analyzer finding is supported by the supplied current
-    clause and Playbook rule. Return only a decision and reason code. Do not
-    create evidence, clauses, rules, revisions, severities, findings, or tool calls.
-
-因此它属于同一工作流里的独立“角色判断”，不是拥有独立状态和工具循环的 Agent。
-"""
+"""Critic 角色：复核 Analyzer 的候选风险是否同时有原文和规则支持。"""
 
 import re
 
@@ -44,34 +25,12 @@ class CriticOutputInvalidError(LLMOutputInvalidError):
 
 
 def criticize_risk(tool_input: dict) -> dict:
-    """执行一次 Critic 复核，只返回决定和原因码。
-
-    ``tool_input`` 来自 Tool Registry，核心参数是：
-
-    * ``finding``：Analyzer 已经生成并校验过的候选风险。
-    * ``current_clause``：候选风险声称对应的合同条款。
-    * ``matched_rule``：Analyzer 使用的 Playbook 规则。
-    * ``_llm_call_records``：可选审计列表，不属于提示词业务内容。
-
-    数据示例：
-
-    输入 A::
-
-        finding.evidence_text = "保密义务持续1年"
-        current_clause.text = "保密义务持续1年"
-        matched_rule.rule_id = "NDA-R01"
-
-    输出 B 只能是类似::
-
-        {"decision": "PASS",
-         "reason_code": "SUPPORTED_BY_EVIDENCE_AND_PLAYBOOK"}
-
-    Critic 不会返回修改后的 finding。LangGraph 节点收到 PASS 后，才会另外调用
-    ``generate_revision``；所以“Critic 通过”和“生成修改建议”是两个动作。
-    """
+    """执行一次 Critic 复核，只返回决定和原因码。"""
 
     # 第 1 步：验证输入并主动裁掉 Critic 不需要看的字段。
     # 角色隔离不仅靠提示词，也靠代码控制它能看到的数据。
+    # 输入示例：finding.evidence_text="保密义务持续1年"，
+    # current_clause.text="保密义务持续1年"，matched_rule.rule_id="NDA-R01"。
     critic_input = _validated_critic_input(tool_input)
 
     # 第 2 步：先用确定性规则算一份本地结果。
@@ -105,7 +64,9 @@ def criticize_risk(tool_input: dict) -> dict:
                 llm_calls=llm_calls,
             )
 
-            # 即使 DeepSeek 给出更多解释文字也不会接收；最终只能保留固定枚举。
+            # 即使 DeepSeek 给出更多解释文字也不会接收；最终只能变成：
+            # {"decision": "PASS",
+            #  "reason_code": "SUPPORTED_BY_EVIDENCE_AND_PLAYBOOK"}
             return validate_critic_result(candidate).to_dict()
         except LLMProviderError as exc:
             last_error = exc
@@ -119,11 +80,7 @@ def criticize_risk(tool_input: dict) -> dict:
 
 
 def _validated_critic_input(tool_input: dict) -> dict:
-    """验证并缩小 Critic 可见数据范围。
-
-    Analyzer 的完整 finding 可能还有严重程度、置信度、修改建议和 Memory。
-    Critic 不需要这些字段，因此这里只保留判断“结论是否有依据”所需的六项。
-    """
+    """验证输入，并缩小 Critic 能看到的数据范围。"""
 
     if not isinstance(tool_input, dict):
         raise ValueError("critic input must be a dict")
@@ -137,12 +94,15 @@ def _validated_critic_input(tool_input: dict) -> dict:
     if not isinstance(matched_rule, dict):
         raise ValueError("critic matched_rule must be a dict")
 
+    # 先确保 Analyzer finding 本身完整合法，再从中裁字段。
     validated_finding = validate_risk_finding(finding).to_dict()
     clause_id = _required_string(current_clause, "clause_id", "current_clause")
     clause_text = _required_string(current_clause, "text", "current_clause")
     rule_id = _required_string(matched_rule, "rule_id", "matched_rule")
     risk_type = _required_string(matched_rule, "risk_type", "matched_rule")
     check_point = _required_string(matched_rule, "check_point", "matched_rule")
+    # Analyzer finding 原本还有 severity、confidence、revision_suggestion、Memory。
+    # 返回的新 dict 不含这些数据，Critic 只能判断“结论是否有依据”。
     return {
         "finding": {
             field_name: validated_finding[field_name]
@@ -165,11 +125,7 @@ def _validated_critic_input(tool_input: dict) -> dict:
 
 
 def _local_critic_result(critic_input: dict) -> dict:
-    """不调用外部模型时使用的确定性复核顺序。
-
-    顺序是：条款 ID -> 原文证据 -> Playbook 对应关系 -> 理由是否同时关联
-    证据和规则。任何一步失败都不会让 Critic 自己修结果。
-    """
+    """不调用外部模型时，按固定顺序复核候选风险。"""
 
     finding = critic_input["finding"]
     current_clause = critic_input["current_clause"]
@@ -214,12 +170,10 @@ def _result(decision: CriticDecision, reason_code: CriticReasonCode) -> dict:
 
 
 def _reason_supports_evidence(risk_reason: str, evidence_text: str) -> bool:
-    """本地模式检查风险理由与证据至少共享两个可比较词。
+    """本地模式检查风险理由与证据至少共享两个可比较词。"""
 
-    这是低成本的最低关联检查，不等同于语义证明；不满足时会转人工，而不是
-    让本地规则擅自补写理由。
-    """
-
+    # 这里只做最低关联检查，不把关键词重合冒充语义证明。
+    # 不满足时上层会转人工，而不是在这里擅自补写理由。
     reason_terms = _terms(risk_reason)
     evidence_terms = _terms(evidence_text)
     return bool(reason_terms and evidence_terms and len(reason_terms & evidence_terms) >= 2)
