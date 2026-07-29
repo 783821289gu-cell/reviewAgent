@@ -349,6 +349,12 @@ def _invoke_planner(
     retry_count: int,
     failure_reason: str,
 ) -> dict:
+    """把 LangGraph 节点发现的异常转换为 Planner 工具输入。
+
+    Planner 看不到完整合同，只收到触发原因、当前状态、目标条款、合同条款 ID
+    白名单、重试次数和失败摘要。随后仍通过 ``invoke_tool`` 获得审计和超时控制。
+    """
+
     return invoke_tool(
         task_id,
         tool_registry,
@@ -375,6 +381,12 @@ def _append_planner_trace(
     decision: dict,
     retry_count: int,
 ) -> None:
+    """把 Planner 决定追加到当前分支 Trace，并更新自动修复次数。
+
+    只有 RETRIEVE_AGAIN/ANALYZE_AGAIN 会消耗一次预算；转人工和终止不增加计数。
+    Trace 只记录调整字段名，不复制完整查询内容。
+    """
+
     trace = list(review_context.get("planner_trace") or [])
     trace.append(
         {
@@ -401,6 +413,8 @@ def _append_critic_trace(
     finding: dict,
     critic_result: dict,
 ) -> None:
+    """记录 Critic 对哪条风险做了什么决定，不修改 Analyzer finding。"""
+
     trace = list(review_context.get("critic_trace") or [])
     trace.append(
         {
@@ -413,6 +427,8 @@ def _append_critic_trace(
 
 
 def _planner_retry_count(review_contexts: list[dict]) -> int:
+    """恢复任务时取所有上下文中的最大 Planner 重试次数。"""
+
     counts = [
         int(context.get("planner_retry_count", 0))
         for context in review_contexts
@@ -467,6 +483,8 @@ def _analysis_result_key(finding: dict) -> str:
 
 
 def _evidence_verification_summary(evidence_result: dict) -> dict:
+    """把 Evidence Verifier 输出转换为前端和风险对象使用的统一摘要。"""
+
     is_valid = bool(evidence_result.get("is_valid"))
     return {
         "status": "AUTO_VERIFIED" if is_valid else "AUTO_VERIFICATION_FAILED",
@@ -483,6 +501,8 @@ def _manual_review_candidate(
     *,
     failure_reason: str = "",
 ) -> dict:
+    """保留 Analyzer 候选，但明确标记为待人工处理且默认不进入报告。"""
+
     candidate = dict(finding)
     candidate["review_status"] = "NEED_MANUAL_REVIEW"
     candidate.setdefault("include_in_report", False)
@@ -508,6 +528,12 @@ def _materialize_manual_review_candidates(
     *,
     default_failure_reason: str = "",
 ) -> list[dict]:
+    """在异常终止时合并候选、证据和已有风险，生成可供人处理的列表。
+
+    已通过证据校验的候选保留验证结果；未通过的候选转为人工状态；数据库已有
+    反馈的风险优先保留，避免恢复过程覆盖人的处理结果。
+    """
+
     latest_evidence = {}
     for result in evidence_results:
         if not isinstance(result, dict):
@@ -636,6 +662,8 @@ def _retrieval_is_insufficient(
     review_context: dict,
     clauses: list[dict],
 ) -> bool:
+    """合同存在其他条款但相关条款检索为空时，触发 Planner 判断。"""
+
     return len(clauses) > 1 and not list(review_context.get("related_clauses") or [])
 
 
@@ -648,6 +676,12 @@ def _rebuild_review_context(
     embedding_cache: dict,
     retry_count: int,
 ) -> dict:
+    """执行 Planner 批准的一次重新检索，并重建 Analyzer 输入。
+
+    原条款、规则、立场和 Memory 保持不变；只有 related_clauses 根据受限的
+    query_adjustments 更新。Planner/Critic Trace 会复制到新上下文。
+    """
+
     current_clause = review_context["current_clause"]
     matched_rule = review_context["matched_rule"]
     related_clauses = invoke_tool(
@@ -683,6 +717,8 @@ def _rebuild_review_context(
 
 
 def _evidence_planner_reason(evidence_result: dict) -> PlannerReasonCode:
+    """把证据失败细分为分析冲突或普通证据缺失，决定 Planner 动作白名单。"""
+
     failure_reason = str(evidence_result.get("failure_reason", ""))
     if failure_reason in {
         "risk_type does not match matched rule",
@@ -694,6 +730,8 @@ def _evidence_planner_reason(evidence_result: dict) -> PlannerReasonCode:
 
 
 def _is_low_confidence(finding: dict) -> bool:
+    """判断 Analyzer 置信度是否低于固定阈值 0.7；非法值按低置信度处理。"""
+
     try:
         confidence = float(finding.get("confidence", 0))
     except (TypeError, ValueError):
@@ -702,6 +740,8 @@ def _is_low_confidence(finding: dict) -> bool:
 
 
 def _requires_manual_review(finding: dict) -> bool:
+    """高风险、显式人工状态或低置信度任一满足时要求人工复核。"""
+
     if finding.get("review_status") == "NEED_MANUAL_REVIEW":
         return True
     if finding.get("severity") == "高":

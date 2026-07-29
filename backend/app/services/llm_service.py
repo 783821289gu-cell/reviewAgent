@@ -217,6 +217,12 @@ def generate_structured_revision(
     local_revision: str,
     llm_calls: list[LLMCallMetadata] | None = None,
 ) -> dict:
+    """准备修改建议请求，并将输出限制为一个建议字符串。
+
+    ``finding`` 和 ``preferred_position`` 会进入提示词；``local_revision`` 只在
+    本地模式使用；``llm_calls`` 只记录调用。operation 会选择修改建议专属指令。
+    """
+
     return _generate_structured(
         operation="generate_revision",
         input_payload={
@@ -234,6 +240,12 @@ def generate_structured_key_fields(
     local_output: dict,
     llm_calls: list[LLMCallMetadata] | None = None,
 ) -> dict:
+    """准备条款关键字段提取请求。
+
+    该方法不是三角色协作节点，但与它们共用 Provider；Schema 限制模型只能返回
+    预先声明的关键字段数组。
+    """
+
     return _generate_structured(
         operation="extract_key_fields",
         input_payload={"clause": clause},
@@ -248,6 +260,8 @@ def generate_structured_contract_type(
     local_output: dict,
     llm_calls: list[LLMCallMetadata] | None = None,
 ) -> dict:
+    """准备合同类型分类请求，限制类型、决定和置信度的可选范围。"""
+
     return _generate_structured(
         operation="classify_contract_type",
         input_payload={"document_texts": document_texts},
@@ -336,12 +350,19 @@ def _generate_structured(
 
 
 def _local_structured_risk(review_context: dict) -> dict:
+    """不开 DeepSeek 时，根据规则和关键词生成完整 RiskFinding。
 
+    它与真实模型使用相同输出 Schema，因此后续 Analyzer 校验链不需要分叉。
+    这里的结果是确定性基线，不会在 DeepSeek 模式下替代模型答案。
+    """
+
+    # 从上下文提取当前条款、当前规则和立场配置。
     clause = review_context.get("current_clause") or {}
     rule = review_context.get("matched_rule") or {}
     review_position, position_config = _position_config(review_context, rule)
     risk_type = str(rule.get("risk_type", ""))
     clause_text = str(clause.get("text", ""))
+    # 按风险类型寻找最小原文证据，再由证据和规则决定状态/置信度/理由。
     evidence_text = _detect_evidence(risk_type, clause_text)
     review_status = _review_status(position_config, evidence_text)
 
@@ -361,6 +382,12 @@ def _local_structured_risk(review_context: dict) -> dict:
 
 
 def _detect_evidence(risk_type: str, clause_text: str) -> str:
+    """按风险类型在当前条款中寻找可引用的原文片段。
+
+    返回空字符串表示本地规则未发现证据；返回值始终来自 ``clause_text``，
+    不会生成合同中不存在的句子。
+    """
+
     text = clause_text.lower()
     if risk_type == "保密信息范围过宽" and _contains_any(text, BROAD_DEFINITION_TERMS):
         return _sentence_with_term(clause_text, BROAD_DEFINITION_TERMS)
@@ -383,6 +410,8 @@ def _detect_evidence(risk_type: str, clause_text: str) -> str:
 
 
 def _review_status(position_config: dict, evidence_text: str) -> str:
+    """根据是否有证据和规则默认等级给出本地审查状态。"""
+
     if not evidence_text:
         return "NO_RISK"
     if position_config.get("severity_default") == "高":
@@ -391,6 +420,12 @@ def _review_status(position_config: dict, evidence_text: str) -> str:
 
 
 def _confidence(review_status: str, evidence_text: str) -> float:
+    """为本地确定性结果分配固定置信度。
+
+    这些数值不是模型概率：无风险为 0.72；有足够长度证据为 0.86；过短证据
+    为 0.62。DeepSeek 模式的 confidence 由模型输出后再校验 0..1 范围。
+    """
+
     if review_status == "NO_RISK":
         return 0.72
     return 0.86 if len(evidence_text) >= 6 else 0.62
@@ -402,6 +437,8 @@ def _risk_reason(
     review_position: str,
     position_config: dict,
 ) -> str:
+    """用证据、Playbook 检查点和审查立场拼出可追踪的本地风险理由。"""
+
     position_basis = f"{review_position}立场风险重点：{position_config.get('risk_focus', '')}"
     if not evidence_text:
         return f"未在当前条款中发现触发“{rule.get('risk_type', '')}”的明确证据；{position_basis}。"
@@ -412,6 +449,12 @@ def _risk_reason(
 
 
 def _position_config(review_context: dict, rule: dict) -> tuple[str, dict]:
+    """读取并校验当前立场的 Playbook 配置。
+
+    规则立场必须与任务立场相同，且默认等级、风险关注点和修改模板都必须存在；
+    任一条件不满足都在生成 finding 前失败。
+    """
+
     review_position = str(review_context.get("review_position", "")).strip()
     if not review_position:
         raise ValueError("review_context review_position is required")
@@ -428,10 +471,14 @@ def _position_config(review_context: dict, rule: dict) -> tuple[str, dict]:
 
 
 def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
+    """判断文本是否包含任一关键词，比较时忽略关键词大小写。"""
+
     return any(term.lower() in text for term in terms)
 
 
 def _sentence_with_term(clause_text: str, terms: tuple[str, ...]) -> str:
+    """返回第一句包含触发词的合同原文，最长保留 180 个字符。"""
+
     separators = ("。", "；", ";", ".")
     sentences = [clause_text]
     for separator in separators:
@@ -446,4 +493,6 @@ def _sentence_with_term(clause_text: str, terms: tuple[str, ...]) -> str:
 
 
 def _short_text(text: str) -> str:
+    """清理文本并限制为 180 字，防止本地证据片段无限扩张。"""
+
     return str(text or "").strip()[:180]

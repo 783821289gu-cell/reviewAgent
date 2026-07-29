@@ -208,16 +208,26 @@ def _local_critic_result(critic_input: dict) -> dict:
 
 
 def _result(decision: CriticDecision, reason_code: CriticReasonCode) -> dict:
+    """把内部枚举转换为 Critic 输出 Schema 要求的两个字符串字段。"""
+
     return {"decision": decision.value, "reason_code": reason_code.value}
 
 
 def _reason_supports_evidence(risk_reason: str, evidence_text: str) -> bool:
+    """本地模式检查风险理由与证据至少共享两个可比较词。
+
+    这是低成本的最低关联检查，不等同于语义证明；不满足时会转人工，而不是
+    让本地规则擅自补写理由。
+    """
+
     reason_terms = _terms(risk_reason)
     evidence_terms = _terms(evidence_text)
     return bool(reason_terms and evidence_terms and len(reason_terms & evidence_terms) >= 2)
 
 
 def _reason_supports_playbook(risk_reason: str, matched_rule: dict) -> bool:
+    """本地模式检查风险理由是否与规则类型/检查点存在最低文字关联。"""
+
     reason_terms = _terms(risk_reason)
     playbook_terms = _terms(
         f"{matched_rule.get('risk_type', '')} {matched_rule.get('check_point', '')}"
@@ -236,6 +246,8 @@ def _terms(text: str) -> set[str]:
 
 
 def _required_string(payload: dict, field_name: str, label: str) -> str:
+    """读取必填字符串；为空时在调用模型前直接拒绝输入。"""
+
     value = payload.get(field_name)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"critic {label} {field_name} must be a non-empty string")

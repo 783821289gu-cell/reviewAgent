@@ -128,10 +128,14 @@ class ToolExecutionControl:
 
 
 def bind_execution_control(control: ToolExecutionControl) -> Token:
+    """把当前任务的取消、超时和重试控制绑定到并发上下文。"""
+
     return _EXECUTION_CONTROL.set(control)
 
 
 def reset_execution_control(token: Token) -> None:
+    """任务结束后恢复之前的执行控制，避免并发任务互相影响。"""
+
     _EXECUTION_CONTROL.reset(token)
 
 
@@ -146,9 +150,27 @@ def invoke_tool(
     parent_step_id: str | None = None,
     node_timeout_seconds: float | None = None,
 ):
+    """通过显式 Tool Registry 调用角色工具，并统一处理控制与审计。
+
+    Analyzer 节点调用时，关键数据流是：
+
+    A ``tool_name="analyze_risk", tool_input={"review_context": ...}``
+    -> B 确认工具已在 ``tool_registry`` 注册
+    -> C 复制输入并注入空的 ``_llm_call_records`` 审计列表
+    -> D 调用 ``risk_analyzer.analyze_risk(runtime_tool_input)``
+    -> E Provider 向审计列表追加 token/耗时/成本
+    -> F 本函数写入脱敏 StepLog，再把角色输出返回 LangGraph 节点。
+
+    Critic 和 Planner 使用相同外壳，只是 ``tool_name``、业务输入和工具实现不同。
+    ``_llm_call_records`` 不会进入模型提示词；角色 service 会单独取出并传给
+    Provider。原始 ``tool_input`` 不被修改，因此日志摘要也不会泄露运行字段。
+    """
+
+    # 限制 1：只能调用显式注册工具，模型不能传入任意 Python 函数名。
     if tool_name not in tool_registry:
         raise ValueError(f"未注册工具：{tool_name}")
 
+    # 为这次工具调用建立稳定 Trace、重试序号和幂等键。
     execution_control = execution_control or _EXECUTION_CONTROL.get()
     resolved_step_name = step_name or tool_name
     trace_id = trace_id_for_task(task_id)
@@ -171,9 +193,11 @@ def invoke_tool(
     runtime_tool_input = tool_input
     contract = tool_contracts.get(tool_name)
     embedding_tools = {"retrieve_related_clauses", "retrieve_memory"}
+    # 只有需要运行时审计字段时才复制输入；不会污染 LangGraph 保存的原数据。
     if (contract is not None and contract.calls_llm) or tool_name in embedding_tools:
         runtime_tool_input = dict(tool_input)
     if contract is not None and contract.calls_llm:
+        # 传入的是列表引用，不是提示词。Provider 会把每次调用 Metadata 追加进来。
         runtime_tool_input[LLM_CALL_RECORDS_INPUT_KEY] = llm_calls
     if tool_name in embedding_tools:
         runtime_tool_input[EMBEDDING_CALL_RECORDS_INPUT_KEY] = embedding_calls
@@ -187,6 +211,7 @@ def invoke_tool(
         retry_index=retry_index,
     )
     try:
+        # 限制 2：执行前检查取消和超时；执行期间由控制器监督节点时限。
         if execution_control is not None:
             execution_control.before_step(resolved_step_name)
         with trace_tool_call(
@@ -197,6 +222,7 @@ def invoke_tool(
             tool_name=tool_name,
             retry_index=retry_index,
         ):
+            # 真正进入 Analyzer/Critic/Planner service 的位置。
             operation = lambda: tool_registry[tool_name](runtime_tool_input)
             operation_started = True
             output = (
@@ -216,6 +242,7 @@ def invoke_tool(
                     node_timeout_seconds,
                 )
     except Exception as exc:
+        # 失败也生成脱敏日志和调用摘要，然后原样抛给 LangGraph 节点分类处理。
         status = _exception_status(exc)
         token_summary = _token_cost_summary(
             tool_name,
@@ -264,6 +291,7 @@ def invoke_tool(
         )
         raise
 
+    # 成功后把角色输出摘要和 Provider Metadata 写入 StepLog，但不记录合同全文。
     token_summary = _token_cost_summary(tool_name, llm_calls, embedding_calls)
     success_log = StepLog(
             task_id=task_id,
@@ -304,6 +332,8 @@ def invoke_tool(
 
 
 def _elapsed_ms(start: float) -> int:
+    """计算工具调用耗时并保证结果不为负数。"""
+
     return max(0, int((perf_counter() - start) * 1000))
 
 
@@ -311,6 +341,8 @@ def _retry_index(
     tool_input: dict,
     execution_control: ToolExecutionControl | None,
 ) -> int:
+    """合并任务级恢复次数与 Planner 分支重试次数，取较大值用于审计。"""
+
     execution_retry = (
         execution_control.execution_retry_index
         if execution_control is not None
@@ -323,6 +355,8 @@ def _retry_index(
 
 
 def _exception_status(exc: Exception) -> str:
+    """把异常映射为 cancelled、timeout 或 failed 三种稳定日志状态。"""
+
     if isinstance(exc, TaskCancelledError):
         return "cancelled"
     if isinstance(exc, (NodeExecutionTimeoutError, TaskExecutionTimeoutError)):
@@ -337,6 +371,12 @@ def _decision_idempotency_key(
     tool_input: dict,
     retry_index: int,
 ) -> str:
+    """为 Analyzer/Critic/Planner 等决策工具生成稳定幂等键。
+
+    只使用任务 ID、条款/规则 ID、输入指纹和重试次数；正文与失败详情先哈希，
+    不直接放进键。相同决策输入可被 Trace 识别，避免把重复执行当成新结论。
+    """
+
     if tool_name not in IDEMPOTENT_DECISION_TOOLS:
         return ""
     finding = tool_input.get("finding") if isinstance(tool_input.get("finding"), dict) else {}
@@ -392,6 +432,8 @@ def _decision_idempotency_key(
 
 
 def _canonical_identity_value(value):
+    """递归排序幂等键输入，使字典键顺序不同也产生相同指纹。"""
+
     if isinstance(value, dict):
         return {
             str(key): _canonical_identity_value(child)
@@ -405,6 +447,8 @@ def _canonical_identity_value(value):
 
 
 def _identity_digest(value) -> str:
+    """对规范化身份数据计算 SHA-256，避免在幂等键中暴露正文。"""
+
     canonical = json.dumps(
         _canonical_identity_value(value),
         ensure_ascii=False,
@@ -423,6 +467,11 @@ def _trace_summary(
     *,
     embedding_calls: list[EmbeddingCallMetadata] | None = None,
 ) -> dict:
+    """汇总输入来源、版本、Provider 和角色决定，供 Agent Trace 展示。
+
+    这里只保留字段名、模型元数据和结构化决定，不保存完整合同或 Prompt。
+    """
+
     provider_trace = _provider_trace(token_summary)
     if embedding_calls:
         provider_trace = _provider_trace(
@@ -459,6 +508,8 @@ def _trace_summary(
 
 
 def _runtime_versions(tool_input: dict) -> dict:
+    """记录本次决定使用的 Prompt、模型、Embedding、Playbook 和代码版本。"""
+
     review_context = (
         tool_input.get("review_context")
         if isinstance(tool_input.get("review_context"), dict)
@@ -484,6 +535,8 @@ def _runtime_versions(tool_input: dict) -> dict:
 
 
 def _token_allocation(tool_input: dict) -> dict:
+    """从 review_context 读取上下文裁剪前后 token 分配，不重新计算。"""
+
     review_context = tool_input.get("review_context")
     if not isinstance(review_context, dict):
         return {}
@@ -499,6 +552,8 @@ def _token_allocation(tool_input: dict) -> dict:
 
 
 def _decision_trace(tool_name: str, output) -> dict:
+    """按工具类型抽取最小可解释决定，不把完整输出复制到 Trace。"""
+
     if not isinstance(output, (dict, list)):
         return {}
     if tool_name == "plan_review_action" and isinstance(output, dict):
@@ -673,6 +728,11 @@ def _annotation_version() -> str:
 
 
 def _summarize_input(tool_input: dict) -> str:
+    """生成脱敏输入摘要。
+
+    合同正文只记录长度或 ID；密钥、授权头、Prompt 和长文本不会原样写日志。
+    """
+
     if {
         "trigger_reason",
         "current_status",
@@ -776,6 +836,8 @@ def _is_sensitive_key(key: str) -> bool:
 
 
 def _safe_error_message(exc: Exception, tool_input: dict | None = None) -> str:
+    """生成最多 300 字的脱敏错误信息，并移除输入中的敏感长文本。"""
+
     redacted_message = _redact_secrets(str(exc)).strip()
     message = redacted_message.splitlines()[0] if redacted_message else ""
     for sensitive_value in _sensitive_input_strings(tool_input or {}):
@@ -816,6 +878,8 @@ def _redact_secrets(value: str) -> str:
 
 
 def _summarize_output(output) -> str:
+    """生成角色决定或检索结果摘要，不记录完整风险和合同内容。"""
+
     if isinstance(output, list):
         if output and isinstance(output[0], dict) and "rerank_score" in output[0]:
             query_context = output[0].get("query_context") or {}
@@ -855,6 +919,12 @@ def _token_cost_summary(
     *,
     result_not_adopted: bool = False,
 ) -> str:
+    """把 LLM/Embedding 调用记录转换为 StepLog 的 token 与成本摘要。
+
+    本地模式明确标记“无外部模型”；真实模式保留 Metadata；模型尚未调用或超时
+    后结果未采用也分别记录，避免界面误报为成功使用 DeepSeek。
+    """
+
     if tool_name in {"retrieve_related_clauses", "retrieve_memory"}:
         if embedding_calls:
             if all(

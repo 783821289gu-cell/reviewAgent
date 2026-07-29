@@ -214,6 +214,20 @@ def _validate_position_basis(finding: dict, review_context: dict) -> None:
 
 
 def generate_revision(tool_input: dict) -> dict:
+    """在 Critic 通过后生成修改建议，并再次限制审查立场。
+
+    输入来自 ``criticize_risk`` LangGraph 节点：
+
+    * ``finding`` 是已经通过 Critic 的候选风险。
+    * ``preferred_position`` 是任务固定的甲方/乙方立场。
+    * ``_llm_call_records`` 是可选审计列表。
+
+    代码先确认 finding 没有偷换审查立场，再用
+    ``operation="generate_revision"`` 调用专属提示词。模型只能返回
+    ``revision_suggestion``；相关规则 ID、立场和 Memory 引用由代码补回。
+    """
+
+    # 第 1 步：模型调用前确认输入完整，并阻止跨立场生成建议。
     finding = tool_input.get("finding")
     preferred_position = str(tool_input.get("preferred_position", "")).strip()
     if not isinstance(finding, dict):
@@ -225,6 +239,7 @@ def generate_revision(tool_input: dict) -> dict:
         raise ValueError("preferred_position does not match finding review_position")
     llm_calls = llm_call_records_from_tool_input(tool_input)
 
+    # 第 2 步：准备本地模式使用的建议。真实 DeepSeek 模式不会拿它覆盖模型。
     local_revision = str(finding.get("revision_suggestion", "")).strip()
     if not local_revision:
         local_revision = (
@@ -236,6 +251,7 @@ def generate_revision(tool_input: dict) -> dict:
     revision_text = ""
     for _attempt in (1, 2):
         try:
+            # 第 3 步：生成结果只能符合 REVISION_OUTPUT_SCHEMA。
             candidate = generate_structured_revision(
                 finding,
                 preferred_position,
@@ -243,6 +259,7 @@ def generate_revision(tool_input: dict) -> dict:
                 llm_calls=llm_calls,
             )
             _validate_output_fields(candidate, REVISION_OUTPUT_SCHEMA, "revision output")
+            # 第 4 步：拒绝空字符串或非字符串建议。
             revision_text = _validate_revision_candidate(candidate)
             break
         except LLMProviderError as exc:
@@ -256,6 +273,8 @@ def generate_revision(tool_input: dict) -> dict:
     if not revision_text:
         raise LLMOutputInvalidError(f"revision output invalid: {last_error}")
 
+    # 第 5 步：Memory 只能在满足类型、生命周期和裁剪条件时补充一条参考，
+    # 不允许覆盖 Playbook 已确定的规则与审查立场。
     memory_references = _memory_references(finding.get("related_memory") or [])
     if memory_references:
         reference = memory_references[0]
@@ -273,6 +292,8 @@ def generate_revision(tool_input: dict) -> dict:
 
 
 def _validate_revision_candidate(candidate: dict) -> str:
+    """确认修改建议是包含非空文本的对象，并返回清理后的文本。"""
+
     if not isinstance(candidate, dict):
         raise ValueError("revision output must be a dict")
     revision_text = candidate.get("revision_suggestion")
@@ -282,6 +303,12 @@ def _validate_revision_candidate(candidate: dict) -> str:
 
 
 def _validate_output_fields(candidate: dict, output_schema: dict, label: str) -> None:
+    """拒绝模型输出 Schema 白名单以外的字段。
+
+    JSON Schema 会在提示词里约束模型；这里再做一次程序校验，避免模型增加
+    ``tool_call``、伪造证据等应用没有声明的内容。
+    """
+
     if not isinstance(candidate, dict):
         raise ValueError(f"{label} must be a dict")
     allowed_fields = set((output_schema.get("properties") or {}).keys())
@@ -294,6 +321,12 @@ def _validate_output_fields(candidate: dict, output_schema: dict, label: str) ->
 
 
 def _memory_references(related_memory: list) -> list[dict]:
+    """从历史 Memory 中最多选择一条可影响建议的语义偏好。
+
+    只有 ``semantic_preference``、允许影响建议、且未因 token 预算被裁剪的
+    Memory 才会进入返回值。函数不写 Memory，也不改变原列表。
+    """
+
     references = []
     for item in related_memory:
         if not isinstance(item, dict):

@@ -240,6 +240,12 @@ def build_prompt_package(
 
 
 def prompt_token_report(prompt: PromptPackage) -> dict:
+    """计算整份提示词和各数据类别的 token 占用。
+
+    ``prompt_tokens`` 用于发送前的总预算校验；``category_tokens`` 用于 Trace
+    显示规则、合同、关联条款、Memory 等分别消耗多少。它不修改提示词。
+    """
+
     return {
         "tokenizer_model": DEEPSEEK_TOKENIZER_MODEL,
         "tokenizer_revision": DEEPSEEK_TOKENIZER_REVISION,
@@ -253,6 +259,12 @@ def prompt_token_report(prompt: PromptPackage) -> dict:
 
 
 def serialize_deepseek_messages(messages: list[dict]) -> str:
+    """按 DeepSeek 模板串联 system/user 消息，供本地 tokenizer 估算 token。
+
+    HTTP 请求仍发送 ``messages`` 数组；这里的字符串只用于得到与模型模板更接近
+    的预算值。消息数量或角色顺序不符合预期时直接拒绝。
+    """
+
     if len(messages) != 2:
         raise ValueError("DeepSeek prompt must contain one system and one user message")
     system_message, user_message = messages
@@ -269,12 +281,20 @@ def serialize_deepseek_messages(messages: list[dict]) -> str:
 
 
 def count_deepseek_tokens(text: str) -> int:
+    """使用固定版本、固定哈希的 DeepSeek tokenizer 计算 token 数。"""
+
     if not isinstance(text, str):
         raise ValueError("tokenized value must be a string")
     return len(_deepseek_tokenizer().encode(text).ids)
 
 
 def detect_prompt_injection(*untrusted_values) -> dict:
+    """在调用模型前扫描合同、finding 等不可信数据中的指令特征。
+
+    参数可以是嵌套字典或列表；函数递归提取字符串并匹配固定模式。发现信号只
+    返回代码和处理策略，不执行合同中的任何命令。
+    """
+
     signal_codes = set()
     for value in untrusted_values:
         for text in _iter_strings(value):
@@ -289,6 +309,11 @@ def detect_prompt_injection(*untrusted_values) -> dict:
 
 
 def schema_example(schema: dict):
+    """递归地从 JSON Schema 生成最小合法示例，放入 system message。
+
+    示例用于告诉模型期望形状，不作为真实业务结果，也不会绕过返回值校验。
+    """
+
     enum_values = schema.get("enum")
     if isinstance(enum_values, list) and enum_values:
         return enum_values[0]
@@ -382,6 +407,12 @@ def _input_sections(operation: str, input_payload: dict) -> dict:
 
 
 def _allowed_values(input_payload: dict, output_schema: dict) -> dict:
+    """从输入和 Schema 生成模型可选值白名单。
+
+    Planner 的动作和目标条款、Analyzer 的风险类型/状态都通过这里进入 system
+    message；``tool_names`` 固定为空，明确禁止模型生成工具调用。
+    """
+
     properties = output_schema.get("properties") or {}
     current_clause = input_payload.get("current_clause") or {}
     clause_id = str(current_clause.get("clause_id", "")).strip()
@@ -401,16 +432,22 @@ def _allowed_values(input_payload: dict, output_schema: dict) -> dict:
 
 
 def _enum_values(schema) -> list:
+    """安全读取 Schema 的枚举列表；结构不合法时返回空列表。"""
+
     if not isinstance(schema, dict) or not isinstance(schema.get("enum"), list):
         return []
     return list(schema["enum"])
 
 
 def _dict_value(value) -> dict:
+    """只接受字典并复制一份，其他类型统一转为空约束。"""
+
     return dict(value) if isinstance(value, dict) else {}
 
 
 def _iter_strings(value):
+    """递归遍历嵌套输入中的键和值，供 Prompt Injection 扫描使用。"""
+
     if isinstance(value, dict):
         for key, child_value in value.items():
             yield str(key)
@@ -423,11 +460,19 @@ def _iter_strings(value):
 
 
 def _json_text(value) -> str:
+    """稳定序列化提示词 JSON，保留中文并固定键顺序以便复现和计数。"""
+
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
 @lru_cache(maxsize=1)
 def _deepseek_tokenizer() -> Tokenizer:
+    """加载一次本地 tokenizer，并先验证文件哈希未被替换。
+
+    tokenizer 位于项目数据目录；哈希不一致会阻止继续估算，避免用错误词表产生
+    虚假的 token 预算。
+    """
+
     tokenizer_bytes = DEEPSEEK_TOKENIZER_PATH.read_bytes()
     actual_hash = hashlib.sha256(tokenizer_bytes).hexdigest()
     if actual_hash != DEEPSEEK_TOKENIZER_SHA256:

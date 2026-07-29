@@ -352,6 +352,8 @@ def _validated_query_adjustments(value, require_adjustment: bool) -> dict:
 
 
 def _non_negative_int(value, field_name: str) -> int:
+    """校验重试计数必须是非负整数，避免布尔值被当作 0/1 接受。"""
+
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"planner {field_name} must be a non-negative integer")
     return value
