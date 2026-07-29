@@ -1,3 +1,24 @@
+"""Critic 角色：复核 Analyzer 的候选风险是否站得住。
+
+Critic 可以理解成“复核员”。它不重新审合同，也不生成另一份风险，只回答：
+Analyzer 的结论是否同时得到当前条款原文和当前 Playbook 规则支持。
+
+它和 Analyzer 的区别不是换了一个 DeepSeek 账号，而是四层边界都不同：
+
+* 输入更少：只看候选 finding、当前条款和命中规则。
+* 提示词不同：``operation="criticize_risk"`` 选择 Critic 专属指令。
+* 输出更少：只能返回 ``decision`` 和 ``reason_code``。
+* 权限更小：不能创建证据、规则、修改建议或调用工具。
+
+Critic 专属提示词原文位于 ``prompt_service._OPERATION_INSTRUCTIONS``：
+
+    Check whether the Analyzer finding is supported by the supplied current
+    clause and Playbook rule. Return only a decision and reason code. Do not
+    create evidence, clauses, rules, revisions, severities, findings, or tool calls.
+
+因此它属于同一工作流里的独立“角色判断”，不是拥有独立状态和工具循环的 Agent。
+"""
+
 import re
 
 from models.risk import (
@@ -17,13 +38,49 @@ from services.prompt_service import detect_prompt_injection
 
 
 class CriticOutputInvalidError(LLMOutputInvalidError):
+    """DeepSeek 返回内容无法满足 Critic 固定输出结构。"""
+
     pass
 
 
 def criticize_risk(tool_input: dict) -> dict:
+    """执行一次 Critic 复核，只返回决定和原因码。
+
+    ``tool_input`` 来自 Tool Registry，核心参数是：
+
+    * ``finding``：Analyzer 已经生成并校验过的候选风险。
+    * ``current_clause``：候选风险声称对应的合同条款。
+    * ``matched_rule``：Analyzer 使用的 Playbook 规则。
+    * ``_llm_call_records``：可选审计列表，不属于提示词业务内容。
+
+    数据示例：
+
+    输入 A::
+
+        finding.evidence_text = "保密义务持续1年"
+        current_clause.text = "保密义务持续1年"
+        matched_rule.rule_id = "NDA-R01"
+
+    输出 B 只能是类似::
+
+        {"decision": "PASS",
+         "reason_code": "SUPPORTED_BY_EVIDENCE_AND_PLAYBOOK"}
+
+    Critic 不会返回修改后的 finding。LangGraph 节点收到 PASS 后，才会另外调用
+    ``generate_revision``；所以“Critic 通过”和“生成修改建议”是两个动作。
+    """
+
+    # 第 1 步：验证输入并主动裁掉 Critic 不需要看的字段。
+    # 角色隔离不仅靠提示词，也靠代码控制它能看到的数据。
     critic_input = _validated_critic_input(tool_input)
+
+    # 第 2 步：先用确定性规则算一份本地结果。
+    # local_structured 模式直接使用它；DeepSeek 模式不会拿它替代模型答案，
+    # 只是因为两种 Provider 共用 LLMRequest，所以这里统一准备该字段。
     local_output = _local_critic_result(critic_input)
 
+    # 第 3 步：合同原文是不可信数据。若发现“忽略系统规则”等注入特征，
+    # 不再把内容发给模型，直接转人工复核。
     prompt_security = detect_prompt_injection(
         critic_input["finding"],
         critic_input["current_clause"],
@@ -36,15 +93,19 @@ def criticize_risk(tool_input: dict) -> dict:
             }
         ).to_dict()
 
+    # 第 4 步：取得审计列表。它只记录 LLM 调用，不改变 Critic 的判断。
     llm_calls = llm_call_records_from_tool_input(tool_input)
     last_error = None
     for _attempt in (1, 2):
         try:
+            # operation="criticize_risk" 会选中本文件顶部列出的专属提示词。
             candidate = generate_structured_critic(
                 critic_input,
                 local_output,
                 llm_calls=llm_calls,
             )
+
+            # 即使 DeepSeek 给出更多解释文字也不会接收；最终只能保留固定枚举。
             return validate_critic_result(candidate).to_dict()
         except LLMProviderError as exc:
             last_error = exc
@@ -58,6 +119,12 @@ def criticize_risk(tool_input: dict) -> dict:
 
 
 def _validated_critic_input(tool_input: dict) -> dict:
+    """验证并缩小 Critic 可见数据范围。
+
+    Analyzer 的完整 finding 可能还有严重程度、置信度、修改建议和 Memory。
+    Critic 不需要这些字段，因此这里只保留判断“结论是否有依据”所需的六项。
+    """
+
     if not isinstance(tool_input, dict):
         raise ValueError("critic input must be a dict")
     finding = tool_input.get("finding")
@@ -98,20 +165,34 @@ def _validated_critic_input(tool_input: dict) -> dict:
 
 
 def _local_critic_result(critic_input: dict) -> dict:
+    """不调用外部模型时使用的确定性复核顺序。
+
+    顺序是：条款 ID -> 原文证据 -> Playbook 对应关系 -> 理由是否同时关联
+    证据和规则。任何一步失败都不会让 Critic 自己修结果。
+    """
+
     finding = critic_input["finding"]
     current_clause = critic_input["current_clause"]
     matched_rule = critic_input["matched_rule"]
 
+    # 候选风险指向了别的条款。
     if finding["clause_id"] != current_clause["clause_id"]:
         return _result(CriticDecision.REJECT, CriticReasonCode.CLAUSE_MISMATCH)
+
+    # 候选引用的证据为空，或不是当前条款的原文片段。
     evidence_text = finding["evidence_text"].strip()
     if not evidence_text or evidence_text not in current_clause["text"]:
         return _result(CriticDecision.REJECT, CriticReasonCode.EVIDENCE_UNSUPPORTED)
+
+    # 候选风险类型或规则 ID 与当前 Playbook 命中不一致。
     if (
         finding["risk_type"] != matched_rule["risk_type"]
         or finding["matched_rule_ids"] != [matched_rule["rule_id"]]
     ):
         return _result(CriticDecision.REJECT, CriticReasonCode.PLAYBOOK_MISMATCH)
+
+    # ID 和原文虽然能对上，但风险理由与证据/规则的文字关系仍不清楚。
+    # 这种情况不武断拒绝，而是要求人工判断。
     if (
         not _reason_supports_evidence(finding["risk_reason"], evidence_text)
         or not _reason_supports_playbook(finding["risk_reason"], matched_rule)
@@ -145,6 +226,8 @@ def _reason_supports_playbook(risk_reason: str, matched_rule: dict) -> bool:
 
 
 def _terms(text: str) -> set[str]:
+    """把中英文文本变成可比较的词集合，供本地基线做最小关联检查。"""
+
     normalized = str(text or "").lower()
     terms = set(re.findall(r"[a-z0-9]{3,}", normalized))
     for sequence in re.findall(r"[\u4e00-\u9fff]{2,}", normalized):

@@ -1,3 +1,25 @@
+"""Planner 角色：流程出现指定异常时，从白名单中选择下一步。
+
+Planner 不是风险分析者，也不是整个 LangGraph 的总指挥。正常路径
+``Analyzer -> Critic -> Evidence Verifier`` 不需要它；只有低置信度、证据缺失、
+检索不足等代码已经识别出的异常，节点才会调用 ``plan_review_action``。
+
+它的权限可以概括为“提建议，不执行”：
+
+* 可以选择 RETRIEVE_AGAIN、ANALYZE_AGAIN、REQUEST_HUMAN_REVIEW、TERMINATE。
+* 不能直接调用检索或 Analyzer，也不能跳转到任意 LangGraph 节点。
+* 返回后仍由节点代码检查白名单、重试预算和目标条款，再决定是否执行。
+
+Planner 专属提示词原文位于 ``prompt_service._OPERATION_INSTRUCTIONS``：
+
+    Choose exactly one allowed planner action for the supplied trigger. Do not
+    call tools, create findings, change Playbook rules, or target a clause
+    outside the whitelist.
+
+Analyzer、Critic、Planner 共用 DeepSeek Provider 和系统安全规则，但通过不同
+``operation`` 获得不同角色提示词、不同输入数据和不同 JSON 输出结构。
+"""
+
 from models.planner import PlannerAction, PlannerDecision, PlannerReasonCode
 from models.review import ReviewStatus
 from providers.llm_provider import (
@@ -9,11 +31,16 @@ from providers.llm_provider import (
 from services.llm_service import PLANNER_OUTPUT_SCHEMA, generate_structured_planner
 
 
+# Planner 最多批准同一分支进行一次“重新检索/重新分析”。
 MAX_PLANNER_RETRIES = 1
+# 重新检索时，Planner 最多补充 5 个关键词，每个不超过 40 个字符。
 MAX_QUERY_KEYWORDS = 5
 MAX_QUERY_KEYWORD_LENGTH = 40
+# 即使模型输出其他检索参数，也会被下面的校验拒绝。
 ALLOWED_QUERY_ADJUSTMENTS = {"additional_keywords", "top_k"}
 
+# 不同异常原因拥有不同动作白名单。
+# 例如证据缺失可以重新检索，但不能直接要求“重新分析”来绕过证据问题。
 ALLOWED_ACTIONS_BY_REASON = {
     PlannerReasonCode.LOW_CONFIDENCE: {
         PlannerAction.ANALYZE_AGAIN,
@@ -41,6 +68,7 @@ ALLOWED_ACTIONS_BY_REASON = {
     },
 }
 
+# Planner 只能在这些业务状态下处理对应异常，不能在任意阶段介入。
 ALLOWED_STATUSES_BY_REASON = {
     PlannerReasonCode.LOW_CONFIDENCE: {ReviewStatus.RISK_ANALYZED.value},
     PlannerReasonCode.EVIDENCE_MISSING: {ReviewStatus.RISK_ANALYZED.value},
@@ -57,6 +85,8 @@ ALLOWED_STATUSES_BY_REASON = {
     },
 }
 
+# 本地模式在重新检索时使用的固定补充词；DeepSeek 模式也会收到允许调整范围，
+# 但输出仍必须通过相同的关键词数量和 top_k 校验。
 _RETRIEVAL_KEYWORDS = {
     PlannerReasonCode.EVIDENCE_MISSING: ["原文证据", "相关条款", "同义表达"],
     PlannerReasonCode.RETRIEVAL_INSUFFICIENT: ["相关条款", "同义表达", "交叉引用"],
@@ -65,22 +95,74 @@ _RETRIEVAL_KEYWORDS = {
 
 
 class PlannerOutputInvalidError(LLMOutputInvalidError):
+    """Planner 返回了白名单外或结构不合法的决定。"""
+
     pass
 
 
 def plan_review_action(tool_input: dict) -> dict:
+    """让 Planner 对一次已识别异常给出受控决定。
+
+    ``tool_input`` 来自发生异常的 LangGraph 节点，而不是完整合同上下文：
+
+    * ``trigger_reason``：为什么现在需要 Planner。
+    * ``current_status``：异常发生时任务处于哪个业务状态。
+    * ``target_clause_id``：本次只能处理哪条条款。
+    * ``contract_clause_ids``：当前合同真实存在的条款 ID 白名单。
+    * ``retry_count``：这条风险已经修复过几次。
+    * ``failure_reason``：给 Planner 看的简短失败摘要，最多保留 160 字。
+    * ``_llm_call_records``：工具执行器附带的调用审计列表。
+
+    示例输入 A::
+
+        {
+            "trigger_reason": "EVIDENCE_MISSING",
+            "current_status": "RISK_ANALYZED",
+            "target_clause_id": "CL-002",
+            "contract_clause_ids": ["CL-001", "CL-002"],
+            "retry_count": 0,
+            "failure_reason": "证据文本不在当前条款中"
+        }
+
+    允许输出 B::
+
+        {
+            "action": "RETRIEVE_AGAIN",
+            "reason_code": "EVIDENCE_MISSING",
+            "target_clause_id": "CL-002",
+            "query_adjustments": {
+                "additional_keywords": ["原文证据", "相关条款"],
+                "top_k": 5
+            },
+            "confidence": 0.9
+        }
+
+    B 不会自己执行。调用它的 LangGraph 节点看到 ``RETRIEVE_AGAIN`` 后，才把
+    ``query_adjustments`` 写入分支状态并路由到 ``repair_retrieval``。
+    """
+
+    # 第 1 步：先在调用模型前验证触发原因、业务状态、条款范围和重试次数。
     planner_input = _validated_planner_input(tool_input)
+
+    # LLM 调用审计列表不进入 Planner 业务判断。
     llm_calls = llm_call_records_from_tool_input(tool_input)
+
+    # 本地确定性决策供 local_structured 模式使用。DeepSeek 模式不会拿它替代
+    # 模型答案，只是两种 Provider 共用同一个 LLMRequest 接口。
     local_output = _local_decision(planner_input)
 
     last_error = None
     for _attempt in (1, 2):
         try:
+            # operation="plan_review_action" 会选择 Planner 专属提示词和
+            # PLANNER_OUTPUT_SCHEMA，而不是 Analyzer/Critic 的提示词。
             candidate = generate_structured_planner(
                 planner_input,
                 local_output,
                 llm_calls=llm_calls,
             )
+
+            # 模型只负责提出候选决定；代码再次执行完整权限校验。
             return _validate_decision(candidate, planner_input).to_dict()
         except LLMProviderError as exc:
             last_error = exc
@@ -94,6 +176,8 @@ def plan_review_action(tool_input: dict) -> dict:
 
 
 def _validated_planner_input(tool_input: dict) -> dict:
+    """把节点传入的数据整理成 Planner 可见且可相信的最小输入。"""
+
     if not isinstance(tool_input, dict):
         raise ValueError("planner input must be a dict")
     try:
@@ -121,6 +205,8 @@ def _validated_planner_input(tool_input: dict) -> dict:
     if retry_count > MAX_PLANNER_RETRIES:
         raise ValueError("planner retry_count exceeds retry budget")
 
+    # allowed_actions 会作为提示词中的白名单发给 DeepSeek。
+    # 模型看不到白名单外动作，返回后仍会再检查一次。
     allowed_actions = sorted(
         action.value for action in ALLOWED_ACTIONS_BY_REASON[reason_code]
     )
@@ -138,6 +224,11 @@ def _validated_planner_input(tool_input: dict) -> dict:
 
 
 def _local_decision(planner_input: dict) -> dict:
+    """本地模式的保守策略：有预算就重检索，否则转人工。
+
+    它不会因为“看起来可以”就无限循环。一次预算用完后，不再批准自动修复。
+    """
+
     reason_code = PlannerReasonCode(planner_input["trigger_reason"])
     retry_count = planner_input["retry_count"]
     if (
@@ -164,6 +255,12 @@ def _local_decision(planner_input: dict) -> dict:
 
 
 def _validate_decision(candidate: dict, planner_input: dict) -> PlannerDecision:
+    """验证模型没有越权，并转换成不可变的 ``PlannerDecision``。
+
+    这里是 Planner 真正的权限边界：提示词只是告诉模型应该怎么做，本函数负责
+    保证模型即使不听话也无法越过动作、原因、条款和重试预算白名单。
+    """
+
     if not isinstance(candidate, dict):
         raise ValueError("planner decision must be a dict")
     expected_fields = set(PLANNER_OUTPUT_SCHEMA["properties"])
@@ -220,6 +317,8 @@ def _validate_decision(candidate: dict, planner_input: dict) -> PlannerDecision:
 
 
 def _validated_query_adjustments(value, require_adjustment: bool) -> dict:
+    """只接受关键词和 top_k 两种检索调整，拒绝模型添加的任意参数。"""
+
     if not isinstance(value, dict):
         raise ValueError("planner query_adjustments must be a dict")
     unexpected = set(value) - ALLOWED_QUERY_ADJUSTMENTS
