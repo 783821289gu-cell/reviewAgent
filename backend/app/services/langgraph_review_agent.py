@@ -120,6 +120,23 @@ class _ReviewRuntime:
 
     Graph State 适合传少量流程数据。这个工具箱保存体积更大的内容，例如文件
     字节、解析后的合同和数据库状态。节点通过 ``runtime.context`` 取得它。
+
+    三层数据不要混淆：
+
+    * ``graph_state``：LangGraph 在节点之间传递的流程字段。
+    * ``_ReviewRuntime``：同一次任务执行期间共用，进程结束后不作为真相源。
+    * ``AgentState``：从 PostgreSQL 读取并通过 EventStore 更新的完整业务状态。
+
+    教学示例中的变化顺序：
+
+    A：刚创建时 ``document=None, clauses_payload=[]``。
+    B：解析后 ``document=ContractDocument(...)``。
+    C：拆条款后 ``clauses_payload=[{"clause_id": "CL-002", ...}]``。
+    D：构建上下文后 ``review_contexts=[{"context_id": "CL-002:R2", ...}]``。
+    E：分支完成后 ``branch_results={0: {"outcome": "verified", ...}}``。
+
+    B 到 E 都会在相应主图节点完成时同步写入 PostgreSQL，Runtime 只是减少同一
+    次执行中的重复查询和对象重建。
     """
 
     # 当前执行这些步骤的 Agent 对象。
@@ -148,8 +165,9 @@ class _ReviewRuntime:
 class ReviewOrchestratorAgent(ReviewAgentSupport):
     """整个审查流程的总负责人。
 
-    ``_graph`` 负责实际审查。``_control_graph`` 负责人工复核的暂停和继续。
-    两张图分开后，Checkpoint 只保存暂停位置，不复制整份合同。
+    ``_graph`` 是主图，内部又调用风险子图；``_control_graph`` 是控制图。
+    三张图的结构在 ``review_workflow.py`` 定义，这里提供节点实现和执行入口。
+    两类顶层图分开后，Checkpoint 只保存控制图暂停位置，不复制整份合同。
     """
 
     def __init__(
@@ -176,9 +194,12 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         self._related_clause_retriever = related_clause_retriever
         self._memory_store = memory_store
         self._context_pipeline = ReviewContextPipeline(self._batch_executor)
-        # 把 self 传进去，表示图中的 parse_document 节点会调用
-        # self.parse_document，其他同名节点也是如此。
+        # 此处只构建和编译图，不执行合同：
+        # handlers=self 表示图中的 "parse_document" 节点实际调用
+        # self.parse_document；其他节点同理。
         self._graph = build_review_graph(self, _ReviewRuntime)
+        # 控制图单独编译并接入 Checkpointer，因此只有控制图支持 interrupt 后
+        # 跨调用恢复；主图的阶段结果通过 EventStore 写入业务数据库。
         self._control_graph = build_review_control_graph(
             self,
             _ReviewRuntime,
@@ -370,15 +391,28 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     ) -> AgentState:
         """用户处理一条风险后，尝试继续之前暂停的流程。
 
-        ``snapshot`` 是 LangGraph 保存的暂停现场。
-        如果现场里没有 ``interrupt``，说明流程没有暂停，直接返回即可。
-        如果有，就用 ``Command(resume=...)`` 唤醒同一个任务。
+        调用来源是反馈接口：接口先把采纳/忽略结果写入 PostgreSQL，再调用本
+        方法。这里不保存反馈，只负责检查和恢复控制图。
+
+        数据流示例：
+
+        A：Checkpoint 中 ``pending_risk_ids=["R1", "R2"]``，节点暂停在
+        ``await_human_review``。
+        B：反馈接口把 R1 的 ``user_action`` 写入业务数据库。
+        C：本方法用 ``get_state`` 读取 A，确认存在 interrupt，然后构造
+        ``Command(resume={"risk_id": "R1", ...})``。
+        D：控制图恢复并重新查询业务数据库，得到 ``pending_risk_ids=["R2"]``。
+
+        如果 Checkpoint 里没有 interrupt，说明控制图没有处于等待状态，直接
+        返回数据库中的当前任务，不会凭空启动一次恢复。
         """
 
+        # 业务状态来自 app schema；它与 langgraph schema 中的书签是两份数据。
         current = self.event_store.get_task(task_id)
         if current is None:
             raise ValueError(f"task not found: {task_id}")
         config = self._control_config(task_id, current)
+        # get_state 根据 thread_id=task_id 读取控制图 Checkpoint，只读不修改。
         snapshot = self._control_graph.get_state(config)
         interrupts = [
             item
@@ -389,6 +423,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
             return current
         execution_owner = self._acquire_execution(task_id)
         try:
+            # Command 不是节点。它是交给已编译控制图的恢复指令。
             self.run(
                 task_id,
                 b"",
@@ -414,15 +449,26 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     ) -> None:
         """一份合同的总执行入口。
 
+        这是 Worker 执行审查和反馈接口恢复控制图时共用的总入口。
+
         新任务会这样走：
 
         1. 从数据库取出任务。
         2. 创建本次执行的工具箱 ``runtime``。
-        3. 运行合同审查主图。
-        4. 有风险待人工处理就暂停，否则结束。
+        3. 控制图以 ``phase=execute`` 运行一次，只记录控制阶段。
+        4. 运行合同审查主图；主图内部通过 Send 调用风险子图。
+        5. 重新读取数据库；有风险待人工处理就让控制图暂停，否则结束。
 
         人工反馈后再次进入这里时，``control_input`` 是 Command。
         这时只继续暂停的控制图，不会重新解析合同。
+
+        初始数据示例：
+
+        A：PostgreSQL ``AgentState(status=START)`` + 上传字节 ``content``。
+        B：构造成 ``_ReviewRuntime(state=A, content=content)``。
+        C：主图逐步把文档、条款、规则和风险写回 PostgreSQL。
+        D：若状态为 ``HUMAN_REVIEW_PENDING``，控制图将待处理 ID 写入
+        Checkpoint 并在 ``interrupt`` 处暂停。
         """
 
         # resolved_owner 是本次执行的唯一编号。
@@ -433,6 +479,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
             resolved_owner,
         ):
             return
+        # AgentState 是本次执行的业务起点，来源是 PostgreSQL app schema。
         state = self.event_store.get_task(task_id)
         if state is None:
             self.event_store.release_execution(task_id, resolved_owner)
@@ -445,6 +492,7 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
             node_timeout_seconds=self.node_timeout_seconds,
             execution_retry_index=state.recovery_count,
         )
+        # Runtime 只在本次调用中共享，不替代 PostgreSQL 持久化。
         runtime = _ReviewRuntime(
             agent=self,
             task_id=task_id,
@@ -476,15 +524,19 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         )
         try:
             if isinstance(control_input, Command):
-                # 这是人工反馈后的调用：从书签位置继续。
+                # 人工反馈后的路径：反馈已落库，只恢复控制图，不运行主图。
                 self._stream_control(runtime, control_input)
             else:
-                # 这是第一次执行：先记录“正在执行”，再跑完整主图。
+                # 新任务路径：
+                # 控制状态 A={"phase": "execute"} -> checkpoint_phase -> END。
+                # 这一步不会处理合同；随后才由 Python 显式启动完整主图。
                 self._stream_control(
                     runtime,
                     self._control_state(runtime.state, "execute"),
                 )
                 self._execute_business_graph(runtime)
+                # 主图已经通过 EventStore 落库，所以必须重新读取，不能继续使用
+                # 启动主图前的 runtime.state 来判断是否需要人工复核。
                 current = self.event_store.get_task(task_id)
                 if current is None:
                     raise ValueError(
@@ -497,7 +549,8 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
                     and pending_risk_ids
                     else "complete"
                 )
-                # 仍有风险没处理时，下一行会暂停在 await_human_review。
+                # 输入 A={"phase": "human_review", pending=["R1"]} 时，下一行
+                # 在 await_human_review 中 interrupt；输入 complete 时直接 END。
                 self._stream_control(
                     runtime,
                     self._control_state(current, phase),
@@ -588,9 +641,14 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         graph_state: ReviewControlState,
         runtime,
     ) -> dict:
-        """让控制图经过一个可以保存书签的步骤。
+        """让控制图经过一个可被 Checkpointer 记录的阶段边界。
 
-        返回空字典表示不修改 State。LangGraph 仍会记录这个步骤已经执行。
+        输入可能是 ``{"phase": "execute"}``、``human_review`` 或 ``complete``。
+        本方法返回 ``{}``，所以 A 和 B 的业务字段完全相同；变化只发生在
+        LangGraph 内部：节点游标从 START 前进到 ``checkpoint_phase`` 之后。
+
+        本方法不查询业务数据库，也不修改任务。正式环境的节点游标由
+        PostgresSaver 自动写入 PostgreSQL ``langgraph`` schema。
         """
 
         return {}
@@ -601,6 +659,16 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         ``initial_state`` 是交给第一个节点的初始工作单。
         ``stream_mode="updates"`` 表示每完成一个节点就返回一次变化。
         因此前端不用等整份合同结束，能逐步看到风险处理数量。
+
+        数据流示例：
+
+        A：``{"task_id": "task_1", "terminal": False, "risk_results": []}``。
+        B：``build_context`` 增加 ``risk_items``。
+        C：Send 为每项调用风险子图，逐项返回 ``risk_results``。
+        D：``aggregate_risks`` 汇总并通过 EventStore 写入 PostgreSQL。
+
+        主图没有 Checkpointer。可恢复数据来自各节点已经写入的业务状态，而
+        不是 LangGraph 主图书签。
         """
 
         # 主图启动时只需要任务编号、停止标记和空结果列表。
@@ -615,8 +683,10 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
             config={"max_concurrency": self._batch_width(context.state)},
             stream_mode="updates",
         ):
-            # update 的 key 是刚完成的节点名。
-            # 这里只读取 risk_subgraph，因为它能提供“第几条风险完成”的进度。
+            # update 示例：
+            # {"risk_subgraph": {"risk_results": [{"index": 0, ...}]}}
+            # 这里只消费分支完成事件来更新进度；业务汇总仍由 aggregate_risks
+            # 完成，不能把这个流式 update 当成最终数据库结果。
             risk_update = update.get("risk_subgraph")
             if not isinstance(risk_update, dict):
                 continue
@@ -630,16 +700,34 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     ) -> dict:
         """有未处理风险时暂停，等用户在界面上处理。
 
-        ``interrupt`` 类似“保存并退出”。传入的字典告诉外部正在等哪些风险。
-        用户提交反馈后，``Command(resume=...)`` 会让这个方法重新执行。
+        本方法是 ``interrupt`` 真正出现的位置，也是控制图唯一会暂停的节点。
+
+        第一次进入：
+
+        A：从 PostgreSQL 读取风险，得到 ``pending_risk_ids=["R1", "R2"]``。
+        B：调用 ``interrupt({...})``；Checkpointer 保存控制状态、当前节点和
+        interrupt 负载，当前 ``_stream_control`` 调用停止。
+
+        用户反馈后：
+
+        C：反馈接口先把 R1 的 ``user_action`` 写入 PostgreSQL。
+        D：``Command(resume)`` 恢复本节点；代码重新读取数据库，得到
+        ``pending_risk_ids=["R2"]``。
+        E：返回 ``phase=human_review`` 后控制图再次进入本节点并暂停；当列表
+        为空时返回 ``phase=complete``，控制图走到 END。
+
+        Checkpoint 只存书签和待处理 ID；风险正文和反馈仍存业务数据库。
         """
 
         context = runtime.context
+        # 不使用 graph_state 中可能过期的 pending 列表，始终查询业务真相源。
         current = self.event_store.get_task(context.task_id)
         if current is None:
             raise ValueError(f"task not found during human review: {context.task_id}")
         pending_risk_ids = self._pending_risk_ids(current)
         if pending_risk_ids:
+            # interrupt 会暂停当前图调用。返回值只有 Command(resume) 到达后才
+            # 继续向下执行，因此下面的数据库重读发生在“恢复之后”。
             interrupt(
                 {
                     "task_id": context.task_id,
@@ -664,7 +752,13 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         }
 
     def bootstrap(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """主图的起点：确认任务已进入“上传完成”状态。"""
+        """主图起点：把数据库任务从 START 推进到 UPLOAD_RECEIVED。
+
+        数据来源：``context.state``，它由 ``run`` 从 PostgreSQL 读取。
+        数据变化：A ``status=START`` -> B ``status=UPLOAD_RECEIVED``。
+        存储位置：B 通过 EventStore 立即写回 PostgreSQL；Graph State 只返回
+        ``{"terminal": False}``，通知主图可以继续到文档解析。
+        """
 
         context = runtime.context
         if context.state.status == ReviewStatus.START:
@@ -679,8 +773,20 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     def parse_document(self, graph_state: ReviewGraphState, runtime) -> dict:
         """把 PDF/DOCX 变成程序可以处理的文档对象。
 
-        ``_before`` 用来判断这一步以前是否完成。
-        已完成时直接使用数据库结果，恢复任务不会重复解析文件。
+        数据来源：
+
+        * 文件名和类型来自 PostgreSQL ``AgentState``。
+        * 原始字节来自 Worker 传入的 ``context.content``。
+        * 恢复执行时，如果数据库已有 document，就不再依赖原始字节重做解析。
+
+        数据变化示例：
+
+        A：``content=<PDF bytes>, document=None``。
+        B：``document={"blocks": [...], "full_text": "...", ...}``。
+
+        B 同时放入 ``context.document`` 供后续节点直接使用，并通过 EventStore
+        以 ``DOCUMENT_PARSED`` 状态写入 PostgreSQL。Graph State 仍只返回
+        ``terminal=False``。
         """
 
         context = runtime.context
@@ -697,6 +803,8 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
                 message="正在解析合同文档。",
                 tool_name="parse_document",
             )
+            # parse_document 是 Tool Registry 中的显式工具；返回的是领域文档
+            # 对象，不是 LangGraph State。下方 update_task 才负责持久化。
             context.document = invoke_tool(
                 context.task_id,
                 tool_registry,
@@ -736,7 +844,16 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     def classify_contract(self, graph_state: ReviewGraphState, runtime) -> dict:
         """判断上传文件是不是目前支持的 NDA 合同。
 
-        不是 NDA 时返回 ``terminal=True``。后面的条款和风险节点就不会执行。
+        数据来源：前一节点写入 ``context.document`` 的文档文本。
+        数据变化示例：
+
+        A：``contract_type=""``。
+        B：工具返回 ``{"contract_type": "NDA", "confidence": 0.98, ...}``，
+        Runtime 变为 ``contract_type="NDA"``，数据库状态变为
+        ``CONTRACT_TYPE_CLASSIFIED``。
+
+        如果返回不支持类型或需要人工判断，本节点把真实终态写入 PostgreSQL，
+        再返回 ``terminal=True``；主图 guarded edge 因此直接走 END。
         """
 
         context = runtime.context
@@ -823,7 +940,19 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     def structure_clauses(self, graph_state: ReviewGraphState, runtime) -> dict:
         """把整份合同拆成一条条带编号的条款。
 
-        后面的检索、风险和证据都使用同一个 ``clause_id`` 指向原文。
+        数据来源：``context.document``。
+        先调用 ``extract_clauses`` 拆条款，再为每条调用
+        ``extract_key_fields`` 抽取结构化字段。
+
+        数据变化示例：
+
+        A：文档正文 ``"第二条 保密义务持续1年"``。
+        B：``{"clause_id": "CL-002", "clause_type": "保密期限",
+        "text": "保密义务持续1年", "key_fields": {"duration": "1年"}}``。
+
+        B 写入 ``context.clauses``/``clauses_payload``，并以
+        ``CLAUSES_STRUCTURED`` 状态写入 PostgreSQL。后面的规则、风险和证据
+        都用同一个 ``clause_id`` 关联回原文。
         """
 
         context = runtime.context
@@ -912,7 +1041,20 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"terminal": False}
 
     def retrieve_playbook(self, graph_state: ReviewGraphState, runtime) -> dict:
-        """为每条合同条款查找需要遵守的 Playbook 审查规则。"""
+        """为每条合同条款查找需要遵守的 Playbook 审查规则。
+
+        数据来源：``context.clauses``、已识别合同类型和数据库中的审查立场。
+        每条条款调用一次 ``retrieve_playbook_rules``。
+
+        数据变化示例：
+
+        A：``CL-002 + 保密期限 + 甲方``。
+        B：``{"clause_id": "CL-002", "matched_rules":
+        [{"rule_id": "NDA-R002", "risk_type": "保密期限不合理"}]}``。
+
+        全部 B 放入 ``context.rule_matches``，并以 ``PLAYBOOK_RETRIEVED`` 状态
+        写入 PostgreSQL；失败则写入真实的 ``RETRIEVAL_FAILED`` 终态。
+        """
 
         context = runtime.context
         state = context.state
@@ -1022,8 +1164,23 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     def build_context(self, graph_state: ReviewGraphState, runtime) -> dict:
         """把“当前条款 + 命中规则 + 相关条款 + Memory”装成模型输入。
 
-        每组输入叫一个 ``review_context``。
-        完成后再把它们转成 ``risk_items``，交给 Send 分别处理。
+        数据来源：
+
+        * 当前条款来自 ``context.clauses_payload``。
+        * 命中规则来自 ``context.rule_matches``。
+        * 相关条款由检索器查询 PostgreSQL/pgvector。
+        * Memory 由 Memory Store 查询 PostgreSQL。
+
+        数据变化示例：
+
+        A：``CL-002 + NDA-R002``。
+        B：``review_context={"context_id": "CL-002:NDA-R002",
+        "current_clause": {...}, "matched_rule": {...},
+        "related_clauses": [...], "related_memory": [...]}``。
+        C：``risk_item={"index": 0, "review_context": B, ...}``。
+
+        B 写入 ``context.review_contexts`` 和 PostgreSQL ``CONTEXT_BUILT``；
+        C 作为本节点返回的 Graph State ``risk_items``，随后由 Send 分发。
         """
 
         context = runtime.context
@@ -1132,6 +1289,8 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         else:
             context.review_contexts = list(state.review_contexts or [])
 
+        # _build_risk_items 还会结合数据库中已恢复的分析/证据，标记哪些分支
+        # 已完成，避免恢复任务时重复调用模型。
         risk_items = self._build_risk_items(context)
         # 每个 risk_item 都记住原始顺序和以前保存的结果。
         # 恢复任务时，已完成的项可以跳过模型调用。
@@ -1191,6 +1350,16 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
 
     def prepare_risk(self, graph_state: ReviewGraphState, runtime) -> dict:
         """拿到一条 risk_item，准备它的处理记录并选择下一步。
+
+        数据来源：Send 放进当前分支的 ``graph_state["risk_item"]``。
+        数据变化：
+
+        A：``risk_item={"index": 0, "review_context": {...}}``。
+        B：``branch_payload={"index": 0, "finding": None,
+        "evidence_results": [], "retrieval_repair_count": 0, ...}``。
+
+        B 只存在于风险子图 State，暂不写数据库；``branch_route`` 决定下一个
+        节点。路线规则：
 
         * 从没分析过：去 ``analyze_risk``。
         * 已确认没有风险：去 ``finalize_risk``。
@@ -1297,10 +1466,22 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     def analyze_risk(self, graph_state: ReviewGraphState, runtime) -> dict:
         """让风险分析模型判断当前条款有没有风险。
 
-        ``invoke_tool("analyze_risk", ...)`` 返回的字典叫 ``finding``。
-        它包含风险类型、等级、理由、证据文本和置信度。
+        数据来源是 ``payload["review_context"]``，其中已经包含当前条款、
+        Playbook、相关条款、Memory 和输出约束。
+
+        数据变化示例：
+
+        A：``payload.finding=None``。
+        B：``payload.finding={"clause_id": "CL-002",
+        "risk_type": "保密期限不合理", "confidence": 0.86,
+        "evidence_text": "保密义务持续1年", ...}``。
+
+        B 是 Analyzer 的结构化工具输出。DeepSeek 模式下 confidence 由模型
+        返回，本地模式由确定性规则生成；两种模式都必须通过 RiskFinding
+        Schema 校验。
 
         如果置信度太低，Planner 只能选择：再分析一次、交给人、停止。
+        本节点只更新分支 State；B 要等 ``aggregate_risks`` 才统一落库。
         """
 
         context = runtime.context
@@ -1401,7 +1582,18 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         * 是否符合命中的 Playbook 规则。
         * 合同文本里是否混入了诱导模型的指令。
 
-        Critic 通过后才自动生成修改建议。没有通过就交给人。
+        数据来源：Analyzer 的 ``finding``、当前条款和当前命中规则。
+        数据变化示例：
+
+        A：``finding.evidence_text="保密义务持续1年"``。
+        B：``critic={"decision": "PASS",
+        "reason_code": "SUPPORTED_BY_EVIDENCE_AND_PLAYBOOK"}``。
+        C：B 被追加到 ``review_context.critic_trace``；PASS 时还会用
+        ``generate_revision`` 更新 ``finding.revision_suggestion``。
+
+        Critic 通过后才自动生成修改建议。没有通过会设置
+        ``critic_requested_human=True``，最终由 ``finalize_risk`` 标成人工。
+        A 到 C 都是分支临时数据，汇总节点才写 PostgreSQL。
         """
 
         context = runtime.context
@@ -1499,9 +1691,24 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     def verify_evidence(self, graph_state: ReviewGraphState, runtime) -> dict:
         """确认风险引用的证据确实存在于合同原文。
 
-        验证成功：保存原文位置，然后整理结果。
-        验证失败：Planner 可以批准重新检索一次。
-        再失败：保留风险，但标记为需要人工补证据。
+        数据来源：Analyzer finding、``context.clauses_payload`` 中的全部原文
+        条款，以及当前 Playbook 规则。Evidence Verifier 是确定性 Python
+        工具，不依赖模型自我确认。
+
+        成功示例：
+
+        A：``finding.evidence_text="保密义务持续1年"``。
+        B：``evidence={"is_valid": True, "verified_clause_id": "CL-002",
+        "source_location": {"page_number": 1, ...}}``。
+        C：B 追加到 ``payload.evidence_results``，原文位置也写回 finding，
+        路线变为 ``finalize_risk``。
+
+        失败示例：
+
+        B 变为 ``{"is_valid": False,
+        "failure_reason": "evidence_text not found in clause text"}``。
+        此时调用 Planner；只有返回 ``RETRIEVE_AGAIN`` 且重试预算未耗尽，
+        才进入 ``repair_retrieval``，否则保留候选并转人工。
         """
 
         context = runtime.context
@@ -1594,7 +1801,15 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     def repair_retrieval(self, graph_state: ReviewGraphState, runtime) -> dict:
         """证据不足时换一组检索词，再构建一次模型输入。
 
-        修复成功后回到 ``analyze_risk``。这条路线最多执行一次。
+        数据来源：Planner 写入的 ``query_adjustments``、旧
+        ``review_context`` 和 Runtime 中的全部条款。
+
+        A：``related_clauses=[]``，调整词为 ``["相关条款", "同义表达"]``。
+        B：重新检索并替换为 ``related_clauses=[{"clause_id": "CL-005", ...}]``，
+        同时 ``retrieval_repair_count`` 加一。
+
+        B 仍只在分支 State 中，修复成功后回到 ``analyze_risk`` 重新生成结论；
+        允许次数由 Planner retry budget 和节点计数共同限制。
         """
 
         context = runtime.context
@@ -1629,8 +1844,18 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
     def finalize_risk(self, graph_state: ReviewGraphState, runtime) -> dict:
         """把当前风险整理成统一格式，交回主图。
 
+        输入 A 是不断被前面节点补充的 ``branch_payload``；输出 B 固定为：
+
+        ``{"risk_results": [{"index": 0, "review_context": ...,
+        "analysis_result": ..., "risk_finding": ...,
+        "evidence_results": [...], "outcome": "verified"}]}``。
+
+        如果 Planner/Critic 要求人工，或风险为高等级/低置信度，本方法会把
+        ``review_status`` 统一改为 ``NEED_MANUAL_REVIEW``。
+
         每个并行分支都返回 ``risk_results=[一条结果]``。
         State 中的 ``add`` 会把这些单项列表拼成完整列表。
+        本方法本身不落库，避免并行分支分别覆盖同一任务。
         """
 
         payload = graph_state["branch_payload"]
@@ -1672,6 +1897,15 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
 
         并行任务完成顺序可能是 3、1、2，所以先按 ``index`` 排回 1、2、3。
         然后把模型结论、证据和日志一次写入数据库。
+
+        数据变化示例：
+
+        A：Graph State ``risk_results=[result_3, result_1, result_2]``。
+        B：排序并拆成 ``contexts``、``analyses``、``evidence``、``findings``。
+        C：EventStore 把 B 写入 PostgreSQL，状态先到 ``RISK_ANALYZED``，再按
+        findings 决定 ``HUMAN_REVIEW_PENDING`` 或 ``EVIDENCE_VERIFIED``。
+
+        这是风险子图临时数据变成业务真相的唯一汇总点。
         """
 
         context = runtime.context
@@ -1778,6 +2012,24 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         return {"terminal": True}
 
     def _build_risk_items(self, context: _ReviewRuntime) -> list[dict]:
+        """把 review_contexts 转成 Send 可以分发的 risk_items。
+
+        新任务时，输入 A 通常只有：
+
+        ``review_contexts=[{"context_id": "CL-002:R2", ...}]``。
+
+        输出 B 会补上分支顺序和恢复字段：
+
+        ``[{"index": 0, "review_context": A[0], "existing_finding": None,
+        "existing_final_finding": None, "existing_evidence_results": [],
+        "completed": False}]``。
+
+        恢复任务时，本方法还会从 PostgreSQL AgentState 的
+        ``analysis_results``、``evidence_results``、``risk_findings`` 和
+        ``progress`` 恢复已有结果。这样 Send 仍可使用统一输入格式，同时已经
+        完成的分支会由 ``prepare_risk`` 直接整理，不重复调用模型。
+        """
+
         state = context.state
         restored = _restored_analysis_prefix(
             context.review_contexts,
@@ -1867,6 +2119,15 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         context: _ReviewRuntime,
         result: dict,
     ) -> None:
+        """收到一个 Send 分支结果后，立即持久化可见进度。
+
+        输入 A：某个风险子图刚返回 ``{"index": 1, "outcome": "verified"}``。
+        Runtime 先变为 ``branch_results={1: A}``，再计算已完成数量和下一项。
+        EventStore 随后把进度、已完成分析和证据写入 PostgreSQL，SSE 因此能在
+        所有分支汇总前显示 ``1/N``。最终正式风险仍由 ``aggregate_risks``
+        统一生成。
+        """
+
         context.branch_results[int(result["index"])] = result
         ordered = self._ordered_results(list(context.branch_results.values()))
         contiguous = []
@@ -1973,6 +2234,11 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
 
         ``thread_id`` 像书签上的书号。暂停和继续必须使用同一个 task_id，
         否则 LangGraph 会把它当成另一份新任务。
+
+        A：业务任务 ID ``task_123``。
+        B：LangGraph 配置 ``{"configurable": {"thread_id": "task_123"}}``。
+        PostgresSaver 使用 B 找到 ``langgraph`` schema 中属于该任务的书签。
+        ``max_concurrency`` 只控制本次调度并发，不写入业务数据。
         """
 
         return {
@@ -1985,7 +2251,18 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         context: _ReviewRuntime,
         control_input,
     ) -> None:
-        """运行控制图，直到它结束或停在人工复核处。"""
+        """运行控制图，直到 END 或 ``interrupt`` 暂停。
+
+        ``control_input`` 有两种：
+
+        * 普通 ``ReviewControlState``：开始一次 execute/human_review/complete
+          阶段。
+        * ``Command(resume=...)``：根据 thread_id 读取 Checkpoint，从暂停节点
+          继续。
+
+        LangGraph 在 stream 内自动读写 Checkpoint。这里不消费节点输出，是
+        因为控制图的业务状态由反馈服务和 EventStore 管理，流只负责推进书签。
+        """
 
         for _update in self._control_graph.stream(
             control_input,
@@ -2000,7 +2277,13 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
         state: AgentState,
         phase: str,
     ) -> ReviewControlState:
-        """从完整任务中挑出书签真正需要的 5 个字段。"""
+        """从完整 AgentState 挑出 Checkpoint 真正需要的五个字段。
+
+        输入 A 是 PostgreSQL 中包含合同、条款、风险、日志的完整任务。
+        输出 B 只保留 ``task_id/phase/status/pending_risk_ids/recovery_count``。
+        B 交给控制图后由 Checkpointer 保存；A 的合同正文不会复制到
+        ``langgraph`` schema。
+        """
 
         return {
             "task_id": state.task_id,
@@ -2012,7 +2295,12 @@ class ReviewOrchestratorAgent(ReviewAgentSupport):
 
     @staticmethod
     def _pending_risk_ids(state: AgentState) -> list[str]:
-        """找出还没被用户采纳、忽略或修改的风险编号。"""
+        """从业务风险中找出还没有用户动作的风险 ID。
+
+        输入 A：``R1.feedback.user_action="adopt"``，R2 没有 feedback。
+        输出 B：``["R2"]``。数据来自 PostgreSQL AgentState；本方法只计算，
+        不修改风险，也不写 Checkpoint。
+        """
 
         return [
             str(risk.get("risk_id", ""))

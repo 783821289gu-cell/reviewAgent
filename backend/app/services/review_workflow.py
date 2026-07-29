@@ -13,8 +13,23 @@
 2. 风险子图：只处理一条风险，必要时可以重新检索。
 3. 控制图：审查需要人工处理时暂停，处理后继续。
 
-阅读顺序：先看 ``ReviewGraphState``，再看 ``build_review_graph``，最后看
-``_dispatch_risk_items``。看懂这三处，就掌握了本项目最重要的 LangGraph 用法。
+代码地图：
+
+* 三张图的结构都定义在本文件。
+* 三张图的节点实现和真实执行入口在 ``langgraph_review_agent.py``。
+* 主图由 ``_execute_business_graph`` 启动。
+* 风险子图由主图的 ``Send`` 自动调用，不提供单独的 API 入口。
+* 控制图由 ``_stream_control`` 启动；``await_human_review`` 在其中调用
+  ``interrupt``，反馈接口再通过 ``Command(resume=...)`` 恢复它。
+
+先区分三种数据，后面才不会把它们混在一起：
+
+* Graph State：节点之间传递的小工作单，只活在当前图执行中。
+* Runtime：当前任务共用的工具箱，保存文件字节、解析对象和批处理结果。
+* PostgreSQL：业务真相源，保存任务、条款、风险和反馈；控制图的 Checkpoint
+  另存于 ``langgraph`` schema。
+
+本文注释中的合同、规则和分数都是教学示例，不是运行时硬编码结果。
 """
 
 from operator import add
@@ -34,7 +49,25 @@ class ReviewGraphState(TypedDict, total=False):
     每个 Node 都会收到这张工作单。Node 只返回自己新增或修改的字段。
     ``total=False`` 的意思也是“不是每次都必须填写所有字段”。
 
-    注意：这里不保存完整合同。完整任务保存在数据库的 ``AgentState`` 中。
+    数据变化示例：
+
+    输入 A（主图刚启动）::
+
+        {"task_id": "task_123", "terminal": False, "risk_results": []}
+
+    经过 ``build_context`` 后变成 B::
+
+        {
+            "task_id": "task_123",
+            "terminal": False,
+            "risk_items": [
+                {"index": 0, "review_context": {"context_id": "CL-002:NDA-R002"}}
+            ],
+            "risk_results": [],
+        }
+
+    注意：这里不保存完整合同。完整业务状态保存在 PostgreSQL 的
+    ``AgentState`` 中，大对象则在本次执行的 ``_ReviewRuntime`` 中流转。
     """
 
     # 当前审查任务的编号。它把图执行、数据库记录和日志关联起来。
@@ -60,6 +93,23 @@ class ReviewControlState(TypedDict, total=False):
 
     人工复核可能持续几分钟甚至几天。程序只要记住任务编号、当前阶段和哪些
     风险还没处理，就能从暂停位置继续。合同正文仍然从业务数据库读取。
+
+    数据变化示例：
+
+    A：主图完成后还有两条风险没处理::
+
+        {"phase": "human_review", "pending_risk_ids": ["R1", "R2"]}
+
+    用户处理 R1 后，反馈先写入 PostgreSQL；``Command(resume)`` 恢复控制图，
+    ``await_human_review`` 再查询数据库，得到 B::
+
+        {"phase": "human_review", "pending_risk_ids": ["R2"]}
+
+    R2 也处理后得到 C::
+
+        {"phase": "complete", "pending_risk_ids": []}
+
+    这五个字段和 LangGraph 的节点游标存入 Checkpoint；风险详情不存进去。
     """
 
     # 哪个任务。
@@ -151,14 +201,30 @@ def build_review_graph(handlers: ReviewWorkflowHandlers, context_schema: type):
     * ``context_schema`` 是“工具箱的规格”，工具箱里有数据库和合同内容。
 
     State 是步骤之间传递的数据。context 是每个步骤都能使用的工具箱。
+
+    定义与执行要分开看：
+
+    * 本方法只在 Agent 初始化时“画图并编译”，不会处理合同。
+    * 真正执行发生在 ``_execute_business_graph`` 调用 ``self._graph.stream``。
+    * 节点从 Runtime 或 PostgreSQL 取数据，节点完成后通过 EventStore 落库。
+
+    主图中的数据变化可以概括为：
+
+    ``task_id`` -> ``document`` -> ``clauses`` -> ``rule_matches``
+    -> ``review_contexts`` -> ``risk_items`` -> ``risk_results``。
     """
 
     # 先造好“处理一条风险”的小流程，主图后面会反复调用它。
     risk_graph = _build_risk_graph(handlers, context_schema)
 
     def run_risk_subgraph(state: ReviewGraphState, runtime) -> dict:
-        # 假设有 3 条风险，这个函数会被调用 3 次。
-        # 每次拿到不同的 risk_item，但都使用同一套风险处理步骤。
+        # Send 传入 A：
+        # {"task_id": "task_123", "risk_item": {"index": 0, ...},
+        #  "risk_results": []}
+        # 风险子图完成后得到 B：
+        # {"risk_results": [{"index": 0, "outcome": "verified", ...}]}
+        # 假设有 3 个 risk_item，本函数会被调用 3 次；每次数据不同，
+        # 但都执行同一套风险节点。结果回到主图后由 risk_results 的 add 合并。
         result = risk_graph.invoke(state, context=runtime.context)
         return {"risk_results": list(result.get("risk_results") or [])}
 
@@ -205,6 +271,15 @@ def build_review_control_graph(
 ):
     """创建一张专门负责“暂停和继续”的小图。
 
+    本图不解析合同，也不调用主图。它只管理人工复核的暂停位置。
+
+    数据来源和存储位置：
+
+    * ``pending_risk_ids`` 每次都从 PostgreSQL 的最新风险反馈重新计算。
+    * ``interrupt`` 发生后，图状态和节点游标由 Checkpointer 保存。
+    * 正式环境 Checkpoint 位于 PostgreSQL 的 ``langgraph`` schema。
+    * 用户反馈仍由反馈接口写入 ``app`` schema，不由本图写入。
+
     例子：系统发现 3 条风险，需要人处理。
 
     1. ``await_human_review`` 暂停图。
@@ -236,7 +311,8 @@ def build_review_control_graph(
         ),
         ["await_human_review", END],
     )
-    # 把 checkpointer 交给 compile 后，interrupt 才能在服务重启后继续。
+    # 没有 checkpointer，interrupt 只能让当前调用停下，却没有可靠的恢复书签。
+    # 把它交给 compile 后，LangGraph 会在节点执行、暂停和恢复时自动读写书签。
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -250,6 +326,18 @@ def _build_risk_graph(handlers: ReviewWorkflowHandlers, context_schema: type):
     重新检索 -> 再分析 -> 再复核 -> 再验证。
 
     最多重试几次由节点代码控制，模型不能随便跳到任意函数。
+
+    单条风险的数据变化示例：
+
+    ``risk_item``
+    -> ``branch_payload``（准备分支工作区）
+    -> ``finding``（Analyzer 输出）
+    -> ``critic_trace``（Critic 结论）
+    -> ``evidence_results``（原文核验）
+    -> ``risk_results=[result]``（返回主图）。
+
+    分支执行期间数据只放在 Graph State/Runtime；所有分支结束后，
+    ``aggregate_risks`` 才把汇总结果写入 PostgreSQL。
     """
 
     graph = StateGraph(ReviewGraphState, context_schema=context_schema)
@@ -307,7 +395,28 @@ def _dispatch_risk_items(state: ReviewGraphState):
     * Send 2：让 risk_subgraph 处理风险 2。
     * Send 3：让 risk_subgraph 处理风险 3。
 
-    这就是本项目的并行来源。DeepSeek 模式最多同时跑 2 份。
+    这就是本项目的并行来源。实际并发上限由执行主图时传入的
+    ``max_concurrency`` 控制。
+
+    输入 A::
+
+        {
+            "task_id": "task_123",
+            "risk_items": [
+                {"index": 0, "review_context": {"context_id": "CL-001:R1"}},
+                {"index": 1, "review_context": {"context_id": "CL-002:R2"}},
+            ],
+        }
+
+    返回 B（两个待调度命令，不是两个线程对象）::
+
+        [
+            Send("risk_subgraph", {"risk_item": risk_item_0}),
+            Send("risk_subgraph", {"risk_item": risk_item_1}),
+        ]
+
+    LangGraph 调度完成后，两个分支结果通过 ``risk_results`` 的 ``add`` reducer
+    合并，再交给 ``aggregate_risks``。
     """
 
     if state.get("terminal"):
