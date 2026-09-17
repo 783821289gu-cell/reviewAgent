@@ -1,3 +1,3 @@
 # Public, pinned Hugging Face tokenizer revision; not a credential.
 # See backend/app/data/tokenizers/deepseek-v4-pro/SOURCE.md.
-historical-commit:backend/app/services/prompt_service.py:generic-api-key:13
+0843a4092785a61edede6446e4774eb618cda07c:backend/app/services/prompt_service.py:generic-api-key:13
