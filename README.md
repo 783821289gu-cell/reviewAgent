@@ -1,5 +1,21 @@
 # ContractReviewAgent
 
+面向 NDA 保密协议的本地合同审查工作台。使用 FastAPI、LangGraph、PostgreSQL/pgvector 和
+Redis/RQ，把文档解析、混合检索、受控 Planner/Critic、证据验证、人工反馈与报告生成连成
+可恢复的执行流程。重点展示 Agent 工程实现和证据可追溯性。
+
+- **看实现：** `backend/app/services/langgraph_review_agent.py`、`review_context_pipeline.py`
+  和 `backend/app/tools/registry.py`；[技术决策记录](DEVELOPMENT_DECISIONS.md)。
+- **看验证：** [真实 DeepSeek 子集验收及未达标项](evaluation/release/agent-evolution-verification.md)、
+  [模型/检索验证记录](evaluation/release/model-embedding-memory-verification.md)。
+- **看演示数据：** [合成样本及标注说明](samples/README.md)、[前端 E2E 夹具](frontend/tests/fixtures/README.md)。
+- **看使用边界：** [安全与数据说明](SECURITY.md)。当前没有用户登录与多租户授权层，默认仅监听
+  `127.0.0.1`；公开仓库不等于部署公网服务。合同样本全部为合成数据，输出需要人工复核。
+
+演示覆盖固定状态流转、检索/重排、证据准入、断点恢复、Memory 和可观测性。
+真实外部模型评测只覆盖记录中的合成子集，部分指标未达标，不应宣称生产级法律准确率。
+2026-09-17 依赖扫描仍有未修复的已知漏洞，详见 [依赖审计](SECURITY.md#dependency-audit-2026-09-17)；当前不具备公网部署的安全条件。
+
 开发过程中实际遇到的问题、技术权衡和方案变更持续记录在 [DEVELOPMENT_DECISIONS.md](DEVELOPMENT_DECISIONS.md)。
 
 当前实现范围：`TASKS.md` 的任务 9、`TASKS_2.md` 的任务 10、`UI_REDESIGN_PLAN.md` 的工作台界面迭代、`TASKS_AGENT.md` 的任务 10、`EVIDENCE_MANUAL_REVIEW_PLAN.md` 的证据失败人工闭环、`AGENT_FRAMEWORK_MIGRATION_PLAN.md` 的任务 10，以及独立记录本轮优化的 `AGENT_MODULARITY_PERFORMANCE_PLAN.md`。系统支持 AgentState、显式 Tool Registry、DeepSeek OpenAI-compatible Provider、受控 Planner/Router、一次检索修复、受控 Critic、确定性 Evidence 最终准入、Prompt Injection 阻断、真实 token 预算、Memory 生命周期、可恢复执行、流式状态事件和脱敏 Agent Trace。HTTP 传输层使用 FastAPI / Uvicorn，并由同一服务托管前端；API 将审查任务写入 PostgreSQL 后交给 RQ Worker，Worker 使用 LangGraph、Postgres Checkpoint、pgvector/BGE 和 LangGraph Postgres Store 执行。Redis 只承担队列、通知和缓存，不是业务真相源。

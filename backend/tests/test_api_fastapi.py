@@ -416,7 +416,8 @@ class FastApiContractTest(unittest.TestCase):
 
         response = self._post_upload("baseline.pdf", build_pdf_bytes(), "甲方", "application/pdf")
         self.assertEqual(response.status_code, 201, response.text)
-        self._wait_for_terminal_task(response.json()["task_id"])
+        # PDF parsing may cold-start the local Docling/OCR models.
+        self._wait_for_terminal_task(response.json()["task_id"], timeout_seconds=120)
 
     def test_upload_limit_cors_and_lifespan(self):
         limited_settings = Settings(
@@ -500,16 +501,18 @@ class FastApiContractTest(unittest.TestCase):
             files={"contract_file": (file_name, content, content_type)},
         )
 
-    def _wait_for_terminal_task(self, task_id: str) -> dict:
-        deadline = time.time() + 10
-        while time.time() < deadline:
+    def _wait_for_terminal_task(self, task_id: str, *, timeout_seconds: float = 10) -> dict:
+        deadline = time.monotonic() + timeout_seconds
+        last_status = "not polled"
+        while time.monotonic() < deadline:
             response = self.client.get(f"/api/tasks/{task_id}")
             self.assertEqual(response.status_code, 200, response.text)
             task = response.json()
+            last_status = task["status"]
             if task["status"] in TERMINAL_STATUSES:
                 return task
             time.sleep(0.05)
-        self.fail("review task did not reach terminal status")
+        self.fail(f"review task did not reach terminal status in {timeout_seconds}s: {last_status}")
 
 
 def _normalize_tools(tools: list[dict]) -> list[dict]:

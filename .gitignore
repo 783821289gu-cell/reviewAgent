@@ -39,3 +39,10 @@ evaluation/reports/
 evaluation/evaluation_memory.sqlite3
 evaluation/effect/
 evaluation/model_embedding_runs/
+*.pem
+*.key
+# Personal reading plans are not portfolio artifacts.
+/学习范围与预计耗时.pdf
+/项目核心掌握清单.pdf
+/AGENT_ARCHITECTURE_INTERVIEW_GUIDE.md
+/AGENT_ENGINEERING_EVOLUTION_INTERVIEW.md
